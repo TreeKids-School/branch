@@ -1,1 +1,10 @@
 .DS_Store
+node_modules
+functions/node_modules
+.firebase
+dist
+firebase-debug.log
+.vscode
+
+# Local Netlify folder
+.netlify

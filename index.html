@@ -3,7 +3,8 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover">
   <title>Care Record Pro</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,10 +14,6 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 
-  <!-- Firebase (Compat UMD) -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
 
   <!-- Lucide (Global) -->
   <script src="https://unpkg.com/lucide@0.330.0/dist/umd/lucide.min.js"></script>
@@ -91,8 +88,22 @@
       }
     }
 
+    .no-print {
+      display: none;
+    }
+
     .print-only {
       display: none;
+    }
+
+    /* Prevent auto-zoom on mobile */
+    @media screen and (max-width: 768px) {
+
+      input,
+      textarea,
+      select {
+        font-size: 16px !important;
+      }
     }
   </style>
 </head>
@@ -121,42 +132,179 @@
   <div id="root"></div>
 
   <script>
-    window.__firebase_config = JSON.stringify({
-      apiKey: "PLACEHOLDER_API_KEY",
-      authDomain: "placeholder.firebaseapp.com",
-      projectId: "placeholder-project",
-      storageBucket: "placeholder.appspot.com",
-      messagingSenderId: "000000000000",
-      appId: "1:000000000000:web:000000000000000000"
-    });
-    window.__app_id = 'care-record-pro-local';
+    window.__app_id = 'care-record-pro-netlify';
   </script>
 
   <script type="text/babel" data-presets="react">
     // --- UMD Globals Setup ---
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useCallback } = React;
     const { createRoot } = ReactDOM;
-    const { initializeApp } = firebase;
-    const { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, query, getDoc } = firebase.firestore;
-    const { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } = firebase.auth;
+
+    // Netlify Storage Helper with LocalStorage Fallback
+    const callStorage = async (payload) => {
+      const performLocalAction = (payload) => {
+        const { action, key, data, childId, messageId, date } = payload;
+        const get = (k) => {
+          try {
+            return JSON.parse(localStorage.getItem('care_pro_local_' + k) || 'null');
+          } catch (e) { return null; }
+        };
+        const set = (k, v) => localStorage.setItem('care_pro_local_' + k, JSON.stringify(v));
+
+        switch (action) {
+          case "getChildren":
+            return get("children") || [];
+          case "setChildren":
+            set("children", data);
+            return { status: "OK" };
+          case "getMessages":
+            return get(`messages_${childId}`) || [];
+          case "saveMessages":
+            set(`messages_${childId}`, data);
+            return { status: "OK" };
+          case "getReport":
+            return get(`report_${date}`) || null;
+          case "saveReport":
+            set(`report_${date}`, data);
+            // Update index
+            let index = get("reports_index") || [];
+            if (!Array.isArray(index)) index = [];
+            if (!index.includes(date)) {
+              index.push(date);
+              set("reports_index", index);
+            }
+            return { status: "OK" };
+          case "getReportIndex":
+            return get("reports_index") || [];
+          default:
+            return null;
+        }
+      };
+
+      try {
+        // Force local if known local environment
+        const isLocal = window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+        if (isLocal) {
+          // console.log("Using LocalStorage (Local Mode):", payload.action);
+          return performLocalAction(payload);
+        }
+
+        const response = await fetch('/.netlify/functions/storage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          // Fallback to local storage on 404 (local server without functions) or other errors
+          console.warn(`Storage API Error (${response.status}), falling back to localStorage.`);
+          return performLocalAction(payload);
+        }
+        const data = await response.json();
+        return data;
+      } catch (e) {
+        console.warn("Storage Connection Error, falling back to localStorage:", e);
+        return performLocalAction(payload);
+      }
+    };
     const { icons } = lucide;
 
     const fetchAI = async (prompt, isJson) => {
+      // Client-side Gemini Call for Local/Preview
+      const callGeminiDirectly = async (apiKey, prompt, isJson) => {
+        const MODEL = 'gemini-2.5-flash';
+        const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+
+        const response = await fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.7 }
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok || data.error) {
+          throw new Error(data.error?.message || 'Gemini API Error');
+        }
+
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        let parsed = null;
+        if (isJson && text) {
+          try {
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(text);
+          } catch (_) { parsed = null; }
+        }
+        return isJson ? parsed : text;
+      };
+
       try {
-        const response = await fetch('/.netlify/functions/gemini', {
+        // ALWAYS try to use the Local Storage API Config Key first if it exists.
+        // This allows users to override the server-side function behavior or use it in preview environments without server functions.
+        let apiKey = localStorage.getItem('care_pro_gemini_key');
+
+        if (apiKey) {
+          console.log("Using Configured API Key for Gemini (Client-side)");
+          try {
+            return await callGeminiDirectly(apiKey, prompt, isJson);
+          } catch (geminiError) {
+            console.error("Gemini Direct Call Error:", geminiError);
+
+            // Specific handling for Quota Exceeded (429)
+            if (geminiError.message && (geminiError.message.includes('429') || geminiError.message.includes('quota') || geminiError.message.includes('Quota'))) {
+              alert("AIサービスの利用制限（回数制限）に達しました。\n\nしばらく時間（1分程度）を空けてから再度お試しください。\n※これは無料版APIの仕様です。");
+              // Do NOT throw to fallback, stop here to let user retry later with real key
+              throw new Error("QUOTA_EXCEEDED_STOP");
+            }
+
+            alert("AI生成エラー (Google API): " + geminiError.message + "\n\nキーが正しいか確認してください。");
+            throw geminiError; // Fallback to demo for other errors
+          }
+        }
+
+        // If no key is configured, check environment
+        const isLocal = window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const API_URL = '/.netlify/functions/gemini';
+
+        if (isLocal) {
+          // Local mode without a key -> Fail to Mock
+          console.log("No Local API Key found in Local Mode, using Demo");
+          throw new Error("No API Key provided for local mode");
+        }
+
+        console.log("Calling API Endpoint:", API_URL);
+        const response = await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ prompt, isJson })
         });
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'AI呼び出しに失敗しました');
 
         if (isJson) return data.parsed || null;
         return data.text;
       } catch (e) {
-        console.error(e);
-        alert("AI生成エラー: " + e.message);
-        return null;
+        console.warn("AI API Error/Local Mode:", e);
+
+        // Mock Fallback
+        const getMockResponse = (isJson) => {
+          if (isJson) {
+            return {
+              B_result: "【デモ生成】本日は集中して学習に取り組みました。特に計算プリントでは、指を使って丁寧に数える姿が見られました。（※実際のAI生成を行うにはAPIキーを設定してください）",
+              B_plan: "引き続き、個々のペースに合わせた学習支援を行い、自信を持って取り組めるようサポートしていきます。",
+              B_item: "①健康管理, ③社会性",
+              D: "こんにちは、〇〇です！今日のツリー通信です！\n\n【デモ生成】今日は学習の時間にとても集中して取り組んでいましたよ。スタッフと一緒にプリントの問題を解く中で、「できた！」と嬉しそうに報告してくれる場面もありました。休憩時間にはお友達と仲良くブロックで遊んでおり、穏やかに過ごせていました。\n\n（※プレビューで実際の生成を行うには、生成時にAPIキーを入力してください）"
+            };
+          }
+          return "【デモ生成】本日は全体的に穏やかに過ごせました。個々の課題にも前向きに取り組む姿が見られ、大きなトラブルもなく順調な一日でした。";
+        };
+
+        await new Promise(r => setTimeout(r, 1000));
+        return getMockResponse(isJson);
       }
     };
 
@@ -195,28 +343,17 @@
     const {
       Users, Clock, FileText, MessageSquare, UsersRound, Send, Loader2, Copy, Check,
       PlusCircle, Trash2, ClipboardCheck, RefreshCw, BookOpen, Coffee, Activity, Smile, Cloud, Clipboard,
-      ShieldCheck, Printer, FileSpreadsheet, Sparkles, Calendar, X, ChevronLeft, ChevronRight
+      ShieldCheck, Printer, FileSpreadsheet, Sparkles, Calendar, X, ChevronLeft, ChevronRight, Settings
     } = Lucide;
 
     // --- App Code ---
-    const firebaseConfig = JSON.parse(window.__firebase_config);
+    const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'care-record-pro-netlify';
+    // Staff Options
+    const STAFF_OPTIONS = ['ブラック', 'パープル', 'さくら', 'ブラウン', 'ブルー', 'ネイビー'];
 
-    // Error handling for Firebase Init (since config is mock)
-    let app, auth, db;
-    try {
-      if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "PLACEHOLDER_API_KEY") {
-        console.log("Using Local Mode (No Firebase Config)");
-        throw new Error("Skipping Firebase Init");
-      }
-      app = initializeApp(firebaseConfig);
-      auth = getAuth(app);
-      db = getFirestore(app);
-    } catch (e) {
-      console.log("Firebase init skipped/failed:", e.message);
-    }
-
-    const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'care-record-pro';
-    const APP_VERSION = typeof window.__app_version !== 'undefined' ? window.__app_version : 'v0.1.0';
+    // App Version
+    // App Version
+    const APP_VERSION = typeof window.__app_version !== 'undefined' ? window.__app_version : '26.02.07.6';
 
     const CopyButton = ({ text, id, label }) => {
       const [copied, setCopied] = useState(false);
@@ -309,10 +446,11 @@
       const [children, setChildren] = useState([]);
       const [results, setResults] = useState({});
       const [summaryC, setSummaryC] = useState('');
+      const [dailyMessages, setDailyMessages] = useState({}); // New: Messages per child for the specific date
       const [selectedChildId, setSelectedChildId] = useState(null);
       const [selectedGenerateIds, setSelectedGenerateIds] = useState([]);
       const [loading, setLoading] = useState(false);
-      const [activeTab, setActiveTab] = useState('input');
+
       const [copiedId, setCopiedId] = useState(null);
       const [isSyncing, setIsSyncing] = useState(false);
       const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -330,41 +468,82 @@
       const [localReports, setLocalReports] = useState({});
       const [showExportModal, setShowExportModal] = useState(false);
       const [showCalendarModal, setShowCalendarModal] = useState(false);
+      const [showSettingsModal, setShowSettingsModal] = useState(false);
+      const [apiKeyInput, setApiKeyInput] = useState('');
       const [calendarViewDate, setCalendarViewDate] = useState(new Date());
       const [existingReportDates, setExistingReportDates] = useState([]);
       const [isMobile, setIsMobile] = useState(false);
-      const [appVersion, setAppVersion] = useState('');
+      const [appVersion, setAppVersion] = useState(APP_VERSION);
       const [selectedDocChildId, setSelectedDocChildId] = useState(null);
       const [showPreview, setShowPreview] = useState(false);
+      const [selectedChildMessages, setSelectedChildMessages] = useState([]); // Derived from dailyMessages for UI
+      const [touchStartPos, setTouchStartPos] = useState(null);
+
+      // Save Helper
+      const saveDailyData = async (date, currentChildren, currentMessages, currentResults, currentSummary) => {
+        setIsSyncing(true);
+        const packet = {
+          children: currentChildren,
+          messages: currentMessages,
+          results: currentResults,
+          summaryC: currentSummary,
+          updatedAt: new Date().toISOString()
+        };
+        await callStorage({ action: 'saveReport', date: date, data: packet });
+
+        // Also update global children roster if we are editing the "latest" or simply to keep master list updated
+        // For simplicity, we always update global roster to match the current view (if intended)
+        // OR we separate "Master Roster" from "Daily Roster".
+        // The user wants "Date's Roster". If I add a child today, they should be in Master. 
+        // Let's safe-guard: Update Master only if it's not a past date? 
+        // User behavior implies "Persistence". Let's update Master too.
+        await callStorage({ action: 'setChildren', data: currentChildren });
+
+        setIsSyncing(false);
+      };
+
+      // Fetch Helpers
+      const fetchGlobalChildren = useCallback(async () => {
+        // This loads the "Master" list, used for new days
+        const data = await callStorage({ action: 'getChildren' });
+        return data || [];
+      }, []);
+
+      const fetchDailyData = useCallback(async (dateString) => {
+        setIsSyncing(true);
+        const data = await callStorage({ action: 'getReport', date: dateString });
+
+        if (data && typeof data === 'object') {
+          setResults(data.results || {});
+          setSummaryC(data.summaryC || '');
+          setDailyMessages(data.messages || {});
+
+          // Children Snapshot
+          if (data.children && Array.isArray(data.children)) {
+            setChildren(data.children);
+          } else {
+            // Old report without children snapshot - treat as empty for this date
+            setChildren([]);
+          }
+        } else {
+          // New Date (no saved snapshot) - Start completely fresh
+          setResults({});
+          setSummaryC('');
+          setDailyMessages({});
+          setChildren([]); // Empty list - user builds from scratch for this date
+        }
+        setIsSyncing(false);
+      }, []);
+
+      const fetchReportIndex = useCallback(async () => {
+        const data = await callStorage({ action: 'getReportIndex' });
+        if (data) setExistingReportDates(data);
+      }, []);
 
       // Generate version number: YY.MM.DD.N (N = update count for the day)
       useEffect(() => {
-        const generateVersion = () => {
-          const now = new Date();
-          const year = String(now.getFullYear()).slice(-2); // Last 2 digits
-          const month = String(now.getMonth() + 1).padStart(2, '0');
-          const day = String(now.getDate()).padStart(2, '0');
-          const dateKey = `${now.getFullYear()}-${month}-${day}`;
-
-          // Get version count from localStorage
-          const versionData = JSON.parse(localStorage.getItem('app_version_data') || '{}');
-
-          if (versionData.date !== dateKey) {
-            // New day, reset count
-            versionData.date = dateKey;
-            versionData.count = 1;
-          } else {
-            // Same day, increment count
-            versionData.count = (versionData.count || 0) + 1;
-          }
-
-          localStorage.setItem('app_version_data', JSON.stringify(versionData));
-
-          const version = `${year}.${month}.${day}.${versionData.count}`;
-          setAppVersion(version);
-        };
-
-        generateVersion();
+        // Version is now static based on APP_VERSION constant
+        setAppVersion(APP_VERSION);
       }, []);
 
       useEffect(() => {
@@ -394,113 +573,43 @@
       }, []);
 
       useEffect(() => {
-        if (!auth) {
-          // If auth failed, simulate a user for UI demo
-          setUser({ uid: 'demo-user' });
-          return;
-        }
-        const initAuth = async () => {
-          try {
-            if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
-              await signInWithCustomToken(auth, window.__initial_auth_token);
-            } else {
-              await signInAnonymously(auth);
-            }
-          } catch (e) {
-            console.warn("Auth failed, using demo user", e);
-            setUser({ uid: 'demo-user' });
-          }
-        };
-        initAuth();
-        const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u || { uid: 'demo-user' }));
-        return () => unsubscribe();
-      }, []);
+        const u = { uid: 'care-record-pro-netlify' };
+        setUser(u);
+        fetchReportIndex();
+        fetchDailyData(selectedDate);
+      }, [selectedDate]);
 
-      // Sync Logic (Mocked if db fails)
+      // Derived UI State: Update messages view when child or dailyMessages changes
       useEffect(() => {
-        if (!user || !db) return;
-
-        setIsSyncing(true);
-        try {
-          const childrenRef = collection(db, 'artifacts', appId, 'users', user.uid, 'children');
-          const unsubscribeChildren = onSnapshot(childrenRef, (snapshot) => {
-            const childrenData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setChildren(childrenData);
-            if (childrenData.length > 0 && !selectedChildId) {
-              setSelectedChildId(childrenData[0].id);
-            }
-            setSelectedGenerateIds(prev => {
-              const ids = childrenData.map(c => c.id);
-              const filtered = prev.filter(id => ids.includes(id));
-              if (filtered.length === prev.length && filtered.length > 0) return prev;
-              return ids; // default: 全員を対象に
-            });
-            setIsSyncing(false);
-          }, (err) => {
-            // console.error("Children Sync Error:", err);
-            setIsSyncing(false);
-          });
-
-          // Sync based on selectedDate
-          const resultsDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'daily_reports', selectedDate);
-          const unsubscribeResults = onSnapshot(resultsDocRef, (docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              setResults(data.results || {});
-              setSummaryC(data.summaryC || '');
-            } else {
-              setResults({});
-              setSummaryC('');
-            }
-          }, (err) => { });
-
-          return () => {
-            unsubscribeChildren();
-            unsubscribeResults();
-          };
-        } catch (e) {
-          console.log("Firestore sync disabled/failed");
-          setIsSyncing(false);
-        }
-      }, [user, selectedDate]); // Trigger re-sync on date change
-
-      // Fetch list of dates with reports for Calendar
-      useEffect(() => {
-        if (!user) return;
-
-        if (db) {
-          // Firestore mode
-          const reportsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'daily_reports');
-          const unsubscribe = onSnapshot(reportsRef, (snapshot) => {
-            const dates = snapshot.docs.map(doc => doc.id);
-            setExistingReportDates(dates);
-          });
-          return () => unsubscribe();
+        if (selectedChildId) {
+          const msgs = dailyMessages[selectedChildId] || [];
+          setSelectedChildMessages(msgs);
         } else {
-          // Local mode
-          setExistingReportDates(Object.keys(localReports));
+          setSelectedChildMessages([]);
         }
-      }, [user, db, localReports]);
+      }, [selectedChildId, dailyMessages]);
 
+      // Polling: Refresh daily data periodically to keep in sync
       useEffect(() => {
-        if (db) return;
-        const report = localReports[selectedDate];
-        if (report) {
-          setResults(report.results || {});
-          setSummaryC(report.summaryC || '');
-        } else {
-          setResults({});
-          setSummaryC('');
-        }
-      }, [db, localReports, selectedDate]);
+        const timer = setInterval(() => {
+          fetchReportIndex();
+          fetchDailyData(selectedDate);
+        }, 5000);
+        return () => clearInterval(timer);
+      }, [selectedDate]);
+
+      // removed redundant polling for now to avoid overwriting edits
+
+
 
       // ローカルモードでも児童変更時に対象選択を同期
       useEffect(() => {
         const ids = children.map(c => c.id);
         setSelectedGenerateIds(prev => {
           const filtered = prev.filter(id => ids.includes(id));
-          if (filtered.length === prev.length && filtered.length > 0) return prev;
-          return ids;
+          // If the list of children changed, or if our selection contains invalid IDs, refresh it
+          if (filtered.length === prev.length && ids.length === prev.length) return prev;
+          return Array.from(new Set(ids)); // Ensure unique
         });
       }, [children]);
 
@@ -540,104 +649,112 @@
       const addChild = async () => {
         if (!user) return;
         try {
-          const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString();
-          const newChild = { name: `新規児童`, messages: [], memo: '', timestamp: Date.now() };
-          if (db) {
-            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'children', newId), newChild);
-          } else {
-            setChildren([...children, { id: newId, ...newChild }]);
-          }
-          // Don't auto-select on mobile - user will tap to open
-          // setSelectedChildId(newId);
-          setSelectedGenerateIds(prev => [...prev, newId]);
+          // Robust ID generation
+          const newId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 11);
+
+          const newChild = { id: newId, name: `新規児童`, timestamp: Date.now() };
+          const newList = [...children, newChild];
+
+          setChildren(newList);
+          setSelectedGenerateIds(prev => Array.from(new Set([...prev, newId])));
+
+          await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC);
         } catch (e) {
-          console.error("Add Child Error:", e);
           alert("児童の追加に失敗しました");
         }
       };
 
       const sendMessage = async (childId, text) => {
-        if (!user || !text.trim()) return;
+        if (!user || !text.trim() || !childId) return;
         const newMessage = {
-          id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
+          id: Date.now().toString(),
           text: text,
           timestamp: Date.now(),
           userId: user.uid,
-          included: true // Default to included
+          included: true
         };
+        try {
+          const currentChildMsgs = dailyMessages[childId] || [];
+          const newMsgList = [...currentChildMsgs, newMessage];
+          const newDailyMessages = { ...dailyMessages, [childId]: newMsgList };
 
-        if (db) {
-          const childRef = doc(db, 'artifacts', appId, 'users', user.uid, 'children', childId);
-          const child = children.find(c => c.id === childId);
-          const currentMessages = child?.messages || [];
-          await updateDoc(childRef, { messages: [...currentMessages, newMessage] });
-        } else {
-          setChildren(children.map(c => {
-            if (c.id === childId) {
-              const currentMessages = c.messages || (c.memo ? [{ id: 'legacy', text: c.memo, timestamp: Date.now(), included: true }] : []);
-              return { ...c, messages: [...currentMessages, newMessage], memo: '' };
-            }
-            return c;
-          }));
+          setDailyMessages(newDailyMessages);
+          if (selectedChildId === childId) setSelectedChildMessages(newMsgList);
+
+          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC);
+        } catch (e) {
+          alert("送信に失敗しました");
         }
       };
 
       const toggleMessage = async (childId, messageId) => {
         if (!user) return;
-        const child = children.find(c => c.id === childId);
-        if (!child) return;
+        try {
+          const currentChildMsgs = dailyMessages[childId] || [];
+          const newMsgList = currentChildMsgs.map(m => m.id === messageId ? { ...m, included: !m.included } : m);
+          const newDailyMessages = { ...dailyMessages, [childId]: newMsgList };
 
-        const newMessages = (child.messages || []).map(m =>
-          m.id === messageId ? { ...m, included: m.included === undefined ? false : !m.included } : m
-        );
+          setDailyMessages(newDailyMessages);
+          if (selectedChildId === childId) setSelectedChildMessages(newMsgList);
 
-        if (db) {
-          const childRef = doc(db, 'artifacts', appId, 'users', user.uid, 'children', childId);
-          await updateDoc(childRef, { messages: newMessages });
-        } else {
-          setChildren(prev => prev.map(c => c.id === childId ? { ...c, messages: newMessages } : c));
+          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC);
+        } catch (e) {
+          alert("状態の更新に失敗しました");
         }
       };
 
       const updateMessageText = async (childId, messageId, newText) => {
         if (!user) return;
-        const child = children.find(c => c.id === childId);
-        if (!child) return;
+        try {
+          const currentChildMsgs = dailyMessages[childId] || [];
+          const newMsgList = currentChildMsgs.map(m => m.id === messageId ? { ...m, text: newText } : m);
+          const newDailyMessages = { ...dailyMessages, [childId]: newMsgList };
 
-        const newMessages = (child.messages || []).map(m =>
-          m.id === messageId ? { ...m, text: newText } : m
-        );
+          setDailyMessages(newDailyMessages);
+          if (selectedChildId === childId) setSelectedChildMessages(newMsgList);
 
-        if (db) {
-          const childRef = doc(db, 'artifacts', appId, 'users', user.uid, 'children', childId);
-          await updateDoc(childRef, { messages: newMessages });
-        } else {
-          setChildren(prev => prev.map(c => c.id === childId ? { ...c, messages: newMessages } : c));
+          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC);
+        } catch (e) {
+          alert("メッセージの更新に失敗しました");
         }
       };
 
       const updateChild = async (id, data) => {
         if (!user) return;
-        if (db) {
-          const childRef = doc(db, 'artifacts', appId, 'users', user.uid, 'children', id);
-          await updateDoc(childRef, data);
-        } else {
-          setChildren(children.map(c => c.id === id ? { ...c, ...data } : c));
+        try {
+          const newList = children.map(c => c.id === id ? { ...c, ...data } : c);
+          setChildren(newList);
+          await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC);
+        } catch (e) {
+          alert("更新に失敗しました");
         }
       };
 
       const removeChild = async (id) => {
         if (!user) return;
-        if (db) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'children', id));
-        else setChildren(children.filter(c => c.id !== id));
+        if (!window.confirm("本当にこの児童を削除してもよろしいですか？\nこの操作は取り消せません。")) return;
+        try {
+          const newList = children.filter(c => c.id !== id);
+          setChildren(newList);
 
-        const newResults = { ...results };
-        delete newResults[id];
-        saveResults(newResults, summaryC);
+          const newResults = { ...results };
+          delete newResults[id];
+          setResults(newResults); // Immediate update
 
-        if (children.length <= 1) setSelectedChildId(null);
-        else if (selectedChildId === id) setSelectedChildId(children.find(c => c.id !== id)?.id || null);
-        setSelectedGenerateIds(prev => prev.filter(cid => cid !== id));
+          const newDailyMessages = { ...dailyMessages };
+          delete newDailyMessages[id];
+          setDailyMessages(newDailyMessages);
+
+          await saveDailyData(selectedDate, newList, newDailyMessages, newResults, summaryC);
+
+          setSelectedGenerateIds(prev => prev.filter(cid => cid !== id));
+          if (selectedChildId === id) setSelectedChildId(null);
+          if (selectedDocChildId === id) setSelectedDocChildId(null);
+        } catch (e) {
+          alert("削除に失敗しました");
+        }
       };
 
       const toggleChildGenerate = (id) => {
@@ -651,7 +768,7 @@
         D: `こんばんは！〇〇です！\nツリー通信をお送りします！\n\nツリー式学習では文章問題に挑戦しました。少し苦戦する場面もありましたが、スタッフと一緒に文章や問題文を少しずつ読み解きながら、順番に考えて解いていくことができました。文章はしっかり読もうとする姿が見られ、ところどころ読み間違える場面はありつつも、答える前に「これで合ってる？」と確認しながら丁寧に進めていましたよ。\n\n制作ではシールのイラストに取り組みました。参考にする写真探しに少し時間がかかり、作業量は多くはありませんでしたが、取り組めた場面では何度も参考の絵の色を見比べながら、「この色かな？」と慎重に色を決めて描く様子が見られました。こだわって丁寧に進めようとしていましたよ。`
       });
 
-      const formatChatText = (text, width = 16) => {
+      const formatChatText = (text, width = 13) => {
         if (!text) return '';
         return text
           .split('\n')
@@ -704,21 +821,14 @@
         };
         const selectedMock = buildMock();
 
-        if (db) {
-          const mockSummary = `本日は全体的に落ち着いて活動できました。（${selectedDate}のデモ）`;
-          const resultsDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'daily_reports', selectedDate);
-          await setDoc(resultsDocRef, { results: selectedMock, summaryC: mockSummary }, { merge: true });
-        } else {
-          setLocalReports(prev => {
-            const next = { ...prev };
-            const mockSummary = `本日は全体的に落ち着いて活動できました。（${selectedDate}のデモ）`;
-            next[selectedDate] = { results: selectedMock, summaryC: mockSummary };
-            return next;
-          });
-          const selectedSummary = `本日は全体的に落ち着いて活動できました。（${selectedDate}のデモ）`;
-          setResults(selectedMock);
-          setSummaryC(selectedSummary);
-        }
+        const mockSummary = `本日は全体的に落ち着いて活動できました。（${selectedDate}のデモ）`;
+
+        // Use saveDailyData for consistency
+        await saveDailyData(selectedDate, kids, dailyMessages, selectedMock, mockSummary);
+
+        setResults(selectedMock);
+        setSummaryC(mockSummary);
+
         setExpandedReportDates(prev => ({ ...prev, [selectedDate]: true }));
         setExpandedChildLevels(prev => {
           const next = { ...prev };
@@ -739,19 +849,22 @@
       const saveResults = async (newResults, newSummary, targetDate = null) => {
         if (!user) return;
         const dateToSave = targetDate || selectedDate;
-        if (db) {
-          const resultsDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'daily_reports', dateToSave);
-          await setDoc(resultsDocRef, { results: newResults, summaryC: newSummary }, { merge: true });
-        } else {
-          setLocalReports(prev => ({
-            ...prev,
-            [dateToSave]: { results: newResults, summaryC: newSummary }
-          }));
-          // Only update current state if saving to the currently selected date
+        try {
           if (dateToSave === selectedDate) {
+            await saveDailyData(dateToSave, children, dailyMessages, newResults, newSummary);
             setResults(newResults);
             setSummaryC(newSummary);
+          } else {
+            // Saving to a different date... this is trickier with the new snapshot model.
+            // We probably shouldn't be blindly saving results to another date without loading its children/messages first.
+            // But for legacy compatibility (demo function), we might just patch the report.
+            // Let's implement a 'patchReport' style if strictly needed, but for now assuming selectedDate.
+            // Actually, the main usage of targetDate is the DEMO function loop.
+            // The demo function loop above calls insertMockOutputs which saves to selectedDate.
           }
+          fetchReportIndex();
+        } catch (e) {
+          alert("保存に失敗しました：" + e.message);
         }
       };
 
@@ -1034,19 +1147,26 @@
 
         XLSX.writeFile(wb, `日報_${selectedDate}.xlsx`);
       };
+      const getStaffInstruction = (staffName) => {
+        if (staffName === 'ブラック') {
+          return `
+          - 【重要】事実中心の客観的な描写に徹底すること。
+          - スタッフの主観的な感想、感情（「〜と感じました」「嬉しかったです」「感動しました」など）は一切記述しないこと。
+          - 「〜しました」「〜という場面がありました」のように、実際に起きた出来事を淡々と記述すること。
+          `;
+        }
+        // Default style
+        return `
+          - 記述方針: 事実ベースで、評価や断定は避ける。「取り組む様子」「考える過程」「本人の選択」を大切に描写する。
+        `;
+      };
 
 
 
       const generateDocuments = async () => {
         if (!user) return;
         ensureQuotaReset();
-        const toGenerate = children
-          .filter(c => selectedGenerateIds.includes(c.id))
-          .filter(c => {
-            const legacy = c.memo || '';
-            const msgs = (c.messages || []).filter(m => m.included !== false).map(m => m.text).join('\n');
-            return [legacy, msgs].filter(Boolean).join('\n').trim() !== '';
-          });
+        const toGenerate = children.filter(c => selectedGenerateIds.includes(c.id));
         const remaining = 20 - dailyUsed;
         if (remaining <= 0) {
           alert("本日の残り生成回数がありません（リセットは9:00）");
@@ -1059,19 +1179,9 @@
         setLoading(true);
 
         try {
-          // 生成日付は今日の日付を使用
-          const generationDate = new Date().toISOString().split('T')[0];
+          // 生成日付は選択中の日付を使用（今日固定ではなく、ユーザーが開いている日付）
+          const generationDate = selectedDate;
           const processedResults = { ...results };
-
-          // Helper to get full content from legacy memo AND selected messages
-          const getChildContent = (c) => {
-            const legacy = c.memo || '';
-            const msgs = (c.messages || [])
-              .filter(m => m.included !== false) // Default to true if undefined
-              .map(m => m.text)
-              .join('\n');
-            return [legacy, msgs].filter(Boolean).join('\n');
-          };
 
           const childrenToProcess = toGenerate;
 
@@ -1087,7 +1197,11 @@
           setSmoothProgress(0);
 
           for (const child of childrenToProcess) {
-            const content = getChildContent(child);
+            // Use dailyMessages from state (which is loaded for this specific date)
+            // Instead of fetching "global" messages which might be empty or old
+            const msgs = dailyMessages[child.id] || [];
+
+            const content = msgs.filter(m => m.included !== false).map(m => m.text).join('\n');
             const prompt = `
           あなたは療育施設の事務担当です。以下の児童のメモを元に、2種類の書類を作成しJSONで返してください。
 
@@ -1104,20 +1218,21 @@
           - B_item (該当項目): ①〜⑤から該当するものを全て選択。
 
           【2. ツリー通信】 (Key: D)
-          - 冒頭固定: こんにちは、〇〇です！ 今日のツリー通信です！
+          - 冒頭固定: こんにちは、${child.staff || '〇〇'}です！ 今日のツリー通信です！
           - 文字数: 300文字前後
           - トーン: 保護者向けのやわらかい文章。療育記録調や専門用語は禁止。
-          - 記述方針: 事実ベースで、評価や断定は避ける。「取り組む様子」「考える過程」「本人の選択」を大切に描写する。
+          ${getStaffInstruction(child.staff)}
           - 時系列で自然につなげる。
           - 否定的な表現は使わず、つまずきは「時間がかかった」「迷う様子」などで表現する。
           - 文末: 「ました。」「ましたよ。」などバリエーションをつける。
+          - 読みやすさを重視し、話題の区切り（例：学習から制作へ変わる時など）には適度に空白行を入れること。
+          - LINEでの閲覧を想定し、1行あたり全角13文字程度で改行を入れること。
           - ※児童の実名は使用せず、主語を省いた自然な記述にすること。
 
           JSON形式で出力:
           {"B_result": "...", "B_plan": "...", "B_item": "...", "D": "..."}
         `;
 
-            // Note: I will update fetchAI later to use window.__runtime_api_key or pass it
             const response = await fetchAI(prompt, true);
             if (response) {
               processedResults[child.id] = response;
@@ -1149,6 +1264,8 @@
 
           // 生成日付に保存
           await saveResults(processedResults, newSummary, generationDate);
+          persistQuota(dailyUsed + childrenToProcess.length, dailyResetAt);
+          // Removed automatic navigation
           setExpandedChildLevels(prev => {
             const next = { ...prev };
             children.forEach(c => { next[c.id] = 0; });
@@ -1156,8 +1273,6 @@
           });
           persistQuota(dailyUsed + childrenToProcess.length + (childrenToProcess.length > 0 ? 1 : 0), dailyResetAt || new Date().toISOString());
 
-          // 出力書類タブに切り替え、生成した日付を選択
-          setActiveTab('docs');
           setSelectedDate(generationDate);
         } catch (error) {
           console.error(error);
@@ -1179,10 +1294,11 @@
           <div className="max-w-7xl mx-auto">
             <header className="flex flex-col gap-4 mb-4 md:mb-6">
               {/* Logo and Info - Mobile Optimized */}
+              {/* Header: Logo and Settings */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 md:gap-3">
                   <img src="logo.png" alt="Tree Kids School Logo" className="h-12 md:h-16 object-contain" />
-                  <div className="hidden sm:block">
+                  <div className="flex flex-col justify-center">
                     <div className="flex items-center gap-2">
                       <Cloud className={`w-3 h-3 md:w-4 md:h-4 ${isSyncing ? 'text-green-500 animate-pulse' : 'text-emerald-500'}`} />
                       <span className="text-[8px] md:text-[9px] text-slate-400 font-bold">v{appVersion}</span>
@@ -1190,26 +1306,34 @@
                     <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Sync: {user.uid.substring(0, 8)}...</p>
                   </div>
                 </div>
+
+                {/* Settings Button */}
+                {/* Settings Button */}
+                <button
+                  onClick={() => {
+                    const key = localStorage.getItem('care_pro_gemini_key') || '';
+                    setApiKeyInput(key);
+                    setShowSettingsModal(true);
+                  }}
+                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-full transition-colors"
+                  title="設定"
+                >
+                  <Settings className="w-5 h-5 md:w-6 md:h-6" />
+                </button>
               </div>
 
               {/* Tabs and Actions - Mobile Optimized */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full">
                 <div className="flex items-center gap-2 w-full sm:w-auto">
-                  {/* Desktop/Tablet Tabs - Hidden on Mobile */}
-                  <div className="hidden lg:flex bg-white rounded-xl shadow-sm border p-1 items-center gap-1 sm:gap-2 flex-1 sm:flex-initial">
-                    {['input', 'docs'].map(tab => (
-                      <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={`flex-1 sm:flex-initial px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-all ${activeTab === tab ? 'bg-green-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
-                      >
-                        {tab === 'input' ? '同時入力' : '出力書類'}
-                      </button>
-                    ))}
-                  </div>
+                  {/* Tabs removed as per user request */}
                   <button
                     onClick={async () => {
                       if (!user) return;
+                      // Add strict confirmation
+                      if (!window.confirm("【注意】これはデモ機能です。\n\n過去5日分の「架空のサンプルデータ」を自動生成します。\n入力したデータが上書きされる可能性がありますが、よろしいですか？\n\n（通常の生成は緑色の「書類を生成」ボタンを使用してください）")) {
+                        return;
+                      }
+
                       let kids = children;
                       if (kids.length === 0) {
                         setChildren(sampleChildren);
@@ -1238,27 +1362,15 @@
                         return mock;
                       };
                       const selectedMock = buildMock();
-                      if (db) {
-                        for (const dateStr of dateList) {
-                          const mockSummary = `本日は全体的に落ち着いて活動できました。（${dateStr}のデモ）`;
-                          const resultsDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'daily_reports', dateStr);
-                          const resultsForDate = dateStr === selectedDate ? selectedMock : buildMock();
-                          await setDoc(resultsDocRef, { results: resultsForDate, summaryC: mockSummary }, { merge: true });
-                        }
-                      } else {
-                        setLocalReports(prev => {
-                          const next = { ...prev };
-                          dateList.forEach(dateStr => {
-                            const mockSummary = `本日は全体的に落ち着いて活動できました。（${dateStr}のデモ）`;
-                            const resultsForDate = dateStr === selectedDate ? selectedMock : buildMock();
-                            next[dateStr] = { results: resultsForDate, summaryC: mockSummary };
-                          });
-                          return next;
-                        });
-                        const selectedSummary = `本日は全体的に落ち着いて活動できました。（${selectedDate}のデモ）`;
-                        setResults(selectedMock);
-                        setSummaryC(selectedSummary);
+                      for (const dateStr of dateList) {
+                        const mockSummary = `本日は全体的に落ち着いて活動できました。（${dateStr}のデモ）`;
+                        const resultsForDate = dateStr === selectedDate ? selectedMock : buildMock();
+                        await callStorage({ action: 'saveReport', date: dateStr, data: { results: resultsForDate, summaryC: mockSummary } });
                       }
+                      const selectedSummary = `本日は全体的に落ち着いて活動できました。（${selectedDate}のデモ）`;
+                      setResults(selectedMock);
+                      setSummaryC(selectedSummary);
+                      fetchReportIndex();
                       setExpandedReportDates(prev => ({ ...prev, [selectedDate]: true }));
                       setExpandedChildLevels(prev => {
                         const next = { ...prev };
@@ -1279,510 +1391,332 @@
               </div>
             </header>
 
-            {
-              activeTab === 'input' ? (
-                <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-auto lg:h-[calc(100vh-200px)]">
-                  {/* Sidebar - Fixed Width at all sizes */}
-                  <div className="w-full max-w-sm flex flex-col gap-4 overflow-hidden flex-shrink-0">
-                    {/* Date Selector */}
-                    <div className="bg-white rounded-xl shadow-lg border-2 border-indigo-200 p-4">
-                      <div className="flex items-center justify-center gap-3">
-                        <div className="flex flex-col items-center w-full">
-                          <span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider mb-2">選択中の日付</span>
-                          <div
-                            onClick={() => setShowCalendarModal(true)}
-                            className="w-full bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-300 rounded-lg px-4 py-3 text-lg font-black text-indigo-900 cursor-pointer hover:shadow-md text-center flex items-center justify-center gap-2 group transition-all active:scale-95"
-                          >
-                            <Calendar className="w-5 h-5 text-indigo-500 group-hover:scale-110 transition-transform" />
-                            <span>
-                              {new Date(selectedDate).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="bg-white p-4 rounded-2xl shadow-sm border overflow-hidden flex flex-col">
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                          <Users className="w-4 h-4" /> 児童リスト
-                        </span>
-                        <button onClick={addChild} className="text-green-600 hover:scale-110 transition-transform">
-                          <PlusCircle className="w-6 h-6" />
-                        </button>
-                      </div>
-                      <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
-                        {children.sort((a, b) => b.timestamp - a.timestamp).map(child => (
-                          <div
-                            key={child.id}
-                            onClick={() => setSelectedChildId(child.id)}
-                            className={`group p-3 rounded-xl cursor-pointer border-2 transition-all flex items-center justify-between ${selectedChildId === child.id ? 'border-green-500 bg-green-50 shadow-sm' : 'border-transparent bg-slate-50 hover:bg-slate-100'}`}
-                          >
-                            <div className="flex items-center gap-3 overflow-hidden">
-                              <div className={`w-2 h-2 shrink-0 rounded-full ${((child.messages && child.messages.length > 0) || child.memo) ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                              <span className="font-bold text-sm truncate flex items-center gap-2">
-                                {child.name}
-                                {results[child.id] && (
-                                  <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">生成済</span>
-                                )}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <label
-                                onClick={(e) => e.stopPropagation()}
-                                className="flex items-center gap-1 text-[10px] font-bold text-slate-500"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedGenerateIds.includes(child.id)}
-                                  onChange={(e) => { e.stopPropagation(); toggleChildGenerate(child.id); }}
-                                  className="h-3 w-3 accent-indigo-500"
-                                />
-                                生成対象
-                              </label>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); removeChild(child.id); }}
-                                className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-all"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                        {children.length === 0 && <p className="text-[10px] text-center text-slate-400 py-4 italic">児童を追加してください</p>}
-                      </div>
-                    </div>
-
-                    {loading ? (
-                      <div className="w-full py-4 bg-green-700 rounded-2xl shadow-xl overflow-hidden relative">
-                        <div
-                          className="absolute inset-0 bg-indigo-600 transition-all duration-300 ease-out"
-                          style={{ width: `${Math.max(progress, smoothProgress)}%` }}
-                        />
-                        <div className="relative z-10 flex items-center justify-center gap-3 text-white font-black">
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          <span>生成中... {Math.max(progress, smoothProgress).toFixed(0)}%</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={generateDocuments}
-                        disabled={loading || children.length === 0 || selectedGenerateIds.length === 0}
-                        className="w-full py-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-2xl shadow-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 group"
+            <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-auto lg:h-[calc(100vh-200px)]">
+              {/* Unified Sidebar */}
+              <div className="w-full lg:w-96 flex flex-col gap-4 overflow-hidden flex-shrink-0">
+                {/* Date Selector & Batch Actions */}
+                <div className="bg-white rounded-xl shadow-lg border-2 border-indigo-200 p-4">
+                  <div className="flex flex-col items-center justify-center gap-3">
+                    <div className="flex flex-col items-center w-full">
+                      <span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider mb-2">選択中の日付</span>
+                      <div
+                        onClick={() => setShowCalendarModal(true)}
+                        className="w-full bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-300 rounded-lg px-4 py-3 text-lg font-black text-indigo-900 cursor-pointer hover:shadow-md text-center flex items-center justify-center gap-2 group transition-all active:scale-95"
                       >
-                        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 group-hover:translate-x-1 transition-transform" />}
-                        書類を生成（{selectedGenerateIds.length}名）
-                      </button>
-                    )}
-                  </div>
+                        <Calendar className="w-5 h-5 text-indigo-500 group-hover:scale-110 transition-transform" />
+                        <span>
+                          {new Date(selectedDate).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })}
+                        </span>
+                      </div>
+                    </div>
 
-                  {/* Editor - Flexible Width on desktop, Slide-in from right on mobile */}
-                  <div className={`fixed lg:relative inset-0 lg:inset-auto lg:flex-1 h-full flex flex-col z-50 lg:z-auto transition-all duration-300 ${selectedChild ? 'bg-slate-900/50 lg:bg-transparent pointer-events-auto' : 'bg-transparent pointer-events-none lg:pointer-events-auto'}`}>
-                    <div className={`bg-white lg:rounded-2xl shadow-xl lg:shadow-sm border flex-1 flex flex-col overflow-hidden ml-auto w-full lg:w-auto transition-transform duration-300 ease-out ${selectedChild ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}>
-                      {selectedChild ? (
-                        <>
-                          <div className="p-4 border-b bg-slate-50 lg:flex items-center justify-between hidden">
-                            <div className="flex items-center gap-3">
+                    <div className="flex gap-2 w-full">
+                      <button
+                        onClick={() => {
+                          const generatedIds = children.filter(c => results[c.id]).map(c => c.id);
+                          if (generatedIds.length === 0) return alert('生成済みの書類がありません');
+                          alert('全児童分の印刷機能は準備中です。各児童の画面から印刷してください。');
+                        }}
+                        className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                      >
+                        <Printer className="w-3 h-3" /> 一括印刷
+                      </button>
+                      <button
+                        onClick={() => {
+                          const generatedIds = children.filter(c => results[c.id]).map(c => c.id);
+                          if (generatedIds.length === 0) return alert('生成済みの書類がありません');
+                          setShowExportModal(true);
+                        }}
+                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-colors"
+                      >
+                        <FileSpreadsheet className="w-3 h-3" /> 一括出力
+                      </button>
+                    </div>
+
+
+                  </div>
+                </div>
+
+                {/* Child List */}
+                <div className="bg-white p-4 rounded-2xl shadow-sm border overflow-hidden flex-1 flex flex-col min-h-[400px] lg:min-h-0">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                      <Users className="w-4 h-4" /> 児童リスト
+                    </span>
+                    <button onClick={addChild} className="text-green-600 hover:scale-110 transition-transform">
+                      <PlusCircle className="w-6 h-6" />
+                    </button>
+                  </div>
+                  <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+                    {children.sort((a, b) => b.timestamp - a.timestamp).map(child => (
+                      <div
+                        key={child.id}
+                        className={`group p-3 rounded-xl border-2 transition-all flex items-center justify-between ${(selectedChildId === child.id || selectedDocChildId === child.id) ? 'border-green-500 bg-green-50 shadow-sm' : 'border-transparent bg-slate-50 hover:bg-slate-100'}`}
+                      >
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <div className={`w-2 h-2 shrink-0 rounded-full ${(results[child.id] || child.memo) ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                          <span className="font-bold text-sm truncate">{child.name}</span>
+                          <div className="flex items-center gap-1">
+                            {/* Staff Selector */}
+                            <select
+                              value={child.staff || ''}
+                              onChange={(e) => updateChild(child.id, { staff: e.target.value })}
+                              className="text-[10px] py-1 px-1 rounded border border-slate-200 bg-white text-slate-600 focus:border-indigo-500 outline-none"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <option value="">担当なし</option>
+                              {STAFF_OPTIONS.map(s => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+
+                            <button
+                              onClick={() => { setSelectedChildId(child.id); setSelectedDocChildId(null); }}
+                              className={`p-1.5 rounded-lg transition-colors ${selectedChildId === child.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                              title="メモ入力"
+                            >
+                              <MessageSquare className="w-4 h-4" />
+                            </button>
+                            {results[child.id] && (
+                              <button
+                                onClick={() => { setSelectedDocChildId(child.id); setSelectedChildId(null); }}
+                                className={`p-1.5 rounded-lg transition-colors ${selectedDocChildId === child.id ? 'bg-emerald-600 text-white' : 'text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50'}`}
+                                title="書類を見る"
+                              >
+                                <FileText className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={selectedGenerateIds.includes(child.id)}
+                            onChange={() => toggleChildGenerate(child.id)}
+                            className="h-4 w-4 accent-indigo-500"
+                          />
+                          <button
+                            onClick={() => removeChild(child.id)}
+                            className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {children.length === 0 && <p className="text-xs text-center text-slate-400 py-8 italic">児童を追加してください</p>}
+                  </div>
+                </div>
+
+                {/* Generate Button Area */}
+                <div className="pt-2">
+                  {loading ? (
+                    <div className="w-full py-4 bg-green-700 rounded-2xl shadow-xl overflow-hidden relative">
+                      <div className="absolute inset-0 bg-indigo-600 transition-all duration-300 ease-out" style={{ width: `${Math.max(progress, smoothProgress)}%` }} />
+                      <div className="relative z-10 flex items-center justify-center gap-3 text-white font-black">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>生成中... {Math.max(progress, smoothProgress).toFixed(0)}%</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={generateDocuments}
+                      disabled={loading || children.length === 0 || selectedGenerateIds.length === 0}
+                      className="w-full py-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-2xl shadow-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 group"
+                    >
+                      <Send className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                      書類を生成（{selectedGenerateIds.length}名）
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Unified Detail Area */}
+              <div className={`fixed lg:relative inset-0 lg:inset-auto lg:flex-1 h-full flex flex-col z-[100] lg:z-auto transition-all duration-300 ${(selectedChildId || selectedDocChildId) ? 'bg-slate-900/50 lg:bg-transparent pointer-events-auto' : 'bg-transparent pointer-events-none lg:pointer-events-auto'}`}>
+                <div className={`bg-white lg:rounded-2xl shadow-xl lg:shadow-sm border flex-1 flex flex-col overflow-hidden ml-auto w-full lg:w-auto transition-transform duration-300 ease-out ${(selectedChildId || selectedDocChildId) ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}>
+                  {/* Document View Mode */}
+                  {selectedDocChildId ? (() => {
+                    const child = children.find(c => c.id === selectedDocChildId);
+                    const result = results[selectedDocChildId] || {};
+                    if (!child) return null;
+                    return (
+                      <div
+                        className="flex flex-col h-full"
+                        onTouchStart={(e) => setTouchStartPos(e.touches[0].clientX)}
+                        onTouchEnd={(e) => {
+                          if (touchStartPos === null) return;
+                          const touchEndPos = e.changedTouches[0].clientX;
+                          const distance = touchEndPos - touchStartPos;
+                          if (distance > 100) { // 100px swipe to the right
+                            setSelectedDocChildId(null);
+                          }
+                          setTouchStartPos(null);
+                        }}
+                        onWheel={(e) => {
+                          if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && e.deltaX < -50) {
+                            setSelectedDocChildId(null);
+                          }
+                        }}
+                      >
+                        <div className="p-4 border-b bg-gradient-to-r from-indigo-50 to-purple-50 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <button onClick={() => {
+                              const list = children.filter(c => results[c.id]).sort((a, b) => b.timestamp - a.timestamp);
+                              const idx = list.findIndex(c => c.id === selectedDocChildId);
+                              if (idx < list.length - 1) setSelectedDocChildId(list[idx + 1].id);
+                            }} disabled={children.filter(c => results[c.id]).findIndex(c => c.id === selectedDocChildId) >= children.filter(c => results[c.id]).length - 1} className="p-1 disabled:opacity-30 lg:hidden text-indigo-400"><ChevronLeft className="w-6 h-6" /></button>
+                            <div>
+                              <h2 className="text-lg font-black text-indigo-900">{child.name}</h2>
+                              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">書類閲覧モード</p>
+                            </div>
+                            <button onClick={() => {
+                              const list = children.filter(c => results[c.id]).sort((a, b) => b.timestamp - a.timestamp);
+                              const idx = list.findIndex(c => c.id === selectedDocChildId);
+                              if (idx > 0) setSelectedDocChildId(list[idx - 1].id);
+                            }} disabled={children.filter(c => results[c.id]).findIndex(c => c.id === selectedDocChildId) <= 0} className="p-1 disabled:opacity-30 lg:hidden text-indigo-400"><ChevronRight className="w-6 h-6" /></button>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={async () => { setChildGeneratingId(child.id); await generateDocuments([child.id]); setChildGeneratingId(null); }} className="p-2 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><RefreshCw className={`w-3 h-3 ${childGeneratingId === child.id ? 'animate-spin' : ''}`} /> 再生成</button>
+                            <button onClick={() => setSelectedDocChildId(null)} className="lg:hidden p-2 bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
+                          </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                          <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-xs font-black text-emerald-600 uppercase">ツリー通信</h3>
+                              <CopyButton text={formatChatText(result.D || '')} label="COPY" />
+                            </div>
+                            <div className="bg-[#7494c0] p-4 rounded-xl rounded-tl-none text-white text-sm whitespace-pre-wrap leading-relaxed font-mono relative ml-2 shadow-sm w-fit max-w-[90%]">
+                              <div className="absolute -top-[0px] -left-[8px] w-0 h-0 border-t-[0px] border-r-[15px] border-b-[15px] border-l-[0px] border-transparent border-r-[#7494c0]"></div>
+                              {formatChatText(result.D || '未生成')}
+                            </div>
+                          </div>
+                          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                            <div className="flex items-center justify-between mb-2">
+                              <h3 className="text-xs font-black text-indigo-600 uppercase">専門的支援実施計画</h3>
+                              <CopyButton text={`${result.B_result}\n${result.B_plan}`} label="COPY" />
+                            </div>
+                            <div className="space-y-3">
+                              <div><p className="text-[10px] font-bold text-slate-400">実績</p><p className="bg-white p-3 rounded border text-sm">{result.B_result}</p></div>
+                              <div><p className="text-[10px] font-bold text-slate-400">予定</p><p className="bg-white p-3 rounded border text-sm">{result.B_plan}</p></div>
+                            </div>
+                          </div>
+                        </div>
+                        <button onClick={() => setSelectedDocChildId(null)} className="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center z-[110]"><X className="w-6 h-6" /></button>
+                      </div>
+                    );
+                  })() : selectedChildId ? (() => {
+                    const child = children.find(c => c.id === selectedChildId);
+                    if (!child) return null;
+                    const messages = child.messages || [];
+                    return (
+                      <div
+                        className="flex flex-col h-full bg-white relative"
+                        onTouchStart={(e) => setTouchStartPos(e.touches[0].clientX)}
+                        onTouchEnd={(e) => {
+                          if (touchStartPos === null) return;
+                          const touchEndPos = e.changedTouches[0].clientX;
+                          const distance = touchEndPos - touchStartPos;
+                          if (distance > 100) { // 100px swipe to the right
+                            setSelectedChildId(null);
+                          }
+                          setTouchStartPos(null);
+                        }}
+                        onWheel={(e) => {
+                          if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && e.deltaX < -50) {
+                            setSelectedChildId(null);
+                          }
+                        }}
+                      >
+                        {/* Messages Area */}
+                        <div className="flex-1 bg-slate-50/50 p-4 overflow-y-auto flex flex-col gap-3 relative">
+                          {selectedChildMessages.length === 0 ? (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-200 pointer-events-none">
+                              <MessageSquare className="w-16 h-16 mb-2 opacity-20" />
+                              <p className="text-sm font-bold opacity-40">メモがありません</p>
+                            </div>
+                          ) : (
+                            selectedChildMessages.map(msg => (
+                              <div key={msg.id} className={`self-start p-3 rounded-2xl rounded-tl-none shadow-sm border relative ${msg.included !== false ? 'bg-white' : 'bg-slate-50 opacity-60 grayscale'}`}>
+                                <button onClick={() => toggleMessage(child.id, msg.id)} className={`absolute -top-2 -right-2 px-2 py-0.5 rounded-full text-[8px] font-bold ${msg.included !== false ? 'bg-emerald-500 text-white' : 'bg-slate-300 text-slate-600'}`}>{msg.included !== false ? 'AI利用' : '除外'}</button>
+                                <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        {/* Input Area (Restored to User Image 2) */}
+                        <div className="bg-white border-t p-4 space-y-3">
+                          {/* Row 1: Name Input + Close Button */}
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 relative">
                               <input
                                 type="text"
-                                value={selectedChild.name}
-                                onChange={(e) => updateChild(selectedChild.id, { name: e.target.value })}
-                                className="bg-white px-3 py-1.5 border rounded-lg font-bold text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-200 w-48 shadow-inner"
+                                value={child.name}
+                                onChange={(e) => updateChild(child.id, { name: e.target.value })}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-indigo-700 outline-none focus:border-indigo-300 transition-colors"
                                 placeholder="児童名"
                               />
-                              <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider hidden md:inline">Sync Active</span>
                             </div>
-                            <div className="text-[10px] text-slate-400 font-bold italic hidden md:block">
-                              {new Date().toLocaleDateString()}
-                            </div>
-                          </div>
-
-                          {/* Chat Timeline */}
-                          <div className="flex-1 bg-slate-100 p-4 overflow-y-auto custom-scrollbar flex flex-col gap-3">
-                            {(selectedChild.messages || []).length === 0 && !selectedChild.memo && (
-                              <div className="flex-1 flex flex-col items-center justify-center text-slate-300 opacity-50">
-                                <MessageSquare className="w-12 h-12 mb-2" />
-                                <p className="text-xs font-bold">メモがありません</p>
-                              </div>
-                            )}
-                            {/* Legacy Memo Support */}
-                            {selectedChild.memo && (
-                              <div className="self-start bg-white p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[80%] border border-slate-200">
-                                <p className="text-sm text-slate-700 whitespace-pre-wrap">{selectedChild.memo}</p>
-                                <p className="text-[10px] text-slate-400 mt-1 text-right">Legacy Memo</p>
-                              </div>
-                            )}
-                            {/* Messages */}
-                            {(selectedChild.messages || []).map((msg) => {
-                              const isIncluded = msg.included !== false; // Default true if undefined
-                              return (
-                                <div
-                                  key={msg.id}
-                                  className={`group self-start p-3 rounded-2xl rounded-tl-none shadow-sm max-w-[80%] border relative transition-all ${isIncluded
-                                    ? 'bg-white border-slate-200'
-                                    : 'bg-slate-50 border-slate-200 opacity-60 grayscale'
-                                    }`}
-                                >
-                                  {/* Edit controls */}
-                                  <div className="absolute -top-3 left-2 flex gap-2">
-                                    {editingMessageId === msg.id ? (
-                                      <>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            updateMessageText(selectedChild.id, msg.id, editingText);
-                                            setEditingMessageId(null);
-                                            setEditingText('');
-                                          }}
-                                          className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-bold shadow-sm"
-                                        >保存</button>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setEditingMessageId(null);
-                                            setEditingText('');
-                                          }}
-                                          className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 font-bold shadow-sm"
-                                        >戻す</button>
-                                      </>
-                                    ) : (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setEditingMessageId(msg.id);
-                                          setEditingText(msg.text);
-                                        }}
-                                        className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 font-bold shadow-sm hover:bg-slate-300"
-                                      >編集</button>
-                                    )}
-                                  </div>
-
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleMessage(selectedChild.id, msg.id);
-                                    }}
-                                    className={`absolute -top-3 -right-3 rounded-full px-2 py-1 text-[10px] font-bold shadow-sm transition-all z-10 ${isIncluded ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500 hover:bg-slate-300'}`}
-                                    title={isIncluded ? "AI生成に使用中" : "AI生成から除外"}
-                                  >
-                                    {isIncluded ? 'AI利用' : '除外'}
-                                  </button>
-                                  {editingMessageId === msg.id ? (
-                                    <textarea
-                                      value={editingText}
-                                      onChange={(e) => setEditingText(e.target.value)}
-                                      className="w-full text-sm bg-white border border-slate-200 rounded-lg p-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                                      rows={3}
-                                    />
-                                  ) : (
-                                    <p className="text-sm whitespace-pre-wrap text-slate-700">
-                                      {msg.text}
-                                    </p>
-                                  )}
-                                  <div className="flex items-center justify-end gap-2 mt-1">
-                                    <p className="text-[10px] text-slate-400">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {/* Name input and Close button - Mobile only */}
-                          <div className="lg:hidden bg-white border-t px-3 py-2 flex items-center gap-2">
-                            <input
-                              type="text"
-                              value={selectedChild.name}
-                              onChange={(e) => updateChild(selectedChild.id, { name: e.target.value })}
-                              className="flex-1 bg-slate-50 px-3 py-2 border rounded-lg font-bold text-indigo-700 outline-none focus:ring-2 focus:ring-indigo-200 shadow-inner text-sm"
-                              placeholder="児童名"
-                            />
                             <button
-                              type="button"
                               onClick={() => setSelectedChildId(null)}
-                              className="w-10 h-10 bg-slate-900 text-white rounded-full hover:bg-slate-700 transition-all flex items-center justify-center active:scale-95 flex-shrink-0"
+                              className="w-10 h-10 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-md active:scale-90 transition-transform"
                             >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
+                              <X className="w-5 h-5" />
                             </button>
                           </div>
 
-                          {/* Input Area */}
-                          <div className="bg-white border-t">
-                            <div className="px-3 pt-2 flex gap-2 overflow-x-auto custom-scrollbar no-scrollbar">
-                              {['ツリー式学習', '宿題', 'プリント', 'プログラム', '自由時間'].map(tag => (
-                                <button
-                                  key={tag}
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    if (!selectedChild) return;
-                                    const currentVal = drafts[selectedChild.id] || '';
-                                    const nextVal = currentVal ? `${currentVal} 【${tag}】` : `【${tag}】`;
-                                    setDrafts(prev => ({ ...prev, [selectedChild.id]: nextVal }));
-                                  }}
-                                  className="whitespace-nowrap px-3 py-1 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-full border border-indigo-100 hover:bg-indigo-100 transition-colors"
-                                >
-                                  {tag}
-                                </button>
-                              ))}
-                            </div>
-                            <div className="p-3">
-                              <form
-                                id="chatForm"
-                                onSubmit={(e) => {
-                                  e.preventDefault();
-                                  if (!selectedChild) return;
-                                  const draft = drafts[selectedChild.id] || '';
-                                  sendMessage(selectedChild.id, draft);
-                                  setDrafts(prev => ({ ...prev, [selectedChild.id]: '' }));
-                                }}
-                                className="flex gap-2"
-                              >
-                                <input
-                                  name="msgInput"
-                                  type="text"
-                                  value={selectedChild ? (drafts[selectedChild.id] || '') : ''}
-                                  onChange={(e) => {
-                                    if (!selectedChild) return;
-                                    const val = e.target.value;
-                                    setDrafts(prev => ({ ...prev, [selectedChild.id]: val }));
-                                  }}
-                                  className="flex-1 bg-slate-100 border-transparent focus:bg-white border focus:border-indigo-300 rounded-xl px-4 py-3 text-sm focus:outline-none transition-all placeholder:text-slate-400 font-medium"
-                                  placeholder="メモを入力..."
-                                  autoComplete="off"
-                                />
-                                <button
-                                  type="submit"
-                                  className="bg-slate-900 text-white p-3 rounded-xl hover:bg-indigo-600 transition-colors shadow-lg active:scale-95"
-                                >
-                                  <Send className="w-5 h-5" />
-                                </button>
-                              </form>
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
-                          <Users className="w-16 h-16 mb-4 opacity-10" />
-                          <p className="font-black text-sm uppercase tracking-widest">児童を選択してください</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-auto lg:h-[calc(100vh-200px)]">
-                  {/* Left Sidebar - Fixed Width at all sizes */}
-                  <div className="w-full max-w-sm flex flex-col gap-4 overflow-hidden flex-shrink-0">
-                    {/* Date Selector */}
-                    <div className="bg-white rounded-xl shadow-lg border-2 border-indigo-200 p-4">
-                      <div className="flex flex-col items-center justify-center gap-3">
-                        <div className="flex flex-col items-center w-full">
-                          <span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider mb-2">選択中の日付</span>
-                          <div
-                            onClick={() => setShowCalendarModal(true)}
-                            className="w-full bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-300 rounded-lg px-4 py-3 text-lg font-black text-indigo-900 cursor-pointer hover:shadow-md text-center flex items-center justify-center gap-2 group transition-all active:scale-95"
-                          >
-                            <Calendar className="w-5 h-5 text-indigo-500 group-hover:scale-110 transition-transform" />
-                            <span>
-                              {new Date(selectedDate).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Batch Actions for Selected Date */}
-                        <div className="flex gap-2 w-full">
-                          <button
-                            onClick={() => {
-                              // Print all generated docs for selected date
-                              // Note: This logic needs to be robust to handle multiple docs
-                              const generatedIds = children.filter(c => results[c.id]).map(c => c.id);
-                              if (generatedIds.length === 0) return alert('生成済みの書類がありません');
-                              // Currently reusing single pront logic - ideally should print all
-                              // For now, let's just alert or print the first one? 
-                              // User request says "export all children", so we should loop or support batch.
-                              // Assuming existing functions can be adapted or reused.
-                              // For MVP, just putting the buttons here.
-                              // Let's call a hypothetical batch function or just loop (popups might be blocked).
-                              alert('全児童分の印刷機能は準備中です。各児童の画面から印刷してください。');
-                            }}
-                            className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-colors"
-                          >
-                            <Printer className="w-3 h-3" /> 一括印刷
-                          </button>
-                          <button
-                            onClick={() => {
-                              const generatedIds = children.filter(c => results[c.id]).map(c => c.id);
-                              if (generatedIds.length === 0) return alert('生成済みの書類がありません');
-                              setShowExportModal(true);
-                            }}
-                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-colors"
-                          >
-                            <FileSpreadsheet className="w-3 h-3" /> 一括出力
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Children List */}
-                    <div className="bg-white p-4 rounded-2xl shadow-sm border overflow-hidden flex flex-col">
-                      <div className="flex items-center justify-between mb-4">
-                        <span className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                          <Users className="w-4 h-4" /> 児童リスト
-                        </span>
-                      </div>
-                      <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
-                        {children.filter(c => results[c.id]).sort((a, b) => b.timestamp - a.timestamp).map(child => (
-                          <div
-                            key={child.id}
-                            onClick={() => setSelectedDocChildId(child.id)}
-                            className={`group p-3 rounded-xl cursor-pointer border-2 transition-all flex items-center justify-between ${selectedDocChildId === child.id ? 'border-green-500 bg-green-50 shadow-sm' : 'border-transparent bg-slate-50 hover:bg-slate-100'}`}
-                          >
-                            <div className="flex items-center gap-3 overflow-hidden">
-                              <div className="w-2 h-2 shrink-0 rounded-full bg-emerald-500" />
-                              <span className="font-bold text-sm truncate flex items-center gap-2">
-                                {child.name}
-                                <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">生成済</span>
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                        {children.filter(c => results[c.id]).length === 0 && (
-                          <div className="text-center text-slate-400 text-xs py-8">
-                            生成済みの書類がありません
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Main Area - Flexible Width on desktop, Slide-in from right on mobile */}
-                  <div className={`fixed lg:relative inset-0 lg:inset-auto lg:flex-1 h-full flex flex-col z-50 lg:z-auto transition-all duration-300 ${selectedDocChildId ? 'bg-slate-900/50 lg:bg-transparent pointer-events-auto' : 'bg-transparent pointer-events-none lg:pointer-events-auto'}`}>
-                    <div className={`bg-white lg:rounded-2xl shadow-xl lg:shadow-sm border flex-1 flex flex-col overflow-hidden ml-auto w-full lg:w-auto transition-transform duration-300 ease-out ${selectedDocChildId ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}>
-                      {selectedDocChildId && children.find(c => c.id === selectedDocChildId) ? (
-                        (() => {
-                          const selectedChild = children.find(c => c.id === selectedDocChildId);
-                          const result = results[selectedDocChildId] || {};
-                          return (
-                            <div className="flex flex-col h-full">
-                              {/* Header */}
-                              <div className="p-4 border-b bg-gradient-to-r from-indigo-50 to-purple-50">
-                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                  <div>
-                                    <h2 className="text-lg sm:text-xl font-black text-indigo-900">{selectedChild.name}</h2>
-                                    <p className="text-xs text-slate-500 mt-1">
-                                      {new Date(selectedDate).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-2 flex-wrap">
-
-
-
-                                    <button
-                                      onClick={async () => {
-                                        setChildGeneratingId(selectedDocChildId);
-                                        await generateDocuments([selectedDocChildId]);
-                                        setChildGeneratingId(null);
-                                      }}
-                                      disabled={childGeneratingId === selectedDocChildId}
-                                      className="text-[10px] px-3 py-2 rounded-full bg-green-600 text-white border border-green-600 font-bold hover:bg-green-700 flex items-center gap-1 disabled:opacity-50"
-                                    >
-                                      <RefreshCw className={`w-3 h-3 ${childGeneratingId === selectedDocChildId ? 'animate-spin' : ''}`} /> 再生成
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Content */}
-                              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                                {/* ツリー通信 (LINE風) */}
-                                <div className="bg-emerald-50 rounded-xl p-6 border-2 border-emerald-200">
-                                  <div className="flex items-center justify-between mb-4">
-                                    <h3 className="font-black text-emerald-600 text-sm uppercase tracking-widest flex items-center gap-2">
-                                      <MessageSquare className="w-4 h-4" /> ツリー通信
-                                    </h3>
-                                    <CopyButton text={result.A_communication || result.D || ''} label="COPY" />
-                                  </div>
-
-                                  {/* LINE Style Display */}
-                                  <div className="bg-[#7494c0] p-4 rounded-xl border shadow-inner">
-                                    <div className="flex flex-col gap-3">
-                                      <div className="flex justify-start items-end gap-2">
-                                        <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center flex-shrink-0 overflow-hidden">
-                                          <img src="logo.png" alt="Icon" className="w-full h-full object-cover" onError={(e) => e.target.style.display = 'none'} />
-                                          <Users className="w-5 h-5 text-slate-400" />
-                                        </div>
-                                        <div className="flex flex-col gap-1 max-w-[85%]">
-                                          <span className="text-[10px] text-white font-bold">{selectedChild.name} 保護者様</span>
-                                          <div className="bg-white p-3 rounded-2xl rounded-tl-none shadow-sm relative max-w-[18em]">
-                                            <p className="text-sm text-slate-800 leading-relaxed font-medium font-sans" style={{ whiteSpace: 'pre-wrap' }}>
-                                              {result.A_communication || result.D || '（メッセージはまだ生成されていません）'}
-                                            </p>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <p className="text-[10px] text-white/80 text-right mt-2 font-bold opacity-70">※LINE送信プレビュー（13文字改行）</p>
-                                  </div>
-                                </div>
-
-                                {/* 専門的支援実施計画 */}
-                                <div className="bg-slate-50 rounded-xl p-6 border-2 border-slate-200">
-                                  <div className="flex items-center justify-between mb-4">
-                                    <h3 className="font-black text-indigo-600 text-sm uppercase tracking-widest flex items-center gap-2">
-                                      <FileText className="w-4 h-4" /> 専門的支援実施計画
-                                    </h3>
-                                    <CopyButton text={`実施した支援の内容・結果:\n${result.B_result || ''}\n\n今後の支援の予定:\n${result.B_plan || ''}\n\n該当項目:\n${result.B_item || ''}`} label="COPY" />
-                                  </div>
-                                  <div className="space-y-4">
-                                    <div>
-                                      <p className="text-xs font-bold text-slate-500 mb-2">実施した支援の内容・結果</p>
-                                      <p className="text-sm font-medium text-slate-700 leading-7 whitespace-pre-wrap bg-white p-4 rounded-lg border">
-                                        {result.B_result || '---'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs font-bold text-slate-500 mb-2">今後の支援の予定</p>
-                                      <p className="text-sm font-medium text-slate-700 leading-7 whitespace-pre-wrap bg-white p-4 rounded-lg border">
-                                        {result.B_plan || '---'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-xs font-bold text-slate-500 mb-2">該当項目</p>
-                                      <p className="text-sm font-medium text-slate-700 leading-7 whitespace-pre-wrap bg-white p-4 rounded-lg border">
-                                        {result.B_item || '---'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-
-                              {/* Close button - Fixed at bottom right (Mobile only) */}
+                          {/* Row 2: Tag Buttons */}
+                          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                            {['ツリー式学習', '宿題', 'プリント', 'プログラム', '自由時間'].map(tag => (
                               <button
-                                onClick={() => setSelectedDocChildId(null)}
-                                className="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-2xl hover:bg-slate-700 transition-all flex items-center justify-center z-50 active:scale-95"
+                                key={tag}
+                                onClick={() => {
+                                  const cur = drafts[child.id] || '';
+                                  setDrafts(prev => ({ ...prev, [child.id]: cur ? `${cur} 【${tag}】` : `【${tag}】` }));
+                                }}
+                                className="whitespace-nowrap px-4 py-1.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-full border border-indigo-100 hover:bg-indigo-100 transition-colors"
                               >
-                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
+                                {tag}
                               </button>
+                            ))}
+                          </div>
 
-                            </div>
-                          );
-                        })()
-                      ) : (
-                        <div className="bg-white rounded-2xl shadow-sm border h-full flex flex-col items-center justify-center text-slate-300">
-                          <Users className="w-16 h-16 mb-4 opacity-10" />
-                          <p className="font-black text-sm uppercase tracking-widest">児童を選択してください</p>
+                          {/* Row 3: Message Input + Send Button */}
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              sendMessage(child.id, drafts[child.id] || '');
+                              setDrafts(prev => ({ ...prev, [child.id]: '' }));
+                            }}
+                            className="flex gap-2"
+                          >
+                            <input
+                              type="text"
+                              value={drafts[child.id] || ''}
+                              onChange={(e) => setDrafts(prev => ({ ...prev, [child.id]: e.target.value }))}
+                              className="flex-1 bg-slate-50 border border-transparent focus:bg-white focus:border-indigo-200 rounded-xl px-4 py-3 text-base outline-none transition-all"
+                              placeholder="メモを入力..."
+                            />
+                            <button
+                              type="submit"
+                              className="bg-slate-900 text-white w-12 h-12 rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
+                            >
+                              <Send className="w-5 h-5 rotate-[-15deg] translate-x-0.5" />
+                            </button>
+                          </form>
                         </div>
-                      )}
+                      </div>
+                    );
+                  })() : (
+                    <div className="flex-1 flex flex-col items-center justify-center text-slate-300 bg-slate-50/50">
+                      <Users className="w-16 h-16 mb-4 opacity-10" />
+                      <p className="font-black text-sm uppercase tracking-widest text-slate-300">児童を選択してください</p>
                     </div>
-                  </div>
+                  )}
                 </div>
-              )
-            }
+              </div>
+            </div>
 
             {/* Calendar Modal - Slide in from TOP */}
             <div
@@ -1918,6 +1852,67 @@
               </div>
             </div>
 
+            {/* Settings Modal */}
+            {showSettingsModal && (
+              <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4" onClick={() => setShowSettingsModal(false)}>
+                <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center gap-2 mb-4">
+                    <Settings className="w-6 h-6 text-indigo-600" />
+                    <h3 className="text-lg font-bold text-slate-800">設定</h3>
+                  </div>
+
+                  <div className="mb-4">
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Google Gemini API Key</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKeyInput}
+                        onChange={(e) => setApiKeyInput(e.target.value)}
+                        placeholder="AIzaSy..."
+                        autoFocus
+                        className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 transition-colors"
+                      />
+                      <button
+                        onClick={async () => {
+                          try {
+                            const text = await navigator.clipboard.readText();
+                            if (text) setApiKeyInput(text);
+                          } catch (e) {
+                            alert("クリップボードの読み取りに失敗しました。\n(ブラウザの制限により動作しない場合があります)");
+                          }
+                        }}
+                        className="px-3 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors flex items-center gap-1"
+                        title="クリップボードから貼り付け"
+                      >
+                        <Clipboard className="w-4 h-4" />
+                        <span className="hidden sm:inline">貼付</span>
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1">※キーはブラウザ内にのみ保存されます</p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        localStorage.setItem('care_pro_gemini_key', apiKeyInput.trim());
+                        setShowSettingsModal(false);
+                        alert("設定を保存しました");
+                      }}
+                      className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold transition-colors"
+                    >
+                      保存
+                    </button>
+                    <button
+                      onClick={() => setShowSettingsModal(false)}
+                      className="px-4 py-2 text-slate-400 hover:text-slate-600 text-sm font-bold"
+                    >
+                      閉じる
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Export Format Selection Modal */}
             {showExportModal && (
               <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4" onClick={() => setShowExportModal(false)}>
@@ -1962,32 +1957,10 @@
             )}
 
 
-            {/* Mobile Bottom Navigation - Fixed at bottom */}
-            <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-[90] flex items-center justify-around pb-2 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-              <button
-                onClick={() => setActiveTab('input')}
-                className={`flex-1 py-3 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'input' ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                <div className={`p-1 rounded-lg ${activeTab === 'input' ? 'bg-indigo-50' : 'bg-transparent'}`}>
-                  <MessageSquare className={`w-5 h-5 ${activeTab === 'input' ? 'fill-indigo-200' : ''}`} />
-                </div>
-                <span className="text-[10px] font-bold">同時入力</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('docs')}
-                className={`flex-1 py-3 flex flex-col items-center justify-center gap-1 transition-colors ${activeTab === 'docs' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}
-              >
-                <div className={`p-1 rounded-lg ${activeTab === 'docs' ? 'bg-emerald-50' : 'bg-transparent'}`}>
-                  <FileText className={`w-5 h-5 ${activeTab === 'docs' ? 'fill-emerald-200' : ''}`} />
-                </div>
-                <span className="text-[10px] font-bold">出力書類</span>
-              </button>
-            </div>
 
 
           </div>
-        </div>
+        </div >
       );
     };
 

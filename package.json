@@ -1,0 +1,11 @@
+{
+    "name": "care-record-pro-netlify",
+    "version": "1.0.0",
+    "description": "Care Record Pro migrated to Netlify Storage",
+    "dependencies": {
+        "@netlify/blobs": "^10.5.0"
+    },
+    "scripts": {
+        "build": "mkdir -p dist && cp index.html logo.png 404.html _redirects dist/"
+    }
+}
