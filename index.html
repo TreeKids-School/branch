@@ -5,7 +5,12 @@
   <meta charset="UTF-8">
   <meta name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover">
-  <title>Care Record Pro</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ツリーメモ">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.json">
+  <title>ツリーメモ</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
@@ -17,6 +22,14 @@
 
   <!-- Lucide (Global) -->
   <script src="https://unpkg.com/lucide@0.330.0/dist/umd/lucide.min.js"></script>
+
+  <!-- Driver.js (Tour) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.css" />
+  <script src="https://cdn.jsdelivr.net/npm/driver.js@1.0.1/dist/driver.js.iife.js"></script>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 
   <style>
     .custom-scrollbar::-webkit-scrollbar {
@@ -105,24 +118,20 @@
         font-size: 16px !important;
       }
     }
+
+    /* Driver.js Specific - Block interaction with highlighted element */
+    .driver-active-element {
+      pointer-events: none !important;
+      user-select: none !important;
+    }
   </style>
 </head>
 
 <body>
   <script>
+    // Error logging only - ErrorBoundary component will handle display
     window.onerror = function (msg, url, line, col, error) {
-      // Show error on screen for debugging
-      const root = document.getElementById('root');
-      if (root) {
-        root.innerHTML = `
-          <div style="color: red; padding: 20px; font-family: monospace; background: #fff0f0; border: 2px solid red;">
-            <h3>Application Error</h3>
-            <p><strong>Message:</strong> ${msg}</p>
-            <p><strong>Line:</strong> ${line}:${col}</p>
-            <pre>${error ? error.stack : 'No stack trace'}</pre>
-          </div>
-        `;
-      }
+      console.error("Application Error:", msg, "at", line + ":" + col, error);
       return false;
     };
     window.onunhandledrejection = function (event) {
@@ -140,74 +149,20 @@
     const { useState, useEffect, useCallback } = React;
     const { createRoot } = ReactDOM;
 
-    // Netlify Storage Helper with LocalStorage Fallback
-    const callStorage = async (payload) => {
-      const performLocalAction = (payload) => {
-        const { action, key, data, childId, messageId, date } = payload;
-        const get = (k) => {
-          try {
-            return JSON.parse(localStorage.getItem('care_pro_local_' + k) || 'null');
-          } catch (e) { return null; }
-        };
-        const set = (k, v) => localStorage.setItem('care_pro_local_' + k, JSON.stringify(v));
-
-        switch (action) {
-          case "getChildren":
-            return get("children") || [];
-          case "setChildren":
-            set("children", data);
-            return { status: "OK" };
-          case "getMessages":
-            return get(`messages_${childId}`) || [];
-          case "saveMessages":
-            set(`messages_${childId}`, data);
-            return { status: "OK" };
-          case "getReport":
-            return get(`report_${date}`) || null;
-          case "saveReport":
-            set(`report_${date}`, data);
-            // Update index
-            let index = get("reports_index") || [];
-            if (!Array.isArray(index)) index = [];
-            if (!index.includes(date)) {
-              index.push(date);
-              set("reports_index", index);
-            }
-            return { status: "OK" };
-          case "getReportIndex":
-            return get("reports_index") || [];
-          default:
-            return null;
-        }
-      };
-
-      try {
-        // Force local if known local environment
-        const isLocal = window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-
-        if (isLocal) {
-          // console.log("Using LocalStorage (Local Mode):", payload.action);
-          return performLocalAction(payload);
-        }
-
-        const response = await fetch('/.netlify/functions/storage', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-          // Fallback to local storage on 404 (local server without functions) or other errors
-          console.warn(`Storage API Error (${response.status}), falling back to localStorage.`);
-          return performLocalAction(payload);
-        }
-        const data = await response.json();
-        return data;
-      } catch (e) {
-        console.warn("Storage Connection Error, falling back to localStorage:", e);
-        return performLocalAction(payload);
-      }
+    // Initialize Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyAXKKOxLBXPPjmkJQMQYdMjGzqVxJxVxVg",
+      authDomain: "octopus-5735b.firebaseapp.com",
+      projectId: "octopus-5735b",
+      storageBucket: "octopus-5735b.firebasestorage.app",
+      messagingSenderId: "123456789012",
+      appId: "1:123456789012:web:abcdef123456",
+      databaseURL: "https://octopus-5735b-default-rtdb.firebaseio.com"
     };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
     const { icons } = lucide;
 
     const fetchAI = async (prompt, isJson) => {
@@ -294,13 +249,14 @@
         const getMockResponse = (isJson) => {
           if (isJson) {
             return {
-              B_result: "【デモ生成】本日は集中して学習に取り組みました。特に計算プリントでは、指を使って丁寧に数える姿が見られました。（※実際のAI生成を行うにはAPIキーを設定してください）",
-              B_plan: "引き続き、個々のペースに合わせた学習支援を行い、自信を持って取り組めるようサポートしていきます。",
-              B_item: "①健康管理, ③社会性",
-              D: "こんにちは、〇〇です！今日のツリー通信です！\n\n【デモ生成】今日は学習の時間にとても集中して取り組んでいましたよ。スタッフと一緒にプリントの問題を解く中で、「できた！」と嬉しそうに報告してくれる場面もありました。休憩時間にはお友達と仲良くブロックで遊んでおり、穏やかに過ごせていました。\n\n（※プレビューで実際の生成を行うには、生成時にAPIキーを入力してください）"
+              B_result: "【デモ生成】学習では宿題に取り組む姿が見られ、途中で集中が途切れる場面もあったが、環境を整えることで再度取り組めた。プログラムでは内容に戸惑う様子が見られたが、説明を受けて参加できた。",
+              B_plan: "宿題では集中が続くよう環境調整を行い、プログラムは事前の見通し提示を増やして参加しやすくしていく。",
+              B_item: "①健康・生活, ⑤人間関係・社会性",
+              D: "【デモ生成】学習では宿題に取り組む姿が見られ、途中で集中が途切れる場面もあったが、声かけで再び取り組めた。プログラムでは説明を受けて参加でき、自由時間は落ち着いて遊ぶ様子が見られた。本日は全体的に落ち着いて過ごすことができており、友だちとの関わりも見られた一日でした。",
+              K_sheet: "【学習】漢字ドリルに集中して取り組み、間違えた箇所も粘り強く修正できていた。\n【自由遊び】お城作りでは、友だちと協力して高い塔を完成させることができていた。\n【プログラム】ルールを理解して参加し、チームの友だちを応援する姿が見られた。\n【おやつ】該当なし"
             };
           }
-          return "【デモ生成】本日は全体的に穏やかに過ごせました。個々の課題にも前向きに取り組む姿が見られ、大きなトラブルもなく順調な一日でした。";
+          return "【デモ生成】学習では宿題に自発的に取り組む姿が見られ、途中で注意が逸れる場面もあったが環境調整で継続できた。プログラムは内容への戸惑いが見られたものの参加は概ね意欲的であった。自由時間は落ち着いて過ごす児童が多かった。";
         };
 
         await new Promise(r => setTimeout(r, 1000));
@@ -343,11 +299,106 @@
     const {
       Users, Clock, FileText, MessageSquare, UsersRound, Send, Loader2, Copy, Check,
       PlusCircle, Trash2, ClipboardCheck, RefreshCw, BookOpen, Coffee, Activity, Smile, Cloud, Clipboard,
-      ShieldCheck, Printer, FileSpreadsheet, Sparkles, Calendar, X, ChevronLeft, ChevronRight, Settings
+      ShieldCheck, Printer, FileSpreadsheet, Sparkles, Calendar, X, ChevronLeft, ChevronRight, Settings, LogOut
     } = Lucide;
 
     // --- App Code ---
     const appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'care-record-pro-netlify';
+
+    // Driver.js Helper
+    const startTour = () => {
+      const driver = window.driver?.js?.driver || window.driver;
+      if (!driver) return;
+
+      const driverObj = driver({
+        showProgress: true,
+        allowClose: false,
+        steps: [
+          {
+            element: '#tutorial-calendar',
+            popover: {
+              title: '① 日付を選択',
+              description: 'まずは作成したい日報の日付を確認・変更します。<br>過去の日報を見たり、未来の予定を立てることもできます。',
+              side: "bottom",
+              align: 'start'
+            }
+          },
+          {
+            element: '#tutorial-add-btn',
+            popover: {
+              title: '② 児童を追加',
+              description: 'このボタンを押して、担当する児童をリストに追加します。',
+              side: "left",
+              align: 'start'
+            }
+          },
+          {
+            element: '.tutorial-memo-btn',
+            popover: {
+              title: '③ メモを入力',
+              description: 'この吹き出しアイコンを押して、児童の様子をメモします。<br>AIはこのメモを元に書類を作成します。',
+              side: "left",
+              align: 'start'
+            }
+          },
+          {
+            element: '.tutorial-staff-select',
+            popover: {
+              title: '④ 担当者を選択',
+              description: '誰が書いたかわかるように、担当スタッフを選択しておきます。<br>（文章の書き方の癖などをAIが調整します）',
+              side: "left",
+              align: 'start'
+            }
+          },
+          {
+            element: '.tutorial-check-btn',
+            popover: {
+              title: '⑤ 生成対象をチェック',
+              description: '書類を作りたい児童にチェックが入っていることを確認します。<br>チェックボックスを押すとオン/オフできます。',
+              side: "right",
+              align: 'start'
+            }
+          },
+          {
+            element: '#tutorial-generate-btn',
+            popover: {
+              title: '⑥ 書類を生成',
+              description: '準備ができたら、このボタンを押してAIに書類を一括生成させます。',
+              side: "top",
+              align: 'start'
+            }
+          },
+          {
+            element: '.tutorial-action-buttons',
+            popover: {
+              title: '⑦ 生成完了',
+              description: '生成が完了すると、この場所に 📄（書類マーク）が表示されます。<br>それを押すと書類の中身を確認・編集できます。',
+              side: "left",
+              align: 'start'
+            }
+          }
+        ],
+        nextBtnText: '次へ',
+        prevBtnText: '戻る',
+        doneBtnText: '完了',
+        onHighlightStarted: (element) => {
+          if (!element) return;
+          // Freeze interaction using pointer-events only
+          // Avoiding 'disabled' attribute to prevent React reconciliation conflicts
+          element.style.pointerEvents = 'none';
+        },
+        onDeselected: (element) => {
+          if (!element) return;
+          element.style.pointerEvents = '';
+        },
+        onDestroyed: () => {
+          // Cleanup global - simplified to avoid React conflicts
+          // Rely on onDeselected for per-element cleanup.
+        }
+      });
+
+      driverObj.drive();
+    };
     // Staff Options
     const STAFF_OPTIONS = ['ブラック', 'パープル', 'さくら', 'ブラウン', 'ブルー', 'ネイビー'];
 
@@ -474,10 +525,154 @@
       const [existingReportDates, setExistingReportDates] = useState([]);
       const [isMobile, setIsMobile] = useState(false);
       const [appVersion, setAppVersion] = useState(APP_VERSION);
+      // DEMO Mode State
+      const [isDemoMode, setIsDemoMode] = useState(false);
+      const backupState = React.useRef(null);
       const [selectedDocChildId, setSelectedDocChildId] = useState(null);
       const [showPreview, setShowPreview] = useState(false);
       const [selectedChildMessages, setSelectedChildMessages] = useState([]); // Derived from dailyMessages for UI
       const [touchStartPos, setTouchStartPos] = useState(null);
+      const [showSummary, setShowSummary] = useState(false);
+      const [docEditId, setDocEditId] = useState(null);
+      const [docDraft, setDocDraft] = useState({});
+
+      // Connection Status: 'online' | 'offline' | 'local'
+      const [connectionStatus, setConnectionStatus] = useState('online');
+      const [lastError, setLastError] = useState(null);
+
+      // Firebase Storage Helper with /api/storage endpoint (prioritized) and LocalStorage Fallback
+      const callStorage = async (payload) => {
+        const performLocalAction = (payload) => {
+          setConnectionStatus('local');
+          const { action, key, data, childId, messageId, date } = payload;
+          const get = (k) => {
+            try {
+              return JSON.parse(localStorage.getItem('care_pro_local_' + k) || 'null');
+            } catch (e) { return null; }
+          };
+          const set = (k, v) => localStorage.setItem('care_pro_local_' + k, JSON.stringify(v));
+
+          switch (action) {
+            case "getChildren":
+              return get("children") || [];
+            case "setChildren":
+              set("children", data);
+              return { status: "OK" };
+            case "getMessages":
+              return get(`messages_${childId}`) || [];
+            case "saveMessages":
+              set(`messages_${childId}`, data);
+              return { status: "OK" };
+            case "getReport":
+              return get(`report_${date}`) || null;
+            case "saveReport":
+              set(`report_${date}`, data);
+              let index = get("reports_index") || [];
+              if (!Array.isArray(index)) index = [];
+              if (!index.includes(date)) {
+                index.push(date);
+                set("reports_index", index);
+              }
+              return { status: "OK" };
+            case "getReportIndex":
+              return get("reports_index") || [];
+            default:
+              return null;
+          }
+        };
+
+        try {
+          // Force local if known local environment
+          const isLocal = window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+          if (isLocal) {
+            return performLocalAction(payload);
+          }
+
+          // Try /api/storage endpoint first (with encryption on server-side)
+          try {
+            const response = await fetch('/api/storage', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+
+            if (response.ok) {
+              const result = await response.json();
+              setConnectionStatus('online');
+              setLastError(null);
+              return result;
+            } else {
+              throw new Error(`API Error: ${response.status}`);
+            }
+          } catch (apiError) {
+            console.warn('Storage API failed, falling back to direct database access:', apiError);
+
+            // Fallback to direct Firebase Realtime Database (without encryption)
+            const { action, data, childId, date } = payload;
+
+            switch (action) {
+              case "getChildren":
+                const childrenSnapshot = await db.ref('children').once('value');
+                setConnectionStatus('online');
+                setLastError(null);
+                return childrenSnapshot.val() || [];
+
+              case "setChildren":
+                await db.ref('children').set(data);
+                setConnectionStatus('online');
+                setLastError(null);
+                return { status: "OK" };
+
+              case "getMessages":
+                const messagesSnapshot = await db.ref(`messages/${childId}`).once('value');
+                setConnectionStatus('online');
+                setLastError(null);
+                return messagesSnapshot.val() || [];
+
+              case "saveMessages":
+                await db.ref(`messages/${childId}`).set(data);
+                setConnectionStatus('online');
+                setLastError(null);
+                return { status: "OK" };
+
+              case "getReport":
+                const reportSnapshot = await db.ref(`reports/${date}`).once('value');
+                setConnectionStatus('online');
+                setLastError(null);
+                return reportSnapshot.val() || null;
+
+              case "saveReport":
+                await db.ref(`reports/${date}`).set(data);
+                // Update index
+                const indexSnapshot = await db.ref('reports_index').once('value');
+                let index = indexSnapshot.val() || [];
+                if (!Array.isArray(index)) index = [];
+                if (!index.includes(date)) {
+                  index.push(date);
+                  await db.ref('reports_index').set(index);
+                }
+                setConnectionStatus('online');
+                setLastError(null);
+                return { status: "OK" };
+
+              case "getReportIndex":
+                const indexSnapshot2 = await db.ref('reports_index').once('value');
+                setConnectionStatus('online');
+                setLastError(null);
+                return indexSnapshot2.val() || [];
+
+              default:
+                return null;
+            }
+          }
+        } catch (e) {
+          console.warn("Firebase Connection Error, falling back to localStorage:", e);
+          setConnectionStatus('offline');
+          setLastError(e.message || 'Network Error');
+          return performLocalAction(payload);
+        }
+      };
 
       // Save Helper
       const saveDailyData = async (date, currentChildren, currentMessages, currentResults, currentSummary) => {
@@ -510,6 +705,7 @@
       }, []);
 
       const fetchDailyData = useCallback(async (dateString) => {
+        if (isDemoMode) return; // Block fetch in demo mode
         setIsSyncing(true);
         const data = await callStorage({ action: 'getReport', date: dateString });
 
@@ -551,10 +747,10 @@
         if (loading) {
           t = setInterval(() => {
             setSmoothProgress((p) => {
-              const next = p + 2.5;
-              return next >= 90 ? 90 : parseFloat(next.toFixed(1));
+              const next = p + 0.5;
+              return next >= 95 ? 95 : parseFloat(next.toFixed(1));
             });
-          }, 180);
+          }, 200);
         } else {
           setSmoothProgress(0);
         }
@@ -573,11 +769,12 @@
       }, []);
 
       useEffect(() => {
+        if (isDemoMode) return;
         const u = { uid: 'care-record-pro-netlify' };
         setUser(u);
         fetchReportIndex();
         fetchDailyData(selectedDate);
-      }, [selectedDate]);
+      }, [selectedDate, isDemoMode]);
 
       // Derived UI State: Update messages view when child or dailyMessages changes
       useEffect(() => {
@@ -591,12 +788,13 @@
 
       // Polling: Refresh daily data periodically to keep in sync
       useEffect(() => {
+        if (isDemoMode) return;
         const timer = setInterval(() => {
           fetchReportIndex();
           fetchDailyData(selectedDate);
         }, 5000);
         return () => clearInterval(timer);
-      }, [selectedDate]);
+      }, [selectedDate, isDemoMode]);
 
       // removed redundant polling for now to avoid overwriting edits
 
@@ -654,7 +852,7 @@
             ? crypto.randomUUID()
             : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 11);
 
-          const newChild = { id: newId, name: `新規児童`, timestamp: Date.now() };
+          const newChild = { id: newId, name: `新規児童`, timestamp: Date.now(), forceSheet: false };
           const newList = [...children, newChild];
 
           setChildren(newList);
@@ -761,26 +959,21 @@
         setSelectedGenerateIds(prev => prev.includes(id) ? prev.filter(cid => cid !== id) : [...prev, id]);
       };
 
+      const toggleForceSheet = async (id) => {
+        const child = children.find(c => c.id === id);
+        if (!child) return;
+        await updateChild(id, { forceSheet: !child.forceSheet });
+      };
+
       const getMockResponse = (childName) => ({
-        B_result: `ツリー式学習では文章問題に取り組んだ。苦戦する場面も見られたが、職員と一緒に文章や問題文を一文ずつ確認し、順を追って考えることができた。読み間違いはあったものの、答える前に「これで合っているか」と確認しながら進めるなど、丁寧に取り組む姿が見られた。制作ではシールのイラストに取り組み、参考画像を見比べながら色を慎重に選び、こだわって描こうとする様子が見られた。`,
-        B_plan: `文章問題では、文を最後まで読み切ってから考える経験を重ねていく。制作活動では、参考を見ながら自分で選び決める過程を大切にし、集中して取り組める時間を少しずつ伸ばしていく。`,
-        B_item: "①健康管理, ③社会性",
-        D: `こんばんは！〇〇です！\nツリー通信をお送りします！\n\nツリー式学習では文章問題に挑戦しました。少し苦戦する場面もありましたが、スタッフと一緒に文章や問題文を少しずつ読み解きながら、順番に考えて解いていくことができました。文章はしっかり読もうとする姿が見られ、ところどころ読み間違える場面はありつつも、答える前に「これで合ってる？」と確認しながら丁寧に進めていましたよ。\n\n制作ではシールのイラストに取り組みました。参考にする写真探しに少し時間がかかり、作業量は多くはありませんでしたが、取り組めた場面では何度も参考の絵の色を見比べながら、「この色かな？」と慎重に色を決めて描く様子が見られました。こだわって丁寧に進めようとしていましたよ。`
+        B_result: `学習では宿題に取り組む姿が見られ、途中で注意が逸れる場面もあったが、環境調整で再開できた。プログラムでは内容への戸惑いが見られたが、説明を受けて参加できた。自由時間は落ち着いて過ごす様子が多かった。`,
+        B_plan: `宿題は集中が続くよう環境調整を行い、プログラムは事前の見通し提示を増やして参加しやすくしていく。`,
+        B_item: "①健康・生活, ⑤人間関係・社会性",
+        D: `本日は学習の時間に集中して宿題に取り組む姿が見られました。途中で少し疲れが見える場面もありましたが、休憩を挟むことで最後までやり遂げることができています。自由遊びの時間には、友だちお城作りを楽しむなど、関わりを持って過ごす様子が見られました。プログラムでは、初めての内容に戸惑う様子もありましたが、スタッフの説明を聞いて参加することができました。`,
+        K_sheet: `【学習】漢字ドリルに集中して取り組み、間違えた箇所も粘り強く修正できていた。\n【自由遊び】お城作りでは、友だちと協力して高い塔を完成させることができていた。\n【プログラム】ルールを理解して参加し、チームの友だちを応援する姿が見られた。\n【おやつ】該当なし`
       });
 
-      const formatChatText = (text, width = 13) => {
-        if (!text) return '';
-        return text
-          .split('\n')
-          .map(line => {
-            const segments = [];
-            for (let i = 0; i < line.length; i += width) {
-              segments.push(line.slice(i, i + width));
-            }
-            return segments.join('\n');
-          })
-          .join('\n');
-      };
+      const formatChatText = (text) => (text || '');
 
       const handleRegenerate = () => {
         if (loading) return;
@@ -814,14 +1007,15 @@
               B_result: res.B_result,
               B_plan: res.B_plan,
               B_item: res.B_item,
-              D: res.D
+              D: res.D,
+              K_sheet: res.K_sheet
             };
           });
           return mock;
         };
         const selectedMock = buildMock();
 
-        const mockSummary = `本日は全体的に落ち着いて活動できました。（${selectedDate}のデモ）`;
+        const mockSummary = `学習では宿題に自発的に取り組む姿が見られ、途中で注意が逸れる場面もあったが環境調整で継続できた。プログラムは内容への戸惑いが見られたものの参加は概ね意欲的であった。自由時間は落ち着いて過ごす様子が多かった。（${selectedDate}のデモ）`;
 
         // Use saveDailyData for consistency
         await saveDailyData(selectedDate, kids, dailyMessages, selectedMock, mockSummary);
@@ -875,6 +1069,7 @@
 
         const printWindow = window.open('', '_blank');
         const result = results[childId] || {};
+        const force = parseForceSheet(result.K_sheet || '');
 
         const printContent = `
           <!DOCTYPE html>
@@ -907,6 +1102,19 @@
               <h3>ツリー通信</h3>
               <div class="content">${result.D || '---'}</div>
             </div>
+            ${result.K_sheet ? `
+            <div class="section">
+              <h3>強行シート</h3>
+              <div class="label">学習</div>
+              <div class="content">${force.learning || '該当なし'}</div>
+              <div class="label" style="margin-top: 15px;">自由遊び</div>
+              <div class="content">${force.play || '該当なし'}</div>
+              <div class="label" style="margin-top: 15px;">プログラム</div>
+              <div class="content">${force.program || '該当なし'}</div>
+              <div class="label" style="margin-top: 15px;">おやつ</div>
+              <div class="content">${force.snack || '該当なし'}</div>
+            </div>
+            ` : ''}
             <div style="margin-top: 50px; text-align: right; font-size: 12px;">
               印刷日: ${new Date().toLocaleDateString('ja-JP')}
             </div>
@@ -968,6 +1176,7 @@
         // 各児童の書類
         childrenWithResults.forEach((child, index) => {
           const result = results[child.id] || {};
+          const force = parseForceSheet(result.K_sheet || '');
           allContent += `
             <div class="${index > 0 || summaryC ? 'child-page' : ''}">
               <div class="child-header">${child.name} 様</div>
@@ -984,6 +1193,19 @@
                 <h3>ツリー通信</h3>
                 <div class="content">${result.D || '---'}</div>
               </div>
+              ${result.K_sheet ? `
+              <div class="section">
+                <h3>強行シート</h3>
+                <div class="label">学習</div>
+                <div class="content">${force.learning || '該当なし'}</div>
+                <div class="label" style="margin-top: 15px;">自由遊び</div>
+                <div class="content">${force.play || '該当なし'}</div>
+                <div class="label" style="margin-top: 15px;">プログラム</div>
+                <div class="content">${force.program || '該当なし'}</div>
+                <div class="label" style="margin-top: 15px;">おやつ</div>
+                <div class="content">${force.snack || '該当なし'}</div>
+              </div>
+              ` : ''}
             </div>
           `;
         });
@@ -1046,6 +1268,23 @@
         commSheet['!cols'] = [{ wch: 80 }];
         XLSX.utils.book_append_sheet(wb, commSheet, 'ツリー通信');
 
+        if (result.K_sheet) {
+          const force = parseForceSheet(result.K_sheet || '');
+          const forceData = [
+            ['強行シート'],
+            ['児童名', child.name],
+            ['日付', selectedDate],
+            [],
+            ['学習', force.learning || '該当なし'],
+            ['自由遊び', force.play || '該当なし'],
+            ['プログラム', force.program || '該当なし'],
+            ['おやつ', force.snack || '該当なし']
+          ];
+          const forceSheet = XLSX.utils.aoa_to_sheet(forceData);
+          forceSheet['!cols'] = [{ wch: 80 }];
+          XLSX.utils.book_append_sheet(wb, forceSheet, '強行シート');
+        }
+
         XLSX.writeFile(wb, `${child.name}_書類_${selectedDate}.xlsx`);
       };
 
@@ -1058,17 +1297,22 @@
 
         // CSV Header with BOM
         let csvContent = '\ufeff';
-        csvContent += '"児童名","日付","支援内容・結果","今後の予定","該当項目","ツリー通信"\n';
+        csvContent += '"児童名","日付","支援内容・結果","今後の予定","該当項目","ツリー通信","強行_学習","強行_自由遊び","強行_プログラム","強行_おやつ"\n';
 
         childrenWithResults.forEach(child => {
           const result = results[child.id] || {};
+          const force = parseForceSheet(result.K_sheet || '');
           const row = [
             child.name,
             selectedDate,
             result.B_result || '',
             result.B_plan || '',
             result.B_item || '',
-            result.D || result.A_communication || ''
+            result.D || result.A_communication || '',
+            force.learning || '',
+            force.play || '',
+            force.program || '',
+            force.snack || ''
           ].map(field => `"${(field || '').replace(/"/g, '""')}"`).join(',');
           csvContent += row + '\n';
         });
@@ -1131,6 +1375,30 @@
         commSheet['!cols'] = [{ wch: 15 }, { wch: 80 }];
         XLSX.utils.book_append_sheet(wb, commSheet, 'ツリー通信');
 
+        const forceRows = childrenWithResults.filter(c => (results[c.id] || {}).K_sheet);
+        if (forceRows.length > 0) {
+          const forceData = [
+            ['強行シート', '', '', '', ''],
+            ['日付', selectedDate],
+            [],
+            ['児童名', '学習', '自由遊び', 'プログラム', 'おやつ']
+          ];
+          forceRows.forEach(child => {
+            const result = results[child.id] || {};
+            const force = parseForceSheet(result.K_sheet || '');
+            forceData.push([
+              child.name,
+              force.learning || '該当なし',
+              force.play || '該当なし',
+              force.program || '該当なし',
+              force.snack || '該当なし'
+            ]);
+          });
+          const forceSheet = XLSX.utils.aoa_to_sheet(forceData);
+          forceSheet['!cols'] = [{ wch: 15 }, { wch: 30 }, { wch: 30 }, { wch: 30 }, { wch: 30 }];
+          XLSX.utils.book_append_sheet(wb, forceSheet, '強行シート');
+        }
+
         // 全体の様子シート
         if (summaryC) {
           const summaryData = [
@@ -1161,10 +1429,61 @@
         `;
       };
 
+      const parseForceSheet = (text) => {
+        const result = { learning: '', play: '', program: '', snack: '' };
+        if (!text) return result;
+        // Normalize text to handle newlines
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+        let currentSection = null;
+        for (const line of lines) {
+          // Check for headers (Standard or Bracketed)
+          if (line.startsWith('学習:') || line.startsWith('【学習】')) {
+            currentSection = 'learning';
+            result.learning += (result.learning ? '\n' : '') + line.replace(/^(学習:|【学習】)\s*/, '');
+          } else if (line.startsWith('自由遊び:') || line.startsWith('【自由遊び】')) {
+            currentSection = 'play';
+            result.play += (result.play ? '\n' : '') + line.replace(/^(自由遊び:|【自由遊び】)\s*/, '');
+          } else if (line.startsWith('プログラム:') || line.startsWith('【プログラム】')) {
+            currentSection = 'program';
+            result.program += (result.program ? '\n' : '') + line.replace(/^(プログラム:|【プログラム】)\s*/, '');
+          } else if (line.startsWith('おやつ:') || line.startsWith('【おやつ】')) {
+            currentSection = 'snack';
+            result.snack += (result.snack ? '\n' : '') + line.replace(/^(おやつ:|【おやつ】)\s*/, '');
+          } else if (currentSection) {
+            // Continuation of previous section
+            result[currentSection] += '\n' + line;
+          }
+        }
+        return result;
+      };
+
+      const buildForceSheet = (force) => {
+        const learning = force.learning || '該当なし';
+        const play = force.play || '該当なし';
+        const program = force.program || '該当なし';
+        const snack = force.snack || '該当なし';
+        return `学習: ${learning}\n自由遊び: ${play}\nプログラム: ${program}\nおやつ: ${snack}`;
+      };
+
+      useEffect(() => {
+        if (!selectedDocChildId) return;
+        const result = results[selectedDocChildId] || {};
+        const force = parseForceSheet(result.K_sheet || '');
+        setDocDraft({
+          D: result.D || '',
+          B_result: result.B_result || '',
+          B_plan: result.B_plan || '',
+          B_item: result.B_item || '',
+          force
+        });
+      }, [selectedDocChildId, results]);
+
 
 
       const generateDocuments = async () => {
         if (!user) return;
+        if (isDemoMode) return; // Disable generation in demo mode
         ensureQuotaReset();
         const toGenerate = children.filter(c => selectedGenerateIds.includes(c.id));
         const remaining = 20 - dailyUsed;
@@ -1202,20 +1521,46 @@
             const msgs = dailyMessages[child.id] || [];
 
             const content = msgs.filter(m => m.included !== false).map(m => m.text).join('\n');
-            const prompt = `
-          あなたは療育施設の事務担当です。以下の児童のメモを元に、2種類の書類を作成しJSONで返してください。
+            const needsForceSheet = !!child.forceSheet;
+            const forceSheetInstruction = needsForceSheet ? `
 
-          児童名: ${child.name}
+          【3. 強行シート】 (Key: K_sheet)
+          - 4つのシーンに分けて作成: 「学習」「自由遊び」「プログラム」「おやつ」
+          - 各シーンは50文字程度で簡潔にまとめる。
+          - 各シーンは1〜2文で、メモの該当部分を参照して事実ベースでまとめる。
+          - 評価や断定、感情表現は避ける。「参加はした」「様子が見られた」「時間を気にする様子」など観察記録調にする。
+          - 文末は「〜だ・である」「〜だった・であった」調（常体）で統一する。「〜ました」「〜でした」は不可。
+          - 該当情報がないシーンは「該当なし」と記載。
+          - 出力形式は以下のとおり（順番固定）:
+            学習: ...
+            自由遊び: ...
+            プログラム: ...
+            おやつ: ...
+          ` : '';
+            const jsonTemplate = needsForceSheet
+              ? '{"B_result": "...", "B_plan": "...", "B_item": "...", "D": "...", "K_sheet": "..."}'
+              : '{"B_result": "...", "B_plan": "...", "B_item": "...", "D": "..."}';
+
+            const docCount = needsForceSheet ? 3 : 2;
+            const prompt = `
+          あなたは療育施設の事務担当です。以下の児童メモを元に、${docCount}種類の書類を作成しJSONで返してください。
+
           メモ内容: ${content}
 
           【共通ルール】
-          - セキュリティ保護のため、児童の実名や「〇〇君」「〇〇さん」などの呼称は一切使用しないでください。
+          - セキュリティ保護のため、児童名・実名や「〇〇君」「〇〇さん」などの呼称は一切使用しないでください。
+          - 個人が特定できる記述はしないでください。
           - 保護者宛の文章として、主語を省き、自然な言い回しで記述してください（例：「〇〇君は楽しみました」→「楽しんでいました」）。
 
           【1. 専門的支援実施計画】 (Keys: B_result, B_plan, B_item)
-          - B_result (結果): 150〜180字。「〜だ・である」調の常体。事実に基づき「取り組む姿が見られた」「様子が見られた」「考えることができた」等、客観的かつ丁寧な観察描写にする。
+          - B_result (結果): 150〜180字。「〜だ・である」「〜だった・であった」調の常体（言い切り）。事実に基づき「取り組む姿が見られた」「様子が見られた」「考えることができた」等、客観的かつ丁寧な観察描写にする。
           - B_plan (予定): 60〜80字。「〜していく」「〜を大切にする」など、方針を示す文末にする。
-          - B_item (該当項目): ①〜⑤から該当するものを全て選択。
+          - B_item (該当項目): 以下の①〜⑤から該当するものを全て選択。
+            ①健康・生活
+            ②運動・感覚
+            ③認知・行動
+            ④言語・コミュニケーション
+            ⑤人間関係・社会性
 
           【2. ツリー通信】 (Key: D)
           - 冒頭固定: こんにちは、${child.staff || '〇〇'}です！ 今日のツリー通信です！
@@ -1226,11 +1571,11 @@
           - 否定的な表現は使わず、つまずきは「時間がかかった」「迷う様子」などで表現する。
           - 文末: 「ました。」「ましたよ。」などバリエーションをつける。
           - 読みやすさを重視し、話題の区切り（例：学習から制作へ変わる時など）には適度に空白行を入れること。
-          - LINEでの閲覧を想定し、1行あたり全角13文字程度で改行を入れること。
           - ※児童の実名は使用せず、主語を省いた自然な記述にすること。
+          ${forceSheetInstruction}
 
           JSON形式で出力:
-          {"B_result": "...", "B_plan": "...", "B_item": "...", "D": "..."}
+          ${jsonTemplate}
         `;
 
             const response = await fetchAI(prompt, true);
@@ -1240,26 +1585,31 @@
             completedOps++;
             const actual = Math.round((completedOps / totalOps) * 100);
             setProgress(actual);
-            setSmoothProgress(actual);
+            setSmoothProgress(p => Math.max(p, actual));
           }
 
           let newSummary = summaryC;
           if (childrenToProcess.length > 0) {
             const summaryText = childrenToProcess.map(c => {
               const res = processedResults[c.id] || {};
-              return `【${c.name}】\n結果: ${res.B_result || ''}\n通信: ${res.D || ''}`;
+              return `結果: ${res.B_result || ''}\n通信: ${res.D || ''}${res.K_sheet ? `\n強行: ${res.K_sheet}` : ''}`;
             }).join('\n\n');
             const summaryPrompt = `
               以下は各児童について既に生成された書類の抜粋です。
               これをもとに、本日の全体の様子を業務管理日誌の「反省」欄として150字程度で1段落にまとめてください。挨拶・署名は不要です。
-              
+              児童名や個人が特定できる情報は一切書かないでください。
+              話し言葉や口語表現は使わず、報告書の文体で記述してください。
+              具体的に誰が何をしたかは書かず、次のカテゴリごとの傾向をまとめてください: 学習（宿題含む）、プログラム、自由時間。
+              文体は以下の例に近い形でまとめてください:
+              例: 学習ではどの子も自分から宿題を取り出して、意欲的に取り組んでいた。途中、他の子の遊びに気が紛れてしまう子もいたが、環境を変えるなどをして最後まで取り組めるよう支援した。プログラムでは内容を知って参加できないやりたがらない子もいたが、全体的に参加は意欲的だった。自由時間ではブロックの取り合いをする子もいたが〜
+
               ${summaryText}
             `;
             newSummary = await fetchAI(summaryPrompt, false);
             completedOps++;
             const actual = Math.round((completedOps / totalOps) * 100);
             setProgress(actual);
-            setSmoothProgress(actual);
+            setSmoothProgress(p => Math.max(p, actual));
           }
 
           // 生成日付に保存
@@ -1299,89 +1649,189 @@
                 <div className="flex items-center gap-2 md:gap-3">
                   <img src="logo.png" alt="Tree Kids School Logo" className="h-12 md:h-16 object-contain" />
                   <div className="flex flex-col justify-center">
-                    <div className="flex items-center gap-2">
-                      <Cloud className={`w-3 h-3 md:w-4 md:h-4 ${isSyncing ? 'text-green-500 animate-pulse' : 'text-emerald-500'}`} />
-                      <span className="text-[8px] md:text-[9px] text-slate-400 font-bold">v{appVersion}</span>
+                    <div className="flex items-center gap-2" title={connectionStatus === 'online' ? 'クラウド同期中' : 'オフライン/ローカルモード（同期停止中）'}>
+                      <Cloud className={`w-3 h-3 md:w-4 md:h-4 ${isSyncing ? 'text-green-500 animate-pulse' : connectionStatus === 'online' ? 'text-emerald-500' : 'text-slate-400'}`} />
+                      <span className="text-[8px] md:text-[9px] text-slate-400 font-bold">
+                        v{appVersion} {connectionStatus !== 'online' && '(オフライン)'}
+                        {lastError && <span className="text-red-500 ml-1">({lastError})</span>}
+                      </span>
                     </div>
                     <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Sync: {user.uid.substring(0, 8)}...</p>
                   </div>
                 </div>
 
-                {/* Settings Button */}
-                {/* Settings Button */}
-                <button
-                  onClick={() => {
-                    const key = localStorage.getItem('care_pro_gemini_key') || '';
-                    setApiKeyInput(key);
-                    setShowSettingsModal(true);
-                  }}
-                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-full transition-colors"
-                  title="設定"
-                >
-                  <Settings className="w-5 h-5 md:w-6 md:h-6" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => startTour()}
+                    className="px-3 py-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold"
+                    title="使い方の説明を見る"
+                  >
+                    <BookOpen className="w-5 h-5" />
+                    <span>使い方ガイド</span>
+                  </button>
+
+                  {/* Settings Button */}
+                  {/* Settings Button */}
+                  <button
+                    id="tutorial-settings"
+                    onClick={() => {
+                      const key = localStorage.getItem('care_pro_gemini_key') || '';
+                      setApiKeyInput(key);
+                      setShowSettingsModal(true);
+                    }}
+                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-full transition-colors"
+                    title="設定"
+                  >
+                    <Settings className="w-5 h-5 md:w-6 md:h-6" />
+                  </button>
+                </div>
               </div>
 
               {/* Tabs and Actions - Mobile Optimized */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full">
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   {/* Tabs removed as per user request */}
+                  {/* Demo Mode Toggle */}
                   <button
                     onClick={async () => {
-                      if (!user) return;
-                      // Add strict confirmation
-                      if (!window.confirm("【注意】これはデモ機能です。\n\n過去5日分の「架空のサンプルデータ」を自動生成します。\n入力したデータが上書きされる可能性がありますが、よろしいですか？\n\n（通常の生成は緑色の「書類を生成」ボタンを使用してください）")) {
-                        return;
-                      }
+                      if (isDemoMode) {
+                        // Exit Demo Mode
+                        if (backupState.current) {
+                          setChildren(backupState.current.children);
+                          setResults(backupState.current.results);
+                          setSummaryC(backupState.current.summaryC);
+                          setDailyMessages(backupState.current.dailyMessages);
+                          setSelectedDate(backupState.current.selectedDate);
+                          setSelectedGenerateIds(backupState.current.selectedGenerateIds);
+                          // Restore other necessary state if any
+                          backupState.current = null;
+                        }
+                        setIsDemoMode(false);
+                        alert("DEMOモードを終了しました。元のデータに戻りました。");
+                      } else {
+                        // Enter Demo Mode
+                        if (!window.confirm("【DEMOモードを開始します】\n\n・現在のデータは一時的に隠され、架空のデータが表示されます。\n・DEMOモード中の変更は保存されません。\n・「DEMO終了」ボタンで元のデータに戻ります。\n\n開始してよろしいですか？")) {
+                          return;
+                        }
 
-                      let kids = children;
-                      if (kids.length === 0) {
-                        setChildren(sampleChildren);
-                        kids = sampleChildren;
-                        setSelectedGenerateIds(sampleChildren.map(c => c.id));
-                        setSelectedChildId(sampleChildren[0].id);
-                      }
-                      const formatDate = (date) => date.toISOString().split('T')[0];
-                      const base = new Date(selectedDate);
-                      const dateList = Array.from({ length: 5 }, (_, i) => {
-                        const d = new Date(base);
-                        d.setDate(d.getDate() - i);
-                        return formatDate(d);
-                      });
-                      const buildMock = () => {
-                        const mock = {};
-                        kids.forEach(k => {
+                        // Backup current state
+                        backupState.current = {
+                          children: [...children],
+                          results: { ...results },
+                          summaryC: summaryC,
+                          dailyMessages: { ...dailyMessages },
+                          selectedDate: selectedDate,
+                          selectedGenerateIds: [...selectedGenerateIds]
+                        };
+
+                        setIsDemoMode(true);
+
+                        // Load Sample Data (Realistic)
+                        const demoKids = [
+                          { id: 'demo-child-1', name: '田中 蓮', timestamp: Date.now(), forceSheet: true },
+                          { id: 'demo-child-2', name: '佐藤 陽葵', timestamp: Date.now(), forceSheet: false },
+                        ];
+
+                        setChildren(demoKids);
+                        setSelectedGenerateIds(demoKids.map(c => c.id));
+                        setSelectedChildId(null); // Don't open memo automatically
+
+
+                        // Generate Mock Results & Messages
+                        const mockResults = {};
+                        const mockMessages = {};
+                        const mockDate = new Date().toISOString().split('T')[0]; // Use today for demo
+                        setSelectedDate(mockDate);
+
+                        // New Logic
+                        demoKids.forEach(k => {
+                          if (k.name === '田中 蓮') {
+                            // Child 1 (Black Teather)
+                            mockResults[k.id] = {
+                              B_result: `学習では、音読や漢字、計算などに取り組み、自信をもって進める姿が見られた。量の多さや難しさに戸惑う場面もあったが、確認しながら最後までやり切ろうとする姿勢があった。思い通りに進まないと悔しさを見せる場面もあり、気持ちの切り替えを支える関わりが必要である。\nプログラムでは、クリスマス飾りの制作に集中して取り組み、折る・切る工程を意識しながら丁寧に仕上げていた。失敗後もやり直す姿が多く、達成感につながっていた。`,
+                              B_plan: `学習面では自信を育む声掛けを継続し、失敗時の切り替え支援を行う。プログラムでは個々のペースに合わせた工程の提示を行う。`,
+                              B_item: "①健康・生活, ⑤人間関係・社会性",
+                              D: `こんばんは！ブラックです！ツリー通信をお送りします！ 今日は宿題からスタート。 音読はとても滑らかに読めるようになり、自信たっぷりの様子。 ひらがなの書き取りも量が多いページでしたが、集中してスラスラ書き進めることができました。 足し算のプリントでも「俺できるよ！」と力強い声で取り組み、学習面での成長がよく見られました。 その後はカード作り。 思った通りにいかず悔しそうな場面もありましたが、別日に再チャレンジしようと思います。 プログラムではクリスマスの切り絵飾りに挑戦。 きらきら折り紙を折り、線に沿って丁寧にカット。途中で切りすぎてしまう場面もありましたが、やり直して“残すべき部分”を意識しながら最後まで作り上げました。 きれいな形に仕上がり、とても嬉しそうでしたよ！`,
+                              K_sheet: `【学習】音読や計算に自信を持って取り組み、「できた」という達成感を感じていた。\n【自由遊び】カード作りで失敗して悔しがる姿があったが、別日に再挑戦することにした。\n【プログラム】切り絵で失敗してもやり直し、最後まで丁寧に作り上げることができた。\n【おやつ】該当なし`
+                            };
+                            mockMessages[k.id] = [
+                              { id: `demo-msg-${k.id}-1`, text: '【学習】音読は滑らか。ひらがな書き取り、量多かったが集中。「俺できるよ！」と発言あり。', timestamp: Date.now(), included: true },
+                              { id: `demo-msg-${k.id}-2`, text: '【自由遊び】カード作り。失敗して悔し泣きする場面あり。別日に再チャレンジを提案し納得。', timestamp: Date.now() - 1000, included: true },
+                              { id: `demo-msg-${k.id}-3`, text: '【プログラム】クリスマス切り絵。途中切りすぎたが、自分でやり直して完成させた。', timestamp: Date.now() - 2000, included: true }
+                            ];
+                          } else {
+                            // Child 2 (Brown Teacher)
+                            mockResults[k.id] = {
+                              B_result: `学習では、国語や算数の課題に集中して取り組み、分からない箇所は質問しながら進めることができた。プログラムでは、スタッフの説明をよく聞き、手順通りに作業を進める姿が見られた。`,
+                              B_plan: `学習への意欲を維持できるよう、できたことを具体的に褒めていく。`,
+                              B_item: "①健康・生活, ⑤人間関係・社会性",
+                              D: `こんばんは！ブラウンです。本日のツリー通信です。\n\nツリー式学習は国語の漢字の問題と、算数の足し算引き算の文章題を行いました。わからない問題は時々スタッフに聞きながら、最後まで頑張っていました！ プログラムはクリスマス飾りを作りました。折り紙で三角に折ったり切り込みを入れたり、スタッフの説明をよく聞いて綺麗な形を作っていました！ 宿題の計算カードと音読のあと、ツリー式学習の国語と算数一単元ずつ行いました。漢字の問題や算数の二桁の足し算を集中して解いていました！ プログラムは、クリスマス飾りのガーランド作りをしました。雪景色の中にかわいいおうちがあるイラストや、クリスマスツリーのイラストなど、クリスマスの雰囲気にぴったりの素敵な飾りができました！`,
+                              K_sheet: k.forceSheet ? `【学習】漢字や計算に取り組み、分からないところは質問して解決できていた。\n【自由遊び】お友だちと関わりながら穏やかに過ごしていた。\n【プログラム】説明をよく聞いて理解し、素敵なクリスマス飾りを作ることができた。\n【おやつ】該当なし` : null
+                            };
+                            mockMessages[k.id] = [
+                              { id: `demo-msg-${k.id}-1`, text: '【学習】漢字と算数文章題。分からないところは質問して完遂。', timestamp: Date.now(), included: true },
+                              { id: `demo-msg-${k.id}-2`, text: '【プログラム】クリスマス飾り。折り紙の工程、説明をよく聞いていた。', timestamp: Date.now() - 1000, included: true },
+                              { id: `demo-msg-${k.id}-3`, text: '【宿題】計算カードと音読。集中していた。', timestamp: Date.now() - 2000, included: true }
+                            ];
+                          }
+                        });
+
+
+                        /* Old Logic
+                        demoKids.forEach(k => {
                           const res = getMockResponse(k.name);
-                          mock[k.id] = {
-                            B_result: res.B_result,
+                          // Add some variation
+                          const variation = k.id === 'demo-child-1' ? '' : '（バリエーション）';
+                          mockResults[k.id] = {
+                            B_result: res.B_result + variation,
                             B_plan: res.B_plan,
                             B_item: res.B_item,
-                            D: res.D
+                            D: res.D + variation,
+                            K_sheet: k.forceSheet ? res.K_sheet : null
                           };
+                          // Realistic Messages with bullets and tags
+                          if (k.name === '田中 蓮') {
+                            mockMessages[k.id] = [
+                              { id: `demo-msg-${k.id}-1`, text: '【宿題】漢字ドリル\n・周りの音が気になって集中できない様子だったため、イヤーマフを提案すると落ち着いて取り組めた。', timestamp: Date.now(), included: true },
+                              { id: `demo-msg-${k.id}-2`, text: '・自由遊びでは「お城を作りたい」とブロックを準備し、友だちを誘って協力して完成させていた。', timestamp: Date.now() - 1000, included: true }
+                            ];
+                          } else if (k.name === '佐藤 陽葵') {
+                            mockMessages[k.id] = [
+                              { id: `demo-msg-${k.id}-1`, text: 'プログラム（運動）では、ルールを理解してチームの友だちを応援する姿が見られた。', timestamp: Date.now(), included: true }
+                            ];
+                          } else {
+                            mockMessages[k.id] = [
+                              { id: `demo-msg-${k.id}-1`, text: '学習の時間、宿題に集中して取り組めていました。', timestamp: Date.now(), included: true }
+                            ];
+                          }
                         });
-                        return mock;
-                      };
-                      const selectedMock = buildMock();
-                      for (const dateStr of dateList) {
-                        const mockSummary = `本日は全体的に落ち着いて活動できました。（${dateStr}のデモ）`;
-                        const resultsForDate = dateStr === selectedDate ? selectedMock : buildMock();
-                        await callStorage({ action: 'saveReport', date: dateStr, data: { results: resultsForDate, summaryC: mockSummary } });
+
+                        */
+                        setResults(mockResults);
+                        setDailyMessages(mockMessages);
+
+                        const demoSummary = "学習では、音読や漢字、計算などに取り組み、自信をもって進める姿が見られた。量の多さや難しさに戸惑う場面もあったが、確認しながら最後までやり切ろうとする姿勢があった。思い通りに進まないと悔しさを見せる場面もあり、気持ちの切り替えを支える関わりが必要である。プログラムでは、クリスマス飾りの制作に集中して取り組み、折る・切る工程を意識しながら丁寧に仕上げていた。失敗後もやり直す姿が多く、達成感につながっていた。（DEMOデータのサンプル）";
+                        setSummaryC(demoSummary);
+
+                        setExpandedReportDates(prev => ({ ...prev, [mockDate]: true }));
+
+                        // Auto-start tour
+                        setTimeout(() => {
+                          startTour();
+                        }, 500);
                       }
-                      const selectedSummary = `本日は全体的に落ち着いて活動できました。（${selectedDate}のデモ）`;
-                      setResults(selectedMock);
-                      setSummaryC(selectedSummary);
-                      fetchReportIndex();
-                      setExpandedReportDates(prev => ({ ...prev, [selectedDate]: true }));
-                      setExpandedChildLevels(prev => {
-                        const next = { ...prev };
-                        kids.forEach(k => { next[k.id] = 1; });
-                        return next;
-                      });
-                      alert('DEMOデータを生成しました!');
                     }}
-                    className="w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                    className={`w-full sm:w-auto px-4 py-2.5 sm:py-2 rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 ${isDemoMode ? 'bg-slate-600 text-white hover:bg-slate-700' : 'bg-gradient-to-r from-purple-600 to-pink-600 text-white'}`}
                   >
-                    <Sparkles className="w-4 h-4" /> DEMO生成
+                    {isDemoMode ? (
+                      <>
+                        <LogOut className="w-4 h-4" /> DEMO終了
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" /> DEMOモード
+                      </>
+                    )}
                   </button>
                 </div>
                 <div className="text-[10px] font-black text-green-700 bg-green-50 border border-green-200 px-3 py-2 rounded-lg shadow-inner flex items-center gap-2 self-start md:self-end">
@@ -1391,15 +1841,21 @@
               </div>
             </header>
 
-            <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-auto lg:h-[calc(100vh-200px)]">
+            {isDemoMode && (
+              <div className="bg-amber-100 border-l-4 border-amber-500 text-amber-700 p-2 mb-4 text-xs font-bold flex items-center justify-center animate-pulse">
+                <span>🚧 現在DEMOモード中です。データは保存されません。</span>
+              </div>
+            )}
+            <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-auto lg:h-[calc(100vh-140px)] lg:min-h-[600px]">
               {/* Unified Sidebar */}
-              <div className="w-full lg:w-96 flex flex-col gap-4 overflow-hidden flex-shrink-0">
+              <div className="w-full lg:w-[450px] flex flex-col gap-4 flex-shrink-0">
                 {/* Date Selector & Batch Actions */}
                 <div className="bg-white rounded-xl shadow-lg border-2 border-indigo-200 p-4">
                   <div className="flex flex-col items-center justify-center gap-3">
                     <div className="flex flex-col items-center w-full">
                       <span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider mb-2">選択中の日付</span>
                       <div
+                        id="tutorial-calendar"
                         onClick={() => setShowCalendarModal(true)}
                         className="w-full bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-300 rounded-lg px-4 py-3 text-lg font-black text-indigo-900 cursor-pointer hover:shadow-md text-center flex items-center justify-center gap-2 group transition-all active:scale-95"
                       >
@@ -1437,31 +1893,68 @@
                   </div>
                 </div>
 
+                {/* Daily Summary */}
+                <div className="bg-white p-3 rounded-2xl shadow-sm border mb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${summaryC ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                      <span className="text-xs font-black uppercase tracking-widest text-slate-400">全体の様子</span>
+                    </div>
+                    <button
+                      onClick={() => setShowSummary((v) => !v)}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
+                    >
+                      {showSummary ? '閉じる' : '開く'}
+                    </button>
+                  </div>
+                  {showSummary && (
+                    <div className="mt-3 space-y-2">
+                      <div className="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 border rounded-lg p-3 max-h-32 overflow-y-auto custom-scrollbar">
+                        {summaryC || 'まだ生成されていません。'}
+                      </div>
+                      {summaryC && (
+                        <div className="flex items-center gap-2">
+                          <CopyButton text={summaryC} label="COPY" />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Child List */}
-                <div className="bg-white p-4 rounded-2xl shadow-sm border overflow-hidden flex-1 flex flex-col min-h-[400px] lg:min-h-0">
+                <div className="bg-white p-4 rounded-2xl shadow-sm border overflow-hidden flex-1 flex flex-col min-h-[400px] lg:min-h-[250px]">
                   <div className="flex items-center justify-between mb-4">
                     <span className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
                       <Users className="w-4 h-4" /> 児童リスト
                     </span>
-                    <button onClick={addChild} className="text-green-600 hover:scale-110 transition-transform">
+                    <button id="tutorial-add-btn" onClick={addChild} className="text-green-600 hover:scale-110 transition-transform">
                       <PlusCircle className="w-6 h-6" />
                     </button>
                   </div>
-                  <div className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
+                  <div id="tutorial-child-list" className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
                     {children.sort((a, b) => b.timestamp - a.timestamp).map(child => (
                       <div
                         key={child.id}
                         className={`group p-3 rounded-xl border-2 transition-all flex items-center justify-between ${(selectedChildId === child.id || selectedDocChildId === child.id) ? 'border-green-500 bg-green-50 shadow-sm' : 'border-transparent bg-slate-50 hover:bg-slate-100'}`}
                       >
                         <div className="flex items-center gap-3 overflow-hidden">
-                          <div className={`w-2 h-2 shrink-0 rounded-full ${(results[child.id] || child.memo) ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                          <button
+                            onClick={() => toggleChildGenerate(child.id)}
+                            className={`tutorial-check-btn w-4 h-4 shrink-0 rounded-[4px] border transition-colors flex items-center justify-center ${selectedGenerateIds.includes(child.id) ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'} ${results[child.id] ? 'ring-2 ring-emerald-400/60' : ''}`}
+                            title="書類生成の対象にする"
+                          >
+                            {selectedGenerateIds.includes(child.id) && <Check className="w-3 h-3 text-white" />}
+                          </button>
                           <span className="font-bold text-sm truncate">{child.name}</span>
-                          <div className="flex items-center gap-1">
+                          {results[child.id]?.K_sheet && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">強行</span>
+                          )}
+                          <div className="flex items-center gap-1 tutorial-action-buttons">
                             {/* Staff Selector */}
                             <select
                               value={child.staff || ''}
                               onChange={(e) => updateChild(child.id, { staff: e.target.value })}
-                              className="text-[10px] py-1 px-1 rounded border border-slate-200 bg-white text-slate-600 focus:border-indigo-500 outline-none"
+                              className="tutorial-staff-select text-[10px] py-1 px-1 rounded border border-slate-200 bg-white text-slate-600 focus:border-indigo-500 outline-none"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <option value="">担当なし</option>
@@ -1472,7 +1965,7 @@
 
                             <button
                               onClick={() => { setSelectedChildId(child.id); setSelectedDocChildId(null); }}
-                              className={`p-1.5 rounded-lg transition-colors ${selectedChildId === child.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                              className={`tutorial-memo-btn p-1.5 rounded-lg transition-colors ${selectedChildId === child.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
                               title="メモ入力"
                             >
                               <MessageSquare className="w-4 h-4" />
@@ -1480,7 +1973,7 @@
                             {results[child.id] && (
                               <button
                                 onClick={() => { setSelectedDocChildId(child.id); setSelectedChildId(null); }}
-                                className={`p-1.5 rounded-lg transition-colors ${selectedDocChildId === child.id ? 'bg-emerald-600 text-white' : 'text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50'}`}
+                                className={`tutorial-doc-icon p-1.5 rounded-lg transition-colors ${selectedDocChildId === child.id ? 'bg-emerald-600 text-white' : 'text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50'}`}
                                 title="書類を見る"
                               >
                                 <FileText className="w-4 h-4" />
@@ -1489,12 +1982,15 @@
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={selectedGenerateIds.includes(child.id)}
-                            onChange={() => toggleChildGenerate(child.id)}
-                            className="h-4 w-4 accent-indigo-500"
-                          />
+                          <label className="flex items-center gap-1 text-[10px] font-bold text-slate-500">
+                            <input
+                              type="checkbox"
+                              checked={!!child.forceSheet}
+                              onChange={() => toggleForceSheet(child.id)}
+                              className="h-3 w-3 accent-amber-500"
+                            />
+                            強行
+                          </label>
                           <button
                             onClick={() => removeChild(child.id)}
                             className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-all"
@@ -1520,19 +2016,33 @@
                     </div>
                   ) : (
                     <button
+                      id="tutorial-generate-btn"
                       onClick={generateDocuments}
-                      disabled={loading || children.length === 0 || selectedGenerateIds.length === 0}
-                      className="w-full py-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-2xl shadow-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 group"
+                      disabled={loading || children.length === 0 || selectedGenerateIds.length === 0 || isDemoMode}
+                      className={`w-full py-4 rounded-2xl shadow-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 group ${loading || children.length === 0 || selectedGenerateIds.length === 0 || isDemoMode ? 'bg-slate-300 cursor-not-allowed text-slate-500' : 'bg-green-600 hover:bg-green-700 text-white'}`}
                     >
-                      <Send className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                      書類を生成（{selectedGenerateIds.length}名）
+                      {loading ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          生成中...
+                        </>
+                      ) : isDemoMode ? (
+                        <>
+                          <span className="text-xs">DEMO中は押せません</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                          書類を生成（{selectedGenerateIds.length}名）
+                        </>
+                      )}
                     </button>
                   )}
                 </div>
               </div>
 
               {/* Unified Detail Area */}
-              <div className={`fixed lg:relative inset-0 lg:inset-auto lg:flex-1 h-full flex flex-col z-[100] lg:z-auto transition-all duration-300 ${(selectedChildId || selectedDocChildId) ? 'bg-slate-900/50 lg:bg-transparent pointer-events-auto' : 'bg-transparent pointer-events-none lg:pointer-events-auto'}`}>
+              <div id="tutorial-detail-area" className={`fixed lg:relative inset-0 lg:inset-auto lg:flex-1 h-full flex flex-col z-[100] lg:z-auto transition-all duration-300 ${(selectedChildId || selectedDocChildId) ? 'bg-slate-900/50 lg:bg-transparent pointer-events-auto' : 'bg-transparent pointer-events-none lg:pointer-events-auto'}`}>
                 <div className={`bg-white lg:rounded-2xl shadow-xl lg:shadow-sm border flex-1 flex flex-col overflow-hidden ml-auto w-full lg:w-auto transition-transform duration-300 ease-out ${(selectedChildId || selectedDocChildId) ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}>
                   {/* Document View Mode */}
                   {selectedDocChildId ? (() => {
@@ -1577,6 +2087,18 @@
                           </div>
                           <div className="flex items-center gap-2">
                             <button onClick={async () => { setChildGeneratingId(child.id); await generateDocuments([child.id]); setChildGeneratingId(null); }} className="p-2 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><RefreshCw className={`w-3 h-3 ${childGeneratingId === child.id ? 'animate-spin' : ''}`} /> 再生成</button>
+                            <button
+                              onClick={() => alert('個別ファイルへのエクスポートは準備中です。')}
+                              className="p-2 bg-slate-800 text-white rounded-lg text-xs font-bold"
+                            >
+                              個別ファイルにエクスポート
+                            </button>
+                            <button
+                              onClick={() => setDocEditId(docEditId === child.id ? null : child.id)}
+                              className={`p-2 rounded-lg text-xs font-bold ${docEditId === child.id ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700'}`}
+                            >
+                              {docEditId === child.id ? '編集終了' : '編集'}
+                            </button>
                             <button onClick={() => setSelectedDocChildId(null)} className="lg:hidden p-2 bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
                           </div>
                         </div>
@@ -1584,11 +2106,17 @@
                           <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
                             <div className="flex items-center justify-between mb-2">
                               <h3 className="text-xs font-black text-emerald-600 uppercase">ツリー通信</h3>
-                              <CopyButton text={formatChatText(result.D || '')} label="COPY" />
+                              <CopyButton text={result.D || ''} label="COPY" />
                             </div>
-                            <div className="bg-[#7494c0] p-4 rounded-xl rounded-tl-none text-white text-sm whitespace-pre-wrap leading-relaxed font-mono relative ml-2 shadow-sm w-fit max-w-[90%]">
+                            <div className="bg-[#7494c0] p-4 rounded-xl rounded-tl-none text-white text-sm whitespace-pre-wrap leading-relaxed font-mono relative ml-2 shadow-sm w-fit max-w-[90%] break-words">
                               <div className="absolute -top-[0px] -left-[8px] w-0 h-0 border-t-[0px] border-r-[15px] border-b-[15px] border-l-[0px] border-transparent border-r-[#7494c0]"></div>
-                              {formatChatText(result.D || '未生成')}
+                              {docEditId === child.id ? (
+                                <textarea
+                                  className="w-full min-h-[140px] bg-white/90 text-slate-900 rounded-lg p-2 text-sm"
+                                  value={docDraft.D || ''}
+                                  onChange={(e) => setDocDraft(prev => ({ ...prev, D: e.target.value }))}
+                                />
+                              ) : (result.D || '未生成')}
                             </div>
                           </div>
                           <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
@@ -1597,10 +2125,161 @@
                               <CopyButton text={`${result.B_result}\n${result.B_plan}`} label="COPY" />
                             </div>
                             <div className="space-y-3">
-                              <div><p className="text-[10px] font-bold text-slate-400">実績</p><p className="bg-white p-3 rounded border text-sm">{result.B_result}</p></div>
-                              <div><p className="text-[10px] font-bold text-slate-400">予定</p><p className="bg-white p-3 rounded border text-sm">{result.B_plan}</p></div>
+                              <div>
+                                <p className="text-[10px] font-bold text-slate-400">実績</p>
+                                {docEditId === child.id ? (
+                                  <textarea
+                                    className="w-full min-h-[100px] bg-white rounded border p-2 text-sm"
+                                    value={docDraft.B_result || ''}
+                                    onChange={(e) => setDocDraft(prev => ({ ...prev, B_result: e.target.value }))}
+                                  />
+                                ) : (
+                                  <p className="bg-white p-3 rounded border text-sm">{result.B_result}</p>
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-bold text-slate-400">予定</p>
+                                {docEditId === child.id ? (
+                                  <textarea
+                                    className="w-full min-h-[80px] bg-white rounded border p-2 text-sm"
+                                    value={docDraft.B_plan || ''}
+                                    onChange={(e) => setDocDraft(prev => ({ ...prev, B_plan: e.target.value }))}
+                                  />
+                                ) : (
+                                  <p className="bg-white p-3 rounded border text-sm">{result.B_plan}</p>
+                                )}
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-bold text-slate-400">該当項目</p>
+                                {docEditId === child.id ? (
+                                  <input
+                                    className="w-full bg-white rounded border p-2 text-sm"
+                                    value={docDraft.B_item || ''}
+                                    onChange={(e) => setDocDraft(prev => ({ ...prev, B_item: e.target.value }))}
+                                  />
+                                ) : (
+                                  <p className="bg-white p-3 rounded border text-sm">{result.B_item}</p>
+                                )}
+                              </div>
                             </div>
                           </div>
+                          {(result.K_sheet || child.forceSheet) && (() => {
+                            const force = docEditId === child.id ? (docDraft.force || {}) : parseForceSheet(result.K_sheet);
+                            return (
+                              <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                                <div className="flex items-center justify-between mb-3">
+                                  <h3 className="text-xs font-black text-amber-700 uppercase">強行シート</h3>
+                                  <CopyButton text={result.K_sheet} label="COPY" />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  <div className="bg-white p-3 rounded border">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className="text-[10px] font-bold text-slate-400">学習</p>
+                                      <CopyButton text={force.learning || '該当なし'} label="COPY" />
+                                    </div>
+                                    {docEditId === child.id ? (
+                                      <textarea
+                                        className="w-full min-h-[70px] text-sm"
+                                        value={force.learning || ''}
+                                        onChange={(e) => setDocDraft(prev => ({ ...prev, force: { ...(prev.force || {}), learning: e.target.value } }))}
+                                      />
+                                    ) : (
+                                      <p className="text-sm whitespace-pre-wrap">{force.learning || '該当なし'}</p>
+                                    )}
+                                  </div>
+                                  <div className="bg-white p-3 rounded border">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className="text-[10px] font-bold text-slate-400">自由遊び</p>
+                                      <CopyButton text={force.play || '該当なし'} label="COPY" />
+                                    </div>
+                                    {docEditId === child.id ? (
+                                      <textarea
+                                        className="w-full min-h-[70px] text-sm"
+                                        value={force.play || ''}
+                                        onChange={(e) => setDocDraft(prev => ({ ...prev, force: { ...(prev.force || {}), play: e.target.value } }))}
+                                      />
+                                    ) : (
+                                      <p className="text-sm whitespace-pre-wrap">{force.play || '該当なし'}</p>
+                                    )}
+                                  </div>
+                                  <div className="bg-white p-3 rounded border">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className="text-[10px] font-bold text-slate-400">プログラム</p>
+                                      <CopyButton text={force.program || '該当なし'} label="COPY" />
+                                    </div>
+                                    {docEditId === child.id ? (
+                                      <textarea
+                                        className="w-full min-h-[70px] text-sm"
+                                        value={force.program || ''}
+                                        onChange={(e) => setDocDraft(prev => ({ ...prev, force: { ...(prev.force || {}), program: e.target.value } }))}
+                                      />
+                                    ) : (
+                                      <p className="text-sm whitespace-pre-wrap">{force.program || '該当なし'}</p>
+                                    )}
+                                  </div>
+                                  <div className="bg-white p-3 rounded border">
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className="text-[10px] font-bold text-slate-400">おやつ</p>
+                                      <CopyButton text={force.snack || '該当なし'} label="COPY" />
+                                    </div>
+                                    {docEditId === child.id ? (
+                                      <textarea
+                                        className="w-full min-h-[70px] text-sm"
+                                        value={force.snack || ''}
+                                        onChange={(e) => setDocDraft(prev => ({ ...prev, force: { ...(prev.force || {}), snack: e.target.value } }))}
+                                      />
+                                    ) : (
+                                      <p className="text-sm whitespace-pre-wrap">{force.snack || '該当なし'}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                {docEditId === child.id && (
+                                  <div className="mt-3 flex justify-end">
+                                    <button
+                                      onClick={async () => {
+                                        const next = {
+                                          ...result,
+                                          D: docDraft.D || '',
+                                          B_result: docDraft.B_result || '',
+                                          B_plan: docDraft.B_plan || '',
+                                          B_item: docDraft.B_item || ''
+                                        };
+                                        const forceText = buildForceSheet(docDraft.force || {});
+                                        if (child.forceSheet || result.K_sheet || forceText) next.K_sheet = forceText;
+                                        const newResults = { ...results, [child.id]: next };
+                                        await saveResults(newResults, summaryC);
+                                        setDocEditId(null);
+                                      }}
+                                      className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
+                                    >
+                                      変更を保存
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                          {docEditId === child.id && !child.forceSheet && !result.K_sheet && (
+                            <div className="flex justify-end">
+                              <button
+                                onClick={async () => {
+                                  const next = {
+                                    ...result,
+                                    D: docDraft.D || '',
+                                    B_result: docDraft.B_result || '',
+                                    B_plan: docDraft.B_plan || '',
+                                    B_item: docDraft.B_item || ''
+                                  };
+                                  const newResults = { ...results, [child.id]: next };
+                                  await saveResults(newResults, summaryC);
+                                  setDocEditId(null);
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
+                              >
+                                変更を保存
+                              </button>
+                            </div>
+                          )}
                         </div>
                         <button onClick={() => setSelectedDocChildId(null)} className="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center z-[110]"><X className="w-6 h-6" /></button>
                       </div>

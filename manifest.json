@@ -1,0 +1,16 @@
+{
+    "name": "ツリーメモ",
+    "short_name": "ツリーメモ",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#ffffff",
+    "description": "Tree Kids ツリーメモ",
+    "icons": [
+        {
+            "src": "/apple-touch-icon.png",
+            "sizes": "180x180",
+            "type": "image/png"
+        }
+    ]
+}
