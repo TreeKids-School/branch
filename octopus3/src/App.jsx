@@ -580,8 +580,8 @@ ${jsonTemplate}`;
                 {/* Header */}
                 <header className="flex flex-col gap-2 mb-4 md:mb-6">
                     <div className="flex flex-col items-center justify-center py-2">
-                        <img src="/logo.png" alt="Tree Kids School Logo" className="h-16 md:h-20 object-contain mb-1" onError={e => { e.target.style.display = 'none'; }} />
-                        <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">Project Octopus</span>
+                        <img src="/logo.png" alt="branch Logo" className="h-16 md:h-20 object-contain mb-1" onError={e => { e.target.style.display = 'none'; }} />
+                        <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest leading-none">branch</span>
                     </div>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 md:gap-4">

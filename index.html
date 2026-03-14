@@ -7,10 +7,10 @@
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="ツリーメモ">
+  <meta name="apple-mobile-web-app-title" content="branch">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
-  <title>ツリーメモ</title>
+  <title>branch</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
@@ -141,7 +141,7 @@
   <div id="root"></div>
 
   <script>
-    window.__app_id = 'care-record-pro-netlify';
+    window.__app_id = 'branch-netlify';
   </script>
 
   <script type="text/babel" data-presets="react">
@@ -1088,7 +1088,7 @@
             </style>
           </head>
           <body>
-            <div class="header">Tree Kids School - ${child.name} 様</div>
+            <div class="header">branch - ${child.name} 様</div>
             <div class="section">
               <h3>専門的支援実施計画</h3>
               <div class="label">実施した支援の内容・結果</div>
@@ -1099,7 +1099,7 @@
               <div class="content">${result.B_item || '---'}</div>
             </div>
             <div class="section">
-              <h3>ツリー通信</h3>
+              <h3>branch通信</h3>
               <div class="content">${result.D || '---'}</div>
             </div>
             ${result.K_sheet ? `
@@ -1160,7 +1160,7 @@
             </style>
           </head>
           <body>
-            <div class="main-header">Tree Kids School 日報<br>${new Date(selectedDate).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</div>
+            <div class="main-header">branch 日報<br>${new Date(selectedDate).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</div>
         `;
 
         // 全体の様子
@@ -1190,7 +1190,7 @@
                 <div class="content">${result.B_item || '---'}</div>
               </div>
               <div class="section">
-                <h3>ツリー通信</h3>
+                <h3>branch通信</h3>
                 <div class="content">${result.D || '---'}</div>
               </div>
               ${result.K_sheet ? `

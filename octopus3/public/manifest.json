@@ -1,11 +1,11 @@
 {
-    "name": "ツリーメモ",
-    "short_name": "ツリーメモ",
+    "name": "branch",
+    "short_name": "branch",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#ffffff",
     "theme_color": "#ffffff",
-    "description": "Tree Kids ツリーメモ",
+    "description": "Tree Kids branch",
     "icons": [
         {
             "src": "/apple-touch-icon.png",
