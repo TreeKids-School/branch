@@ -315,6 +315,22 @@
         allowClose: false,
         steps: [
           {
+            popover: {
+              title: '10枠＋5枠の固定スロット構造',
+              description: '常に10枠確保: 児童が少ない場合でも、常に10名分の一般枠が表示されます。<br>キャンセル待ち5枠: 一般枠の下に5名分のキャンセル待ち枠を常備。<br>動的拡張: 全ての枠が埋まると、自動的に新しいキャンセル待ち枠が追加されます。',
+              side: "left",
+              align: 'start'
+            }
+          },
+          {
+            popover: {
+              title: 'アーカイブ（ゴミ箱）機能',
+              description: '1週間のデータ保持: 児童をリストから削除（リセット）しても、データは完全に消去されず「アーカイブ」に1週間保存されます。<br>簡単復元: ツールバーのゴミ箱アイコンから、アーカイブされた過去のデータを任意の空き枠へ簡単に復元できます。<br>名前の編集: ドロワーの見出し部分で児童名を直接編集できるようになりました。',
+              side: "left",
+              align: 'start'
+            }
+          },
+          {
             element: '#tutorial-calendar',
             popover: {
               title: '① 日付を選択',
@@ -490,6 +506,140 @@
       }
     }
 
+    // Helper Component for Row
+    const ChildRow = ({
+      child,
+      isWaitlist,
+      selectedChildId,
+      setSelectedChildId,
+      setSelectedDocChildId,
+      selectedGenerateIds,
+      toggleChildGenerate,
+      sheetData,
+      updateSheetField,
+      results,
+      getStudyText,
+      getProgramText,
+      updateChild
+    }) => {
+      const data = sheetData[child.id] || {};
+      const isPlaceholder = child.name === '未設定';
+
+      return (
+        <tr className={`divide-x divide-slate-100 hover:bg-slate-50/50 transition-colors ${isWaitlist ? 'bg-amber-50/30' : ''}`}>
+          {/* AI生成対象チェック */}
+          <td className="p-2 text-center">
+            {!isPlaceholder && (
+              <input
+                type="checkbox"
+                checked={selectedGenerateIds.includes(child.id)}
+                onChange={() => toggleChildGenerate(child.id)}
+                className="w-4 h-4 rounded accent-indigo-600 cursor-pointer shadow-sm"
+              />
+            )}
+          </td>
+
+          {/* 名前 (Click to open Memo) */}
+          <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 p-0 border-r border-slate-200">
+            <button
+              onClick={() => setSelectedChildId(child.id)}
+              className={`w-full h-full p-2 text-left font-bold transition-all flex flex-col gap-0.5 ${selectedChildId === child.id ? 'text-indigo-600 bg-indigo-50' : isPlaceholder ? 'text-slate-300 italic' : 'text-slate-700'}`}
+            >
+              <div className="flex items-center justify-between gap-1">
+                <span className="truncate">{child.name}</span>
+                {results[child.id] && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedDocChildId(child.id);
+                      setSelectedChildId(null);
+                    }}
+                    className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
+                    title="書類を表示"
+                  >
+                    <FileText className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+              {!isPlaceholder && results[child.id] && <span className="text-[8px] bg-emerald-100 text-emerald-600 px-1 rounded-sm w-fit uppercase font-black">AI書類有</span>}
+            </button>
+          </td>
+
+          {/* LINE */}
+          <td className="p-2 text-center">
+            {!isPlaceholder && (
+              <input
+                type="checkbox"
+                checked={!!data.lineCheck}
+                onChange={(e) => updateSheetField(child.id, 'lineCheck', e.target.checked)}
+                className="w-5 h-5 rounded accent-green-600 cursor-pointer shadow-sm"
+              />
+            )}
+          </td>
+
+          {/* 迎え場所 */}
+          <td className="p-1">
+            {!isPlaceholder && (
+              <input
+                list="pickup-locations"
+                type="text"
+                value={data.pickupLocation || ''}
+                onChange={(e) => updateSheetField(child.id, 'pickupLocation', e.target.value)}
+                className="w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs font-bold text-slate-700"
+                placeholder="..."
+              />
+            )}
+          </td>
+
+          {/* 終了時間 */}
+          <td className="p-1">
+            {!isPlaceholder && (
+              <input
+                type="time"
+                value={data.endTime || ''}
+                onChange={(e) => updateSheetField(child.id, 'endTime', e.target.value)}
+                className="w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs text-center font-bold text-slate-600"
+              />
+            )}
+          </td>
+
+          {/* 送迎時間 */}
+          <td className="p-1">
+            {!isPlaceholder && (
+              <input
+                type="time"
+                value={data.transportTime || ''}
+                onChange={(e) => updateSheetField(child.id, 'transportTime', e.target.value)}
+                className="w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs text-center font-bold text-slate-600"
+              />
+            )}
+          </td>
+
+          {/* 学習 (Auto-populated from Chat tags) */}
+          <td className="p-2 text-xs text-slate-600 whitespace-pre-wrap leading-relaxed min-h-[3rem]">
+            {!isPlaceholder && (getStudyText(child.id) || <span className="text-slate-200 italic">---</span>)}
+          </td>
+
+          {/* プログラム (Auto-populated from Chat tags) */}
+          <td className="p-2 text-xs text-slate-600 whitespace-pre-wrap leading-relaxed">
+            {!isPlaceholder && (getProgramText(child.id) || <span className="text-slate-200 italic">---</span>)}
+          </td>
+
+          {/* 備考 */}
+          <td className="p-1">
+            {!isPlaceholder && (
+              <textarea
+                value={data.notes || ''}
+                onChange={(e) => updateSheetField(child.id, 'notes', e.target.value)}
+                className="w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-[11px] min-h-[3rem] resize-none leading-normal font-medium"
+                placeholder="..."
+              />
+            )}
+          </td>
+        </tr>
+      );
+    };
+
 
     const App = () => {
       // Mock user for demo if auth fails
@@ -501,6 +651,7 @@
       const [selectedChildId, setSelectedChildId] = useState(null);
       const [selectedGenerateIds, setSelectedGenerateIds] = useState([]);
       const [loading, setLoading] = useState(false);
+      const [sheetData, setSheetData] = useState({}); // New: { [childId]: { lineCheck, pickupLocation, endTime, transportTime, notes } }
 
       const [copiedId, setCopiedId] = useState(null);
       const [isSyncing, setIsSyncing] = useState(false);
@@ -535,6 +686,8 @@
       const [showSummary, setShowSummary] = useState(false);
       const [docEditId, setDocEditId] = useState(null);
       const [docDraft, setDocDraft] = useState({});
+      const [archivedData, setArchivedData] = useState([]); // [{ id, name, deletedAt, data: { messages, results, sheetData } }]
+      const [showTrashModal, setShowTrashModal] = useState(false);
 
       // Connection Status: 'online' | 'offline' | 'local'
       const [connectionStatus, setConnectionStatus] = useState('online');
@@ -576,6 +729,11 @@
               return { status: "OK" };
             case "getReportIndex":
               return get("reports_index") || [];
+            case "getArchive":
+              return get("archive") || [];
+            case "saveArchive":
+              set("archive", data);
+              return { status: "OK" };
             default:
               return null;
           }
@@ -675,23 +833,19 @@
       };
 
       // Save Helper
-      const saveDailyData = async (date, currentChildren, currentMessages, currentResults, currentSummary) => {
+      const saveDailyData = async (date, currentChildren, currentMessages, currentResults, currentSummary, currentSheetData) => {
         setIsSyncing(true);
         const packet = {
           children: currentChildren,
           messages: currentMessages,
           results: currentResults,
           summaryC: currentSummary,
+          sheetData: currentSheetData || sheetData,
           updatedAt: new Date().toISOString()
         };
         await callStorage({ action: 'saveReport', date: date, data: packet });
 
-        // Also update global children roster if we are editing the "latest" or simply to keep master list updated
-        // For simplicity, we always update global roster to match the current view (if intended)
-        // OR we separate "Master Roster" from "Daily Roster".
-        // The user wants "Date's Roster". If I add a child today, they should be in Master. 
-        // Let's safe-guard: Update Master only if it's not a past date? 
-        // User behavior implies "Persistence". Let's update Master too.
+        // Also update global children roster
         await callStorage({ action: 'setChildren', data: currentChildren });
 
         setIsSyncing(false);
@@ -713,23 +867,51 @@
           setResults(data.results || {});
           setSummaryC(data.summaryC || '');
           setDailyMessages(data.messages || {});
+          setSheetData(data.sheetData || {});
 
-          // Children Snapshot
-          if (data.children && Array.isArray(data.children)) {
-            setChildren(data.children);
-          } else {
-            // Old report without children snapshot - treat as empty for this date
-            setChildren([]);
-          }
+          // Children Snapshot with Padding
+          let loadedChildren = data.children || [];
+          setChildren(padChildren(loadedChildren));
         } else {
-          // New Date (no saved snapshot) - Start completely fresh
+          // New Date - Start with fresh empty slots
           setResults({});
           setSummaryC('');
           setDailyMessages({});
-          setChildren([]); // Empty list - user builds from scratch for this date
+          setSheetData({});
+          setChildren(padChildren([]));
         }
         setIsSyncing(false);
       }, []);
+
+      const padChildren = (existing) => {
+        const regularCount = 10;
+        const waitlistCount = 5;
+
+        const regulars = existing.filter(c => (c.type || 'regular') === 'regular');
+        const waitlists = existing.filter(c => c.type === 'waitlist');
+
+        const paddedRegulars = [...regulars];
+        while (paddedRegulars.length < regularCount) {
+          paddedRegulars.push({
+            id: 'reg-' + Math.random().toString(36).slice(2, 11),
+            name: '未設定',
+            type: 'regular',
+            timestamp: Date.now()
+          });
+        }
+
+        const paddedWaitlists = [...waitlists];
+        while (paddedWaitlists.length < waitlistCount) {
+          paddedWaitlists.push({
+            id: 'wait-' + Math.random().toString(36).slice(2, 11),
+            name: '未設定',
+            type: 'waitlist',
+            timestamp: Date.now()
+          });
+        }
+
+        return [...paddedRegulars, ...paddedWaitlists];
+      };
 
       const fetchReportIndex = useCallback(async () => {
         const data = await callStorage({ action: 'getReportIndex' });
@@ -812,15 +994,20 @@
       }, [children]);
 
       useEffect(() => {
-        const raw = localStorage.getItem('care_pro_quota');
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            setDailyUsed(parsed.used || 0);
-            setDailyResetAt(parsed.resetAt || null);
-          } catch (e) { }
-        }
-      }, []);
+        const loadArchive = async () => {
+          const data = await callStorage({ action: 'getArchive' });
+          if (data) {
+            // Cleanup: remove items older than 7 days
+            const now = Date.now();
+            const filtered = data.filter(item => (now - item.deletedAt) < (7 * 24 * 60 * 60 * 1000));
+            setArchivedData(filtered);
+            if (filtered.length !== data.length) {
+              await callStorage({ action: 'saveArchive', data: filtered });
+            }
+          }
+        };
+        if (!isDemoMode && user) loadArchive();
+      }, [user, isDemoMode]);
 
       const persistQuota = (used, resetAt) => {
         setDailyUsed(used);
@@ -847,20 +1034,98 @@
       const addChild = async () => {
         if (!user) return;
         try {
-          // Robust ID generation
-          const newId = (typeof crypto !== 'undefined' && crypto.randomUUID)
-            ? crypto.randomUUID()
-            : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 11);
+          const newList = [...children];
+          // Try to find first "未設定" regular slot
+          let targetIndex = newList.findIndex(c => c.name === '未設定' && (c.type || 'regular') === 'regular');
 
-          const newChild = { id: newId, name: `新規児童`, timestamp: Date.now(), forceSheet: false };
-          const newList = [...children, newChild];
+          // If no regular, try first "未設定" waitlist slot
+          if (targetIndex === -1) {
+            targetIndex = newList.findIndex(c => c.name === '未設定' && c.type === 'waitlist');
+          }
+
+          if (targetIndex !== -1) {
+            // Fill existing slot
+            newList[targetIndex] = { ...newList[targetIndex], name: '新規児童', timestamp: Date.now() };
+          } else {
+            // All slots full, add a new waitlist slot
+            const newId = 'wait-' + Math.random().toString(36).slice(2, 11);
+            newList.push({ id: newId, name: '新規児童', type: 'waitlist', timestamp: Date.now() });
+          }
 
           setChildren(newList);
-          setSelectedGenerateIds(prev => Array.from(new Set([...prev, newId])));
-
-          await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC);
+          await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, sheetData);
         } catch (e) {
           alert("児童の追加に失敗しました");
+        }
+      };
+
+      const removeChild = async (id) => {
+        if (!user) return;
+        const child = children.find(c => c.id === id);
+        if (!child || child.name === '未設定') return;
+
+        if (!window.confirm(`「${child.name}」さんのデータをリセットして「未設定」に戻しますか？\n現在のデータは1週間アーカイブに保存されます。`)) return;
+
+        try {
+          // Archive data
+          const archiveItem = {
+            id: child.id,
+            name: child.name,
+            deletedAt: Date.now(),
+            data: {
+              messages: dailyMessages[child.id] || [],
+              results: results[child.id] || null,
+              sheetData: sheetData[child.id] || null
+            }
+          };
+          const newArchive = [archiveItem, ...archivedData];
+          setArchivedData(newArchive);
+          await callStorage({ action: 'saveArchive', data: newArchive });
+
+          // Reset Slot
+          const newList = children.map(c => c.id === id ? { ...c, name: '未設定', timestamp: Date.now() } : c);
+          setChildren(newList);
+
+          // Clear active data for this slot
+          const newMsgs = { ...dailyMessages }; delete newMsgs[id];
+          const newRes = { ...results }; delete newRes[id];
+          const newSData = { ...sheetData }; delete newSData[id];
+
+          setDailyMessages(newMsgs);
+          setResults(newRes);
+          setSheetData(newSData);
+
+          await saveDailyData(selectedDate, newList, newMsgs, newRes, summaryC, newSData);
+          if (selectedChildId === id) setSelectedChildId(null);
+        } catch (e) {
+          alert("リセットに失敗しました");
+        }
+      };
+
+      const restoreChild = async (archiveItem, targetSlotId) => {
+        try {
+          // Update Slot
+          const newList = children.map(c => c.id === targetSlotId ? { ...c, name: archiveItem.name, timestamp: Date.now() } : c);
+          setChildren(newList);
+
+          // Restore Data
+          const newMsgs = { ...dailyMessages, [targetSlotId]: archiveItem.data.messages };
+          const newRes = { ...results, [targetSlotId]: archiveItem.data.results };
+          const newSData = { ...sheetData, [targetSlotId]: archiveItem.data.sheetData };
+
+          setDailyMessages(newMsgs);
+          setResults(newRes);
+          setSheetData(newSData);
+
+          // Remove from Archive
+          const newArchive = archivedData.filter(item => item !== archiveItem);
+          setArchivedData(newArchive);
+          await callStorage({ action: 'saveArchive', data: newArchive });
+
+          await saveDailyData(selectedDate, newList, newMsgs, newRes, summaryC, newSData);
+          setShowTrashModal(false);
+        } catch (e) {
+          alert("復元に失敗しました");
         }
       };
 
@@ -881,7 +1146,7 @@
           setDailyMessages(newDailyMessages);
           if (selectedChildId === childId) setSelectedChildMessages(newMsgList);
 
-          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC);
+          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC, sheetData);
         } catch (e) {
           alert("送信に失敗しました");
         }
@@ -897,7 +1162,7 @@
           setDailyMessages(newDailyMessages);
           if (selectedChildId === childId) setSelectedChildMessages(newMsgList);
 
-          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC);
+          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC, sheetData);
         } catch (e) {
           alert("状態の更新に失敗しました");
         }
@@ -913,7 +1178,7 @@
           setDailyMessages(newDailyMessages);
           if (selectedChildId === childId) setSelectedChildMessages(newMsgList);
 
-          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC);
+          await saveDailyData(selectedDate, children, newDailyMessages, results, summaryC, sheetData);
         } catch (e) {
           alert("メッセージの更新に失敗しました");
         }
@@ -924,34 +1189,9 @@
         try {
           const newList = children.map(c => c.id === id ? { ...c, ...data } : c);
           setChildren(newList);
-          await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC);
+          await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, sheetData);
         } catch (e) {
           alert("更新に失敗しました");
-        }
-      };
-
-      const removeChild = async (id) => {
-        if (!user) return;
-        if (!window.confirm("本当にこの児童を削除してもよろしいですか？\nこの操作は取り消せません。")) return;
-        try {
-          const newList = children.filter(c => c.id !== id);
-          setChildren(newList);
-
-          const newResults = { ...results };
-          delete newResults[id];
-          setResults(newResults); // Immediate update
-
-          const newDailyMessages = { ...dailyMessages };
-          delete newDailyMessages[id];
-          setDailyMessages(newDailyMessages);
-
-          await saveDailyData(selectedDate, newList, newDailyMessages, newResults, summaryC);
-
-          setSelectedGenerateIds(prev => prev.filter(cid => cid !== id));
-          if (selectedChildId === id) setSelectedChildId(null);
-          if (selectedDocChildId === id) setSelectedDocChildId(null);
-        } catch (e) {
-          alert("削除に失敗しました");
         }
       };
 
@@ -1018,7 +1258,7 @@
         const mockSummary = `学習では宿題に自発的に取り組む姿が見られ、途中で注意が逸れる場面もあったが環境調整で継続できた。プログラムは内容への戸惑いが見られたものの参加は概ね意欲的であった。自由時間は落ち着いて過ごす様子が多かった。（${selectedDate}のデモ）`;
 
         // Use saveDailyData for consistency
-        await saveDailyData(selectedDate, kids, dailyMessages, selectedMock, mockSummary);
+        await saveDailyData(selectedDate, kids, dailyMessages, selectedMock, mockSummary, sheetData);
 
         setResults(selectedMock);
         setSummaryC(mockSummary);
@@ -1466,6 +1706,64 @@
         return `学習: ${learning}\n自由遊び: ${play}\nプログラム: ${program}\nおやつ: ${snack}`;
       };
 
+      // Table Data Helpers
+      const getStudyText = (childId) => {
+        const msgs = dailyMessages[childId] || [];
+        return msgs
+          .filter(m => m.included !== false)
+          .map(m => {
+            const matches = m.text.match(/【(宿題|プリント|ツリー式)】[^【]*/g);
+            return matches ? matches.map(s => s.trim()).join('\n') : null;
+          })
+          .filter(Boolean)
+          .join('\n');
+      };
+
+      const getProgramText = (childId) => {
+        const msgs = dailyMessages[childId] || [];
+        return msgs
+          .filter(m => m.included !== false)
+          .map(m => {
+            const matches = m.text.match(/【プログラム】[^【]*/g);
+            if (matches) return matches.map(s => s.replace('【プログラム】', '').trim()).join('\n');
+            return null;
+          })
+          .filter(Boolean)
+          .join('\n');
+      };
+
+      const getOtherText = (childId) => {
+        const msgs = dailyMessages[childId] || [];
+        return msgs
+          .filter(m => m.included !== false)
+          .map(m => {
+            // Remove all known tags from text to see if anything else remains
+            let text = m.text;
+            const hasTags = text.match(/【(宿題|プリント|ツリー式|プログラム)】/);
+            if (hasTags) {
+              // If it has tags, it's already handled by other functions
+              // Unless it has PRECEDING text? Usually people put tags at start.
+              // For simplicity, if it has any tag, we exclude it from "Other"
+              return null;
+            }
+            return text.trim();
+          })
+          .filter(Boolean)
+          .join('\n');
+      };
+
+      const updateSheetField = async (childId, field, value) => {
+        const newSheetData = {
+          ...sheetData,
+          [childId]: {
+            ...(sheetData[childId] || {}),
+            [field]: value
+          }
+        };
+        setSheetData(newSheetData);
+        await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, newSheetData);
+      };
+
       useEffect(() => {
         if (!selectedDocChildId) return;
         const result = results[selectedDocChildId] || {};
@@ -1765,7 +2063,7 @@
                               B_result: `学習では、国語や算数の課題に集中して取り組み、分からない箇所は質問しながら進めることができた。プログラムでは、スタッフの説明をよく聞き、手順通りに作業を進める姿が見られた。`,
                               B_plan: `学習への意欲を維持できるよう、できたことを具体的に褒めていく。`,
                               B_item: "①健康・生活, ⑤人間関係・社会性",
-                              D: `こんばんは！ブラウンです。本日のツリー通信です。\n\nツリー式学習は国語の漢字の問題と、算数の足し算引き算の文章題を行いました。わからない問題は時々スタッフに聞きながら、最後まで頑張っていました！ プログラムはクリスマス飾りを作りました。折り紙で三角に折ったり切り込みを入れたり、スタッフの説明をよく聞いて綺麗な形を作っていました！ 宿題の計算カードと音読のあと、ツリー式学習の国語と算数一単元ずつ行いました。漢字の問題や算数の二桁の足し算を集中して解いていました！ プログラムは、クリスマス飾りのガーランド作りをしました。雪景色の中にかわいいおうちがあるイラストや、クリスマスツリーのイラストなど、クリスマスの雰囲気にぴったりの素敵な飾りができました！`,
+                              D: `こんばんは！ブラウンです。本日のツリー通信です。\n\nツリー式学習は国語の漢字の問題と、算数の足し算引き算の文章題を行いました。わからない問題は時々スタッフに聞きながら、最後まで頑張っていました！ プログラムはクリスマス飾りを作りました。折り紙で三角に折ったり切り込みを入れたり、スタッフの説明をよく聞いて綺麗な形を作っていました！ 宿題の計算カードと音読のあと、ツリー式学習の国語と算数一単元ずつ行いました。漢字の問題や算数の二桁の足し算を集中して解いていました！ プログラムは、クリスマスの飾り付けをしました。雪景色の中にかわいいおうちがあるイラストや、クリスマスツリーのイラストなど、クリスマスの雰囲気にぴったりの素敵な飾りができました！`,
                               K_sheet: k.forceSheet ? `【学習】漢字や計算に取り組み、分からないところは質問して解決できていた。\n【自由遊び】お友だちと関わりながら穏やかに過ごしていた。\n【プログラム】説明をよく聞いて理解し、素敵なクリスマス飾りを作ることができた。\n【おやつ】該当なし` : null
                             };
                             mockMessages[k.id] = [
@@ -1842,526 +2140,249 @@
             </header>
 
             {isDemoMode && (
-              <div className="bg-amber-100 border-l-4 border-amber-500 text-amber-700 p-2 mb-4 text-xs font-bold flex items-center justify-center animate-pulse">
+              <div className="bg-amber-100 border-l-4 border-amber-500 text-amber-700 p-2 mb-4 text-xs font-bold flex items-center justify-center animate-pulse rounded-r-lg">
                 <span>🚧 現在DEMOモード中です。データは保存されません。</span>
               </div>
             )}
-            <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 h-auto lg:h-[calc(100vh-140px)] lg:min-h-[600px]">
-              {/* Unified Sidebar */}
-              <div className="w-full lg:w-[450px] flex flex-col gap-4 flex-shrink-0">
-                {/* Date Selector & Batch Actions */}
-                <div className="bg-white rounded-xl shadow-lg border-2 border-indigo-200 p-4">
-                  <div className="flex flex-col items-center justify-center gap-3">
-                    <div className="flex flex-col items-center w-full">
-                      <span className="text-[10px] font-black text-indigo-600 uppercase tracking-wider mb-2">選択中の日付</span>
-                      <div
-                        id="tutorial-calendar"
-                        onClick={() => setShowCalendarModal(true)}
-                        className="w-full bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-300 rounded-lg px-4 py-3 text-lg font-black text-indigo-900 cursor-pointer hover:shadow-md text-center flex items-center justify-center gap-2 group transition-all active:scale-95"
-                      >
-                        <Calendar className="w-5 h-5 text-indigo-500 group-hover:scale-110 transition-transform" />
-                        <span>
-                          {new Date(selectedDate).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })}
-                        </span>
-                      </div>
-                    </div>
 
-                    <div className="flex gap-2 w-full">
-                      <button
-                        onClick={() => {
-                          const generatedIds = children.filter(c => results[c.id]).map(c => c.id);
-                          if (generatedIds.length === 0) return alert('生成済みの書類がありません');
-                          alert('全児童分の印刷機能は準備中です。各児童の画面から印刷してください。');
-                        }}
-                        className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-colors"
-                      >
-                        <Printer className="w-3 h-3" /> 一括印刷
-                      </button>
-                      <button
-                        onClick={() => {
-                          const generatedIds = children.filter(c => results[c.id]).map(c => c.id);
-                          if (generatedIds.length === 0) return alert('生成済みの書類がありません');
-                          setShowExportModal(true);
-                        }}
-                        className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1 transition-colors"
-                      >
-                        <FileSpreadsheet className="w-3 h-3" /> 一括出力
-                      </button>
-                    </div>
-
-
-                  </div>
+            {/* Control Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-4 mb-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+              <div className="flex items-center gap-3">
+                {/* Date Selector */}
+                <div
+                  onClick={() => setShowCalendarModal(true)}
+                  className="bg-slate-50 border border-slate-200 hover:border-indigo-300 rounded-xl px-4 py-2 flex items-center gap-2 cursor-pointer transition-all active:scale-95 shadow-sm"
+                >
+                  <Calendar className="w-5 h-5 text-indigo-500" />
+                  <span className="font-bold text-slate-700">
+                    {new Date(selectedDate).toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })}
+                  </span>
                 </div>
 
-                {/* Daily Summary */}
-                <div className="bg-white p-3 rounded-2xl shadow-sm border mb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${summaryC ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                      <span className="text-xs font-black uppercase tracking-widest text-slate-400">全体の様子</span>
-                    </div>
-                    <button
-                      onClick={() => setShowSummary((v) => !v)}
-                      className="text-xs font-bold text-indigo-600 hover:text-indigo-700"
-                    >
-                      {showSummary ? '閉じる' : '開く'}
-                    </button>
-                  </div>
-                  {showSummary && (
-                    <div className="mt-3 space-y-2">
-                      <div className="text-sm text-slate-700 whitespace-pre-wrap bg-slate-50 border rounded-lg p-3 max-h-32 overflow-y-auto custom-scrollbar">
-                        {summaryC || 'まだ生成されていません。'}
-                      </div>
-                      {summaryC && (
-                        <div className="flex items-center gap-2">
-                          <CopyButton text={summaryC} label="COPY" />
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
+                {/* Add Child */}
+                <button
+                  onClick={addChild}
+                  className="bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-200 rounded-xl px-4 py-2 flex items-center gap-2 font-bold transition-all active:scale-95 shadow-sm"
+                >
+                  <PlusCircle className="w-5 h-5" />
+                  <span>児童追加</span>
+                </button>
+              </div>
 
-                {/* Child List */}
-                <div className="bg-white p-4 rounded-2xl shadow-sm border overflow-hidden flex-1 flex flex-col min-h-[400px] lg:min-h-[250px]">
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                      <Users className="w-4 h-4" /> 児童リスト
+              <div className="flex items-center gap-2">
+                {/* Trash Button */}
+                <button
+                  onClick={() => setShowTrashModal(true)}
+                  className="p-2.5 bg-slate-50 text-slate-500 rounded-xl hover:bg-slate-100 hover:text-slate-700 transition-all border border-slate-200 shadow-sm relative"
+                  title="アーカイブ（ゴミ箱）"
+                >
+                  <Trash2 className="w-5 h-5 text-slate-400" />
+                  {archivedData.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white shadow-sm">
+                      {archivedData.length}
                     </span>
-                    <button id="tutorial-add-btn" onClick={addChild} className="text-green-600 hover:scale-110 transition-transform">
-                      <PlusCircle className="w-6 h-6" />
-                    </button>
-                  </div>
-                  <div id="tutorial-child-list" className="space-y-2 overflow-y-auto flex-1 pr-1 custom-scrollbar">
-                    {children.sort((a, b) => b.timestamp - a.timestamp).map(child => (
-                      <div
-                        key={child.id}
-                        className={`group p-3 rounded-xl border-2 transition-all flex items-center justify-between ${(selectedChildId === child.id || selectedDocChildId === child.id) ? 'border-green-500 bg-green-50 shadow-sm' : 'border-transparent bg-slate-50 hover:bg-slate-100'}`}
-                      >
-                        <div className="flex items-center gap-3 overflow-hidden">
-                          <button
-                            onClick={() => toggleChildGenerate(child.id)}
-                            className={`tutorial-check-btn w-4 h-4 shrink-0 rounded-[4px] border transition-colors flex items-center justify-center ${selectedGenerateIds.includes(child.id) ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'} ${results[child.id] ? 'ring-2 ring-emerald-400/60' : ''}`}
-                            title="書類生成の対象にする"
-                          >
-                            {selectedGenerateIds.includes(child.id) && <Check className="w-3 h-3 text-white" />}
-                          </button>
-                          <span className="font-bold text-sm truncate">{child.name}</span>
-                          {results[child.id]?.K_sheet && (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold">強行</span>
-                          )}
-                          <div className="flex items-center gap-1 tutorial-action-buttons">
-                            {/* Staff Selector */}
-                            <select
-                              value={child.staff || ''}
-                              onChange={(e) => updateChild(child.id, { staff: e.target.value })}
-                              className="tutorial-staff-select text-[10px] py-1 px-1 rounded border border-slate-200 bg-white text-slate-600 focus:border-indigo-500 outline-none"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <option value="">担当なし</option>
-                              {STAFF_OPTIONS.map(s => (
-                                <option key={s} value={s}>{s}</option>
-                              ))}
-                            </select>
-
-                            <button
-                              onClick={() => { setSelectedChildId(child.id); setSelectedDocChildId(null); }}
-                              className={`tutorial-memo-btn p-1.5 rounded-lg transition-colors ${selectedChildId === child.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
-                              title="メモ入力"
-                            >
-                              <MessageSquare className="w-4 h-4" />
-                            </button>
-                            {results[child.id] && (
-                              <button
-                                onClick={() => { setSelectedDocChildId(child.id); setSelectedChildId(null); }}
-                                className={`tutorial-doc-icon p-1.5 rounded-lg transition-colors ${selectedDocChildId === child.id ? 'bg-emerald-600 text-white' : 'text-emerald-500 hover:text-emerald-700 hover:bg-emerald-50'}`}
-                                title="書類を見る"
-                              >
-                                <FileText className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <label className="flex items-center gap-1 text-[10px] font-bold text-slate-500">
-                            <input
-                              type="checkbox"
-                              checked={!!child.forceSheet}
-                              onChange={() => toggleForceSheet(child.id)}
-                              className="h-3 w-3 accent-amber-500"
-                            />
-                            強行
-                          </label>
-                          <button
-                            onClick={() => removeChild(child.id)}
-                            className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 text-slate-400 hover:text-red-500 transition-all"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {children.length === 0 && <p className="text-xs text-center text-slate-400 py-8 italic">児童を追加してください</p>}
-                  </div>
-                </div>
-
-                {/* Generate Button Area */}
-                <div className="pt-2">
-                  {loading ? (
-                    <div className="w-full py-4 bg-green-700 rounded-2xl shadow-xl overflow-hidden relative">
-                      <div className="absolute inset-0 bg-indigo-600 transition-all duration-300 ease-out" style={{ width: `${Math.max(progress, smoothProgress)}%` }} />
-                      <div className="relative z-10 flex items-center justify-center gap-3 text-white font-black">
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        <span>生成中... {Math.max(progress, smoothProgress).toFixed(0)}%</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      id="tutorial-generate-btn"
-                      onClick={generateDocuments}
-                      disabled={loading || children.length === 0 || selectedGenerateIds.length === 0 || isDemoMode}
-                      className={`w-full py-4 rounded-2xl shadow-xl font-black flex items-center justify-center gap-3 transition-all active:scale-95 group ${loading || children.length === 0 || selectedGenerateIds.length === 0 || isDemoMode ? 'bg-slate-300 cursor-not-allowed text-slate-500' : 'bg-green-600 hover:bg-green-700 text-white'}`}
-                    >
-                      {loading ? (
-                        <>
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                          生成中...
-                        </>
-                      ) : isDemoMode ? (
-                        <>
-                          <span className="text-xs">DEMO中は押せません</span>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-                          書類を生成（{selectedGenerateIds.length}名）
-                        </>
-                      )}
-                    </button>
                   )}
+                </button>
+
+                {/* Export */}
+                <button
+                  onClick={() => setShowExportModal(true)}
+                  className="p-2.5 bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all shadow-sm"
+                  title="データ出力"
+                >
+                  <FileSpreadsheet className="w-5 h-5" />
+                </button>
+
+                {/* AI Generate Button */}
+                {loading ? (
+                  <div className="min-w-[160px] h-[46px] bg-slate-900 rounded-xl overflow-hidden relative shadow-lg">
+                    <div className="absolute inset-0 bg-indigo-600 transition-all duration-300 ease-out" style={{ width: `${Math.max(progress, smoothProgress)}%` }} />
+                    <div className="relative z-10 h-full flex items-center justify-center gap-2 text-white text-xs font-black">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>生成中... {Math.max(progress, smoothProgress).toFixed(0)}%</span>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={generateDocuments}
+                    disabled={loading || children.length === 0 || selectedGenerateIds.length === 0 || isDemoMode}
+                    className={`min-w-[160px] h-[46px] rounded-xl shadow-lg font-black flex items-center justify-center gap-2 transition-all active:scale-95 group ${loading || children.length === 0 || selectedGenerateIds.length === 0 || isDemoMode ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}
+                  >
+                    <Sparkles className="w-5 h-5 group-hover:animate-pulse" />
+                    <span>書類を生成 ({selectedGenerateIds.length})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+              {/* Main Sheet View */}
+              <div className="flex-1 min-h-0 overflow-hidden flex flex-col bg-white rounded-2xl shadow-xl border-2 border-slate-200">
+                <div className="flex-1 overflow-auto custom-scrollbar relative">
+                  <table className="w-full border-collapse border-spacing-0 text-sm">
+                    <thead className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                      <tr className="divide-x divide-slate-200">
+                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-10 text-center">
+                          <input
+                            type="checkbox"
+                            checked={children.length > 0 && selectedGenerateIds.length === children.length}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedGenerateIds(children.map(c => c.id));
+                              else setSelectedGenerateIds([]);
+                            }}
+                            className="w-4 h-4 rounded accent-indigo-600"
+                          />
+                        </th>
+                        <th className="sticky left-0 z-30 bg-slate-50 p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-24 min-w-[100px]">氏名</th>
+                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-12 text-center">LINE</th>
+                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-32">迎え場所</th>
+                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-20">終了時間</th>
+                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-20">送迎時間</th>
+                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter min-w-[200px]">学習</th>
+                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter min-w-[200px]">プログラム</th>
+                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter min-w-[200px]">備考</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 bg-white">
+                      {/* 通常枠 */}
+                      {children.filter(c => (c.type || 'regular') === 'regular').map(child => (
+                        <ChildRow 
+                          key={child.id} 
+                          child={child} 
+                          selectedChildId={selectedChildId}
+                          setSelectedChildId={setSelectedChildId}
+                          setSelectedDocChildId={setSelectedDocChildId}
+                          selectedGenerateIds={selectedGenerateIds}
+                          toggleChildGenerate={toggleChildGenerate}
+                          sheetData={sheetData}
+                          updateSheetField={updateSheetField}
+                          results={results}
+                          getStudyText={getStudyText}
+                          getProgramText={getProgramText}
+                          updateChild={updateChild}
+                        />
+                      ))}
+
+                      {/* キャンセル待ち見出し */}
+                      <tr className="bg-slate-50 border-y border-slate-200">
+                        <td colSpan="9" className="p-2 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center bg-slate-50/50">
+                          キャンセル待ち
+                        </td>
+                      </tr>
+
+                      {/* キャンセル待ち枠 */}
+                      {children.filter(c => c.type === 'waitlist').map(child => (
+                        <ChildRow 
+                          key={child.id} 
+                          child={child} 
+                          isWaitlist={true}
+                          selectedChildId={selectedChildId}
+                          setSelectedChildId={setSelectedChildId}
+                          setSelectedDocChildId={setSelectedDocChildId}
+                          selectedGenerateIds={selectedGenerateIds}
+                          toggleChildGenerate={toggleChildGenerate}
+                          sheetData={sheetData}
+                          updateSheetField={updateSheetField}
+                          results={results}
+                          getStudyText={getStudyText}
+                          getProgramText={getProgramText}
+                          updateChild={updateChild}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Datalist for Pickup Locations */}
+                  <datalist id="pickup-locations">
+                    <option value="上志段味小学校" />
+                    <option value="吉根小学校" />
+                    <option value="下志段味小学校" />
+                    <option value="志段味西小学校" />
+                    <option value="アスク志段味" />
+                    <option value="中志段味保育園" />
+                  </datalist>
                 </div>
               </div>
 
-              {/* Unified Detail Area */}
-              <div id="tutorial-detail-area" className={`fixed lg:relative inset-0 lg:inset-auto lg:flex-1 h-full flex flex-col z-[100] lg:z-auto transition-all duration-300 ${(selectedChildId || selectedDocChildId) ? 'bg-slate-900/50 lg:bg-transparent pointer-events-auto' : 'bg-transparent pointer-events-none lg:pointer-events-auto'}`}>
-                <div className={`bg-white lg:rounded-2xl shadow-xl lg:shadow-sm border flex-1 flex flex-col overflow-hidden ml-auto w-full lg:w-auto transition-transform duration-300 ease-out ${(selectedChildId || selectedDocChildId) ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}>
-                  {/* Document View Mode */}
-                  {selectedDocChildId ? (() => {
-                    const child = children.find(c => c.id === selectedDocChildId);
-                    const result = results[selectedDocChildId] || {};
-                    if (!child) return null;
-                    return (
-                      <div
-                        className="flex flex-col h-full"
-                        onTouchStart={(e) => setTouchStartPos(e.touches[0].clientX)}
-                        onTouchEnd={(e) => {
-                          if (touchStartPos === null) return;
-                          const touchEndPos = e.changedTouches[0].clientX;
-                          const distance = touchEndPos - touchStartPos;
-                          if (distance > 100) { // 100px swipe to the right
-                            setSelectedDocChildId(null);
-                          }
-                          setTouchStartPos(null);
-                        }}
-                        onWheel={(e) => {
-                          if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && e.deltaX < -50) {
-                            setSelectedDocChildId(null);
-                          }
-                        }}
-                      >
-                        <div className="p-4 border-b bg-gradient-to-r from-indigo-50 to-purple-50 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <button onClick={() => {
-                              const list = children.filter(c => results[c.id]).sort((a, b) => b.timestamp - a.timestamp);
-                              const idx = list.findIndex(c => c.id === selectedDocChildId);
-                              if (idx < list.length - 1) setSelectedDocChildId(list[idx + 1].id);
-                            }} disabled={children.filter(c => results[c.id]).findIndex(c => c.id === selectedDocChildId) >= children.filter(c => results[c.id]).length - 1} className="p-1 disabled:opacity-30 lg:hidden text-indigo-400"><ChevronLeft className="w-6 h-6" /></button>
-                            <div>
-                              <h2 className="text-lg font-black text-indigo-900">{child.name}</h2>
-                              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">書類閲覧モード</p>
-                            </div>
-                            <button onClick={() => {
-                              const list = children.filter(c => results[c.id]).sort((a, b) => b.timestamp - a.timestamp);
-                              const idx = list.findIndex(c => c.id === selectedDocChildId);
-                              if (idx > 0) setSelectedDocChildId(list[idx - 1].id);
-                            }} disabled={children.filter(c => results[c.id]).findIndex(c => c.id === selectedDocChildId) <= 0} className="p-1 disabled:opacity-30 lg:hidden text-indigo-400"><ChevronRight className="w-6 h-6" /></button>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button onClick={async () => { setChildGeneratingId(child.id); await generateDocuments([child.id]); setChildGeneratingId(null); }} className="p-2 bg-green-600 text-white rounded-lg text-xs font-bold flex items-center gap-1"><RefreshCw className={`w-3 h-3 ${childGeneratingId === child.id ? 'animate-spin' : ''}`} /> 再生成</button>
-                            <button
-                              onClick={() => alert('個別ファイルへのエクスポートは準備中です。')}
-                              className="p-2 bg-slate-800 text-white rounded-lg text-xs font-bold"
-                            >
-                              個別ファイルにエクスポート
-                            </button>
-                            <button
-                              onClick={() => setDocEditId(docEditId === child.id ? null : child.id)}
-                              className={`p-2 rounded-lg text-xs font-bold ${docEditId === child.id ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700'}`}
-                            >
-                              {docEditId === child.id ? '編集終了' : '編集'}
-                            </button>
-                            <button onClick={() => setSelectedDocChildId(null)} className="lg:hidden p-2 bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
-                          </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                          <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
-                            <div className="flex items-center justify-between mb-2">
-                              <h3 className="text-xs font-black text-emerald-600 uppercase">ツリー通信</h3>
-                              <CopyButton text={result.D || ''} label="COPY" />
-                            </div>
-                            <div className="bg-[#7494c0] p-4 rounded-xl rounded-tl-none text-white text-sm whitespace-pre-wrap leading-relaxed font-mono relative ml-2 shadow-sm w-fit max-w-[90%] break-words">
-                              <div className="absolute -top-[0px] -left-[8px] w-0 h-0 border-t-[0px] border-r-[15px] border-b-[15px] border-l-[0px] border-transparent border-r-[#7494c0]"></div>
-                              {docEditId === child.id ? (
-                                <textarea
-                                  className="w-full min-h-[140px] bg-white/90 text-slate-900 rounded-lg p-2 text-sm"
-                                  value={docDraft.D || ''}
-                                  onChange={(e) => setDocDraft(prev => ({ ...prev, D: e.target.value }))}
-                                />
-                              ) : (result.D || '未生成')}
-                            </div>
-                          </div>
-                          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
-                            <div className="flex items-center justify-between mb-2">
-                              <h3 className="text-xs font-black text-indigo-600 uppercase">専門的支援実施計画</h3>
-                              <CopyButton text={`${result.B_result}\n${result.B_plan}`} label="COPY" />
-                            </div>
-                            <div className="space-y-3">
-                              <div>
-                                <p className="text-[10px] font-bold text-slate-400">実績</p>
-                                {docEditId === child.id ? (
-                                  <textarea
-                                    className="w-full min-h-[100px] bg-white rounded border p-2 text-sm"
-                                    value={docDraft.B_result || ''}
-                                    onChange={(e) => setDocDraft(prev => ({ ...prev, B_result: e.target.value }))}
-                                  />
-                                ) : (
-                                  <p className="bg-white p-3 rounded border text-sm">{result.B_result}</p>
-                                )}
-                              </div>
-                              <div>
-                                <p className="text-[10px] font-bold text-slate-400">予定</p>
-                                {docEditId === child.id ? (
-                                  <textarea
-                                    className="w-full min-h-[80px] bg-white rounded border p-2 text-sm"
-                                    value={docDraft.B_plan || ''}
-                                    onChange={(e) => setDocDraft(prev => ({ ...prev, B_plan: e.target.value }))}
-                                  />
-                                ) : (
-                                  <p className="bg-white p-3 rounded border text-sm">{result.B_plan}</p>
-                                )}
-                              </div>
-                              <div>
-                                <p className="text-[10px] font-bold text-slate-400">該当項目</p>
-                                {docEditId === child.id ? (
-                                  <input
-                                    className="w-full bg-white rounded border p-2 text-sm"
-                                    value={docDraft.B_item || ''}
-                                    onChange={(e) => setDocDraft(prev => ({ ...prev, B_item: e.target.value }))}
-                                  />
-                                ) : (
-                                  <p className="bg-white p-3 rounded border text-sm">{result.B_item}</p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          {(result.K_sheet || child.forceSheet) && (() => {
-                            const force = docEditId === child.id ? (docDraft.force || {}) : parseForceSheet(result.K_sheet);
-                            return (
-                              <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
-                                <div className="flex items-center justify-between mb-3">
-                                  <h3 className="text-xs font-black text-amber-700 uppercase">強行シート</h3>
-                                  <CopyButton text={result.K_sheet} label="COPY" />
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  <div className="bg-white p-3 rounded border">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <p className="text-[10px] font-bold text-slate-400">学習</p>
-                                      <CopyButton text={force.learning || '該当なし'} label="COPY" />
-                                    </div>
-                                    {docEditId === child.id ? (
-                                      <textarea
-                                        className="w-full min-h-[70px] text-sm"
-                                        value={force.learning || ''}
-                                        onChange={(e) => setDocDraft(prev => ({ ...prev, force: { ...(prev.force || {}), learning: e.target.value } }))}
-                                      />
-                                    ) : (
-                                      <p className="text-sm whitespace-pre-wrap">{force.learning || '該当なし'}</p>
-                                    )}
-                                  </div>
-                                  <div className="bg-white p-3 rounded border">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <p className="text-[10px] font-bold text-slate-400">自由遊び</p>
-                                      <CopyButton text={force.play || '該当なし'} label="COPY" />
-                                    </div>
-                                    {docEditId === child.id ? (
-                                      <textarea
-                                        className="w-full min-h-[70px] text-sm"
-                                        value={force.play || ''}
-                                        onChange={(e) => setDocDraft(prev => ({ ...prev, force: { ...(prev.force || {}), play: e.target.value } }))}
-                                      />
-                                    ) : (
-                                      <p className="text-sm whitespace-pre-wrap">{force.play || '該当なし'}</p>
-                                    )}
-                                  </div>
-                                  <div className="bg-white p-3 rounded border">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <p className="text-[10px] font-bold text-slate-400">プログラム</p>
-                                      <CopyButton text={force.program || '該当なし'} label="COPY" />
-                                    </div>
-                                    {docEditId === child.id ? (
-                                      <textarea
-                                        className="w-full min-h-[70px] text-sm"
-                                        value={force.program || ''}
-                                        onChange={(e) => setDocDraft(prev => ({ ...prev, force: { ...(prev.force || {}), program: e.target.value } }))}
-                                      />
-                                    ) : (
-                                      <p className="text-sm whitespace-pre-wrap">{force.program || '該当なし'}</p>
-                                    )}
-                                  </div>
-                                  <div className="bg-white p-3 rounded border">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <p className="text-[10px] font-bold text-slate-400">おやつ</p>
-                                      <CopyButton text={force.snack || '該当なし'} label="COPY" />
-                                    </div>
-                                    {docEditId === child.id ? (
-                                      <textarea
-                                        className="w-full min-h-[70px] text-sm"
-                                        value={force.snack || ''}
-                                        onChange={(e) => setDocDraft(prev => ({ ...prev, force: { ...(prev.force || {}), snack: e.target.value } }))}
-                                      />
-                                    ) : (
-                                      <p className="text-sm whitespace-pre-wrap">{force.snack || '該当なし'}</p>
-                                    )}
-                                  </div>
-                                </div>
-                                {docEditId === child.id && (
-                                  <div className="mt-3 flex justify-end">
-                                    <button
-                                      onClick={async () => {
-                                        const next = {
-                                          ...result,
-                                          D: docDraft.D || '',
-                                          B_result: docDraft.B_result || '',
-                                          B_plan: docDraft.B_plan || '',
-                                          B_item: docDraft.B_item || ''
-                                        };
-                                        const forceText = buildForceSheet(docDraft.force || {});
-                                        if (child.forceSheet || result.K_sheet || forceText) next.K_sheet = forceText;
-                                        const newResults = { ...results, [child.id]: next };
-                                        await saveResults(newResults, summaryC);
-                                        setDocEditId(null);
-                                      }}
-                                      className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
-                                    >
-                                      変更を保存
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
-                          {docEditId === child.id && !child.forceSheet && !result.K_sheet && (
-                            <div className="flex justify-end">
-                              <button
-                                onClick={async () => {
-                                  const next = {
-                                    ...result,
-                                    D: docDraft.D || '',
-                                    B_result: docDraft.B_result || '',
-                                    B_plan: docDraft.B_plan || '',
-                                    B_item: docDraft.B_item || ''
-                                  };
-                                  const newResults = { ...results, [child.id]: next };
-                                  await saveResults(newResults, summaryC);
-                                  setDocEditId(null);
-                                }}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
-                              >
-                                変更を保存
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <button onClick={() => setSelectedDocChildId(null)} className="lg:hidden fixed bottom-6 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-2xl flex items-center justify-center z-[110]"><X className="w-6 h-6" /></button>
-                      </div>
-                    );
-                  })() : selectedChildId ? (() => {
+              {/* Chat Memo Drawer (Side Panel) */}
+              {selectedChildId && (
+                <div className="fixed inset-y-0 right-0 w-full sm:w-[400px] bg-white shadow-2xl z-50 flex flex-col border-l animate-in slide-in-from-right duration-300">
+                  {(() => {
                     const child = children.find(c => c.id === selectedChildId);
                     if (!child) return null;
-                    const messages = child.messages || [];
                     return (
-                      <div
-                        className="flex flex-col h-full bg-white relative"
-                        onTouchStart={(e) => setTouchStartPos(e.touches[0].clientX)}
-                        onTouchEnd={(e) => {
-                          if (touchStartPos === null) return;
-                          const touchEndPos = e.changedTouches[0].clientX;
-                          const distance = touchEndPos - touchStartPos;
-                          if (distance > 100) { // 100px swipe to the right
-                            setSelectedChildId(null);
-                          }
-                          setTouchStartPos(null);
-                        }}
-                        onWheel={(e) => {
-                          if (Math.abs(e.deltaX) > Math.abs(e.deltaY) && e.deltaX < -50) {
-                            setSelectedChildId(null);
-                          }
-                        }}
-                      >
+                      <div className="flex flex-col h-full">
+                        {/* Drawer Header */}
+                        <div className="p-6 pb-2 border-b bg-white">
+                          <div className="flex items-center justify-between mb-2">
+                            {/* Editable Name */}
+                            <div className="flex-1 mr-4">
+                              <input
+                                type="text"
+                                value={child.name === '未設定' ? '' : child.name}
+                                placeholder="氏名を入力..."
+                                onChange={(e) => updateChild(child.id, { name: e.target.value || '未設定' })}
+                                className="w-full text-2xl font-black text-slate-900 bg-transparent border-none focus:ring-0 p-0 placeholder-slate-300"
+                              />
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-1">
+                                {child.type === 'waitlist' ? 'キャンセル待ち枠' : '一般枠'}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => removeChild(child.id)}
+                                className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                                title="リセット（アーカイブへ）"
+                              >
+                                <RotateCcw className="w-5 h-5" />
+                              </button>
+                              <button onClick={() => setSelectedChildId(null)} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors">
+                                <X className="w-5 h-5 text-slate-500" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-100 w-fit px-2 py-1 rounded-lg">
+                            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+                            リアルタイム更新中
+                          </div>
+                        </div>
+
                         {/* Messages Area */}
-                        <div className="flex-1 bg-slate-50/50 p-4 overflow-y-auto flex flex-col gap-3 relative">
+                        <div className="flex-1 overflow-y-auto p-4 bg-slate-100 flex flex-col gap-3 custom-scrollbar">
                           {selectedChildMessages.length === 0 ? (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-200 pointer-events-none">
-                              <MessageSquare className="w-16 h-16 mb-2 opacity-20" />
-                              <p className="text-sm font-bold opacity-40">メモがありません</p>
+                            <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-30 italic text-sm">
+                              <MessageSquare className="w-12 h-12 mb-2" />
+                              <p>メモがありません</p>
                             </div>
                           ) : (
                             selectedChildMessages.map(msg => (
-                              <div key={msg.id} className={`self-start p-3 rounded-2xl rounded-tl-none shadow-sm border relative ${msg.included !== false ? 'bg-white' : 'bg-slate-50 opacity-60 grayscale'}`}>
-                                <button onClick={() => toggleMessage(child.id, msg.id)} className={`absolute -top-2 -right-2 px-2 py-0.5 rounded-full text-[8px] font-bold ${msg.included !== false ? 'bg-emerald-500 text-white' : 'bg-slate-300 text-slate-600'}`}>{msg.included !== false ? 'AI利用' : '除外'}</button>
-                                <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                              <div key={msg.id} className={`self-start p-3 rounded-2xl rounded-tl-none shadow-sm border max-w-[90%] ${msg.included !== false ? 'bg-white border-transparent' : 'bg-slate-200 opacity-60 border-slate-300'}`}>
+                                <div className="flex items-center justify-between gap-4 mb-1">
+                                  <span className="text-[9px] font-bold text-slate-400">{new Date(msg.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}</span>
+                                  <button onClick={() => toggleMessage(child.id, msg.id)} className={`px-2 py-0.5 rounded-full text-[8px] font-black ${msg.included !== false ? 'bg-emerald-500 text-white shadow-sm' : 'bg-slate-400 text-white'}`}>
+                                    {msg.included !== false ? 'AI利用中' : '除外済み'}
+                                  </button>
+                                </div>
+                                <p className="text-sm whitespace-pre-wrap leading-relaxed text-slate-800 font-medium">{msg.text}</p>
                               </div>
                             ))
                           )}
                         </div>
 
-                        {/* Input Area (Restored to User Image 2) */}
-                        <div className="bg-white border-t p-4 space-y-3">
-                          {/* Row 1: Name Input + Close Button */}
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 relative">
-                              <input
-                                type="text"
-                                value={child.name}
-                                onChange={(e) => updateChild(child.id, { name: e.target.value })}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-indigo-700 outline-none focus:border-indigo-300 transition-colors"
-                                placeholder="児童名"
-                              />
-                            </div>
-                            <button
-                              onClick={() => setSelectedChildId(null)}
-                              className="w-10 h-10 bg-slate-900 text-white rounded-full flex items-center justify-center shadow-md active:scale-90 transition-transform"
-                            >
-                              <X className="w-5 h-5" />
-                            </button>
-                          </div>
-
-                          {/* Row 2: Tag Buttons */}
+                        {/* Input Area */}
+                        <div className="p-4 bg-white border-t space-y-3">
                           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-                            {['ツリー式学習', '宿題', 'プリント', 'プログラム', '自由時間'].map(tag => (
+                            {['【宿題】', '【プリント】', '【ツリー式】', '【プログラム】', '【自由時間】'].map(tag => (
                               <button
                                 key={tag}
                                 onClick={() => {
                                   const cur = drafts[child.id] || '';
-                                  setDrafts(prev => ({ ...prev, [child.id]: cur ? `${cur} 【${tag}】` : `【${tag}】` }));
+                                  setDrafts(prev => ({ ...prev, [child.id]: cur ? `${tag}${cur}` : tag }));
                                 }}
-                                className="whitespace-nowrap px-4 py-1.5 bg-indigo-50 text-indigo-700 text-[10px] font-bold rounded-full border border-indigo-100 hover:bg-indigo-100 transition-colors"
+                                className="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 text-[10px] font-black rounded-lg border border-indigo-100 hover:bg-indigo-600 hover:text-white transition-all active:scale-95"
                               >
-                                {tag}
+                                {tag.replace(/[【】]/g, '')}
                               </button>
                             ))}
                           </div>
-
-                          {/* Row 3: Message Input + Send Button */}
                           <form
                             onSubmit={(e) => {
                               e.preventDefault();
@@ -2372,30 +2393,193 @@
                           >
                             <input
                               type="text"
+                              autoFocus
                               value={drafts[child.id] || ''}
                               onChange={(e) => setDrafts(prev => ({ ...prev, [child.id]: e.target.value }))}
-                              className="flex-1 bg-slate-50 border border-transparent focus:bg-white focus:border-indigo-200 rounded-xl px-4 py-3 text-base outline-none transition-all"
+                              className="flex-1 bg-slate-100 focus:bg-white border-2 border-transparent focus:border-indigo-400 rounded-xl px-4 py-3 text-base outline-none transition-all"
                               placeholder="メモを入力..."
                             />
                             <button
                               type="submit"
-                              className="bg-slate-900 text-white w-12 h-12 rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
+                              disabled={!(drafts[child.id] || '').trim()}
+                              className="bg-indigo-600 disabled:bg-slate-300 text-white w-12 h-12 rounded-xl flex items-center justify-center shadow-lg active:scale-95 transition-all"
                             >
                               <Send className="w-5 h-5 rotate-[-15deg] translate-x-0.5" />
                             </button>
                           </form>
+                          {/* Close Link */}
+                          <button onClick={() => setSelectedChildId(null)} className="w-full text-center text-xs font-bold text-slate-400 hover:text-indigo-600 py-1">
+                            閉じる
+                          </button>
                         </div>
                       </div>
                     );
-                  })() : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-slate-300 bg-slate-50/50">
-                      <Users className="w-16 h-16 mb-4 opacity-10" />
-                      <p className="font-black text-sm uppercase tracking-widest text-slate-300">児童を選択してください</p>
-                    </div>
-                  )}
+                  })()}
                 </div>
-              </div>
-            </div>
+              )}
+
+              {/* Document View Overlay */}
+              {selectedDocChildId && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-end bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300" onClick={() => setSelectedDocChildId(null)}>
+                  <div 
+                    className="w-full sm:w-[600px] h-full bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-500"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    {(() => {
+                      const child = children.find(c => c.id === selectedDocChildId);
+                      const result = results[selectedDocChildId] || {};
+                      if (!child) return null;
+                      return (
+                        <div className="flex flex-col h-full">
+                          {/* Header */}
+                          <div className="p-4 bg-emerald-900 text-white flex items-center justify-between shadow-lg">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow-inner">
+                                <FileText className="w-6 h-6" />
+                              </div>
+                              <div>
+                                <h3 className="font-black text-lg leading-none mb-1">{child.name}</h3>
+                                <p className="text-[10px] text-emerald-300 font-bold uppercase tracking-widest">AI Generated Record</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={async () => { setChildGeneratingId(child.id); await generateDocuments([child.id]); setChildGeneratingId(null); }}
+                                className="p-2 bg-white/10 hover:bg-white/20 rounded-xl transition-all flex items-center gap-1 text-xs font-bold active:scale-95"
+                              >
+                                <RefreshCw className={`w-3 h-3 ${childGeneratingId === child.id ? 'animate-spin' : ''}`} /> 再生成
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (docEditId === child.id) {
+                                    // Save logic (handled in bottom bar for better UX)
+                                    setDocEditId(null);
+                                  } else {
+                                    setDocEditId(child.id);
+                                    setDocDraft({
+                                      D: result.D || '',
+                                      B_result: result.B_result || '',
+                                      B_plan: result.B_plan || '',
+                                      B_item: result.B_item || ''
+                                    });
+                                  }
+                                }}
+                                className={`p-2 rounded-xl text-xs font-bold transition-all active:scale-95 ${docEditId === child.id ? 'bg-amber-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}
+                              >
+                                {docEditId === child.id ? '編集終了' : '編集'}
+                              </button>
+                              <button
+                                onClick={() => setSelectedDocChildId(null)}
+                                className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                              >
+                                <X className="w-6 h-6" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Content Area */}
+                          <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-50 custom-scrollbar">
+                            {/* ツリー通信 Section */}
+                            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
+                              <div className="flex items-center justify-between mb-4">
+                                <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-2">
+                                  <MessageSquare className="w-4 h-4" /> ツリー通信（メッセージ）
+                                </h4>
+                                <CopyButton text={result.D || ''} label="COPY" />
+                              </div>
+                              {docEditId === child.id ? (
+                                <textarea
+                                  className="w-full min-h-[200px] bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-sm leading-relaxed outline-none focus:border-indigo-400 focus:bg-white transition-all shadow-inner"
+                                  value={docDraft.D || ''}
+                                  onChange={(e) => setDocDraft(prev => ({ ...prev, D: e.target.value }))}
+                                  placeholder="通信内容を入力..."
+                                />
+                              ) : (
+                                <div className="text-sm leading-relaxed text-slate-700 whitespace-pre-wrap font-medium bg-indigo-50/30 p-4 rounded-2xl border border-indigo-100/50">
+                                  {result.D || 'まだ生成されていません'}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 専門的支援実施計画 Section */}
+                            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
+                              <div className="flex items-center justify-between mb-5">
+                                <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest flex items-center gap-2">
+                                  <FileText className="w-4 h-4" /> 専門的支援実施計画
+                                </h4>
+                                <CopyButton text={`${result.B_result}\n${result.B_plan}`} label="COPY" />
+                              </div>
+                              <div className="space-y-6">
+                                <div>
+                                  <label className="text-[9px] font-black text-slate-400 uppercase mb-2 block tracking-tight">支援の実績</label>
+                                  {docEditId === child.id ? (
+                                    <textarea
+                                      className="w-full min-h-[120px] bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-sm outline-none focus:border-indigo-400 focus:bg-white transition-all shadow-inner"
+                                      value={docDraft.B_result || ''}
+                                      onChange={(e) => setDocDraft(prev => ({ ...prev, B_result: e.target.value }))}
+                                    />
+                                  ) : (
+                                    <p className="bg-slate-50 p-4 rounded-2xl text-sm border border-slate-100 text-slate-700 leading-relaxed">{result.B_result || '未生成'}</p>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="text-[9px] font-black text-slate-400 uppercase mb-2 block tracking-tight">今後の計画・課題</label>
+                                  {docEditId === child.id ? (
+                                    <textarea
+                                      className="w-full min-h-[100px] bg-slate-50 border-2 border-slate-100 rounded-2xl p-4 text-sm outline-none focus:border-indigo-400 focus:bg-white transition-all shadow-inner"
+                                      value={docDraft.B_plan || ''}
+                                      onChange={(e) => setDocDraft(prev => ({ ...prev, B_plan: e.target.value }))}
+                                    />
+                                  ) : (
+                                    <p className="bg-slate-50 p-4 rounded-2xl text-sm border border-slate-100 text-slate-700 leading-relaxed">{result.B_plan || '未生成'}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Footer Action Bar */}
+                          <div className="p-5 bg-white border-t flex items-center justify-between gap-4">
+                            <button
+                              onClick={() => setSelectedDocChildId(null)}
+                              className="px-6 py-3 text-slate-400 font-bold text-sm hover:text-slate-600 transition-colors"
+                            >
+                              閉じる
+                            </button>
+                            <div className="flex items-center gap-3">
+                              {docEditId === child.id ? (
+                                <button
+                                  onClick={async () => {
+                                    const next = {
+                                      ...result,
+                                      ...docDraft
+                                    };
+                                    const newResults = { ...results, [child.id]: next };
+                                    setResults(newResults);
+                                    await saveResults(newResults, summaryC);
+                                    setDocEditId(null);
+                                  }}
+                                  className="px-8 py-3 bg-emerald-600 text-white rounded-2xl font-black text-sm shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition-all active:scale-95"
+                                >
+                                  変更を保存
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => alert("個別PDF出力（開発予定）")}
+                                  className="px-8 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm shadow-lg shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 flex items-center gap-2"
+                                >
+                                  <Printer className="w-4 h-4" /> 個別印刷
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
 
             {/* Calendar Modal - Slide in from TOP */}
             <div
@@ -2634,13 +2818,80 @@
                 </div>
               </div>
             )}
-
-
-
-
+              {/* Trash Modal */}
+              {showTrashModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-300">
+                  <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[80vh]">
+                    <div className="p-6 border-b flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Trash2 className="w-6 h-6 text-slate-400" />
+                        <h2 className="text-xl font-black text-slate-900">アーカイブ（ゴミ箱）</h2>
+                      </div>
+                      <button onClick={() => setShowTrashModal(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                        <X className="w-5 h-5 text-slate-500" />
+                      </button>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                      {archivedData.length === 0 ? (
+                        <div className="py-12 text-center">
+                          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <Archive className="w-8 h-8 text-slate-200" />
+                          </div>
+                          <p className="text-slate-400 font-bold">アーカイブされたデータはありません</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {archivedData.map(item => (
+                            <div key={item.id + item.deletedAt} className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex flex-col gap-3 group transition-all hover:border-indigo-100">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <h3 className="font-bold text-slate-900">{item.name}</h3>
+                                  <p className="text-[10px] text-slate-400 font-bold">
+                                    削除: {new Date(item.deletedAt).toLocaleString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                  </p>
+                                </div>
+                                <div className="flex gap-1">
+                                  {item.data.messages?.length > 0 && <span className="text-[9px] bg-white border border-slate-200 text-slate-500 px-1.5 py-0.5 rounded font-bold">{item.data.messages.length}件のメモ</span>}
+                                  {item.data.results && <span className="text-[9px] bg-emerald-50 border border-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded font-bold">書類有</span>}
+                                </div>
+                              </div>
+                              
+                              <div className="flex flex-col gap-2 bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-1 rounded w-fit">復元先の枠を選択</span>
+                                <div className="grid grid-cols-4 gap-2">
+                                  {children.filter(c => c.name === '未設定').slice(0, 8).map((slot, i) => (
+                                    <button
+                                      key={slot.id}
+                                      onClick={() => restoreChild(item, slot.id)}
+                                      className="py-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-black text-slate-600 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all active:scale-95"
+                                    >
+                                      枠{i + 1}
+                                    </button>
+                                  ))}
+                                  {children.filter(c => c.name === '未設定').length === 0 && (
+                                    <p className="col-span-4 text-[10px] text-red-500 font-bold text-center">空き枠がありません</p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="p-4 bg-slate-50 border-t">
+                      <p className="text-[10px] text-slate-400 text-center font-bold leading-relaxed">
+                        ※アーカイブされたデータは削除から1週間後に自動消去されます。<br />
+                        一度復元されたデータはアーカイブから削除されます。
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div >
-      );
+        );
     };
 
     const root = createRoot(document.getElementById('root'));
