@@ -886,28 +886,33 @@
       }, []);
 
       const padChildren = (existing) => {
-        const regularCount = 10;
+        const regularLimit = 10;
         const waitlistCount = 5;
 
-        const regulars = existing.filter(c => (c.type || 'regular') === 'regular');
-        const waitlists = existing.filter(c => c.type === 'waitlist');
+        // Force all beyond 10 to waitlist if they are marked as regular
+        const allRegulars = existing.filter(c => (c.type || 'regular') === 'regular');
+        const regulars = allRegulars.slice(0, regularLimit);
+        const excessToWaitlist = allRegulars.slice(regularLimit).map(c => ({ ...c, type: 'waitlist' }));
+
+        const waitlists = [...existing.filter(c => c.type === 'waitlist'), ...excessToWaitlist];
 
         const paddedRegulars = [...regulars];
-        while (paddedRegulars.length < regularCount) {
+        while (paddedRegulars.length < regularLimit) {
           const idx = paddedRegulars.length;
           paddedRegulars.push({
-            id: 'reg-slot-' + idx, // FIXED ID TO AVOID LOOP
+            id: 'reg-slot-' + idx,
             name: '未設定',
             type: 'regular',
             timestamp: Date.now()
           });
         }
 
+        // Waitlist: Ensure at least waitlistCount slots, but allow it to be larger if data exists
         const paddedWaitlists = [...waitlists];
         while (paddedWaitlists.length < waitlistCount) {
           const idx = paddedWaitlists.length;
           paddedWaitlists.push({
-            id: 'wait-slot-' + idx, // FIXED ID TO AVOID LOOP
+            id: 'wait-slot-' + idx,
             name: '未設定',
             type: 'waitlist',
             timestamp: Date.now()
@@ -1039,10 +1044,10 @@
         if (!user) return;
         try {
           const newList = [...children];
-          // Try to find first "未設定" regular slot
+          // Try to find first "未設定" regular slot (limited to 10)
           let targetIndex = newList.findIndex(c => c.name === '未設定' && (c.type || 'regular') === 'regular');
 
-          // If no regular, try first "未設定" waitlist slot
+          // If no regular slots available, try first "未設定" waitlist slot
           if (targetIndex === -1) {
             targetIndex = newList.findIndex(c => c.name === '未設定' && c.type === 'waitlist');
           }
@@ -1051,9 +1056,11 @@
             // Fill existing slot
             newList[targetIndex] = { ...newList[targetIndex], name: '新規児童', timestamp: Date.now() };
           } else {
-            // All slots full, add a new waitlist slot
-            const newId = 'wait-' + Math.random().toString(36).slice(2, 11);
+            // ALL slots full (including 5 waitlist slots), add a new dynamic waitlist slot
+            const newId = 'wait-dynamic-' + Date.now();
             newList.push({ id: newId, name: '新規児童', type: 'waitlist', timestamp: Date.now() });
+            // Automatically expand waitlist so the user sees where it was added
+            setIsWaitlistExpanded(true);
           }
 
           setChildren(newList);
