@@ -1043,6 +1043,13 @@
       const addChild = async () => {
         if (!user) return;
         try {
+          // Count active children (name is not "未設定")
+          const activeCount = children.filter(c => c.name !== '未設定').length;
+          if (activeCount >= 10) {
+            alert("定員（10名）に達しているため、これ以上追加できません。\n既存の児童を削除（アーカイブ）してから追加してください。");
+            return;
+          }
+
           const newList = [...children];
           // Try to find first "未設定" regular slot (limited to 10)
           let targetIndex = newList.findIndex(c => c.name === '未設定' && (c.type || 'regular') === 'regular');
@@ -1056,10 +1063,10 @@
             // Fill existing slot
             newList[targetIndex] = { ...newList[targetIndex], name: '新規児童', timestamp: Date.now() };
           } else {
-            // ALL slots full (including 5 waitlist slots), add a new dynamic waitlist slot
+            // This case should ideally not be reached because activeCount < 10, 
+            // but we keep the dynamic logic just in case the total slots were less than 10.
             const newId = 'wait-dynamic-' + Date.now();
             newList.push({ id: newId, name: '新規児童', type: 'waitlist', timestamp: Date.now() });
-            // Automatically expand waitlist so the user sees where it was added
             setIsWaitlistExpanded(true);
           }
 
