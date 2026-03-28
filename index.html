@@ -45,6 +45,25 @@
       border-radius: 10px;
     }
 
+    /* Column Animation */
+    .animate-col {
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    .col-collapsed {
+      max-width: 0 !important;
+      min-width: 0 !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+      opacity: 0 !important;
+      border-left-width: 0 !important;
+      border-right-width: 0 !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      pointer-events: none;
+    }
+
     /* Print Styles */
     @media print {
       body {
@@ -317,79 +336,58 @@
         steps: [
           {
             popover: {
-              title: '10枠＋5枠の固定スロット構造',
-              description: '常に10枠確保: 児童が少ない場合でも、常に10名分の一般枠が表示されます。<br>キャンセル待ち5枠: 一般枠の下に5名分のキャンセル待ち枠を常備。<br>動的拡張: 全ての枠が埋まると、自動的に新しいキャンセル待ち枠が追加されます。',
+              title: '10枠＋5枠の固定スロット',
+              description: '常に10名分を確保。児童が少なくともレイアウトが崩れず、安定した入力が可能です。5枠目以降はキャンセル待ちとして管理されます。',
               side: "left",
               align: 'start'
             }
           },
           {
             popover: {
-              title: 'アーカイブ（ゴミ箱）機能',
-              description: '1週間のデータ保持: 児童をリストから削除（リセット）しても、データは完全に消去されず「アーカイブ」に1週間保存されます。<br>簡単復元: ツールバーのゴミ箱アイコンから、アーカイブされた過去のデータを任意の空き枠へ簡単に復元できます。<br>名前の編集: ドロワーの見出し部分で児童名を直接編集できるようになりました。',
+              title: 'カラムの折りたたみ（画面を広く使う）',
+              description: '送迎情報（時計アイコン）や備考欄（＋ボタン）はデフォルトで畳まれています。必要な時だけ展開して、画面をスッキリ保てます。',
               side: "left",
               align: 'start'
             }
           },
           {
-            element: '#tutorial-calendar',
+            element: '.sticky.left-0',
             popover: {
-              title: '① 日付を選択',
-              description: 'まずは作成したい日報の日付を確認・変更します。<br>過去の日報を見たり、未来の予定を立てることもできます。',
+              title: '① 氏名をクリックしてメモ',
+              description: '児童の氏名をクリックすると、右側にチャット形式のメモ欄が開きます。日々の様子をサッとメモしましょう。',
               side: "bottom",
               align: 'start'
             }
           },
           {
-            element: '#tutorial-add-btn',
             popover: {
-              title: '② 児童を追加',
-              description: 'このボタンを押して、担当する児童をリストに追加します。',
+              title: '② タグで表に自動反映（できた・できないの蓄積）',
+              description: 'チャットメモで `【学習】` や `【プログラム】` のタグを使うと、この表の各欄に自動で反映されます。<br><br>「何ができて、何ができなかったか」をタグで整理することで、子どもの成長を効果的にまとめられます。',
               side: "left",
               align: 'start'
             }
           },
           {
-            element: '.tutorial-memo-btn',
             popover: {
-              title: '③ メモを入力',
-              description: 'この吹き出しアイコンを押して、児童の様子をメモします。<br>AIはこのメモを元に書類を作成します。',
+              title: '③ LINE用まとめメモ',
+              description: 'LINE列の吹き出しアイコンから、保護者に送る「その日の姿」をサッとメモ。日報の文章とは別に、親しみやすい言葉で記録を残せます。',
               side: "left",
-              align: 'start'
-            }
-          },
-          {
-            element: '.tutorial-staff-select',
-            popover: {
-              title: '④ 担当者を選択',
-              description: '誰が書いたかわかるように、担当スタッフを選択しておきます。<br>（文章の書き方の癖などをAIが調整します）',
-              side: "left",
-              align: 'start'
-            }
-          },
-          {
-            element: '.tutorial-check-btn',
-            popover: {
-              title: '⑤ 生成対象をチェック',
-              description: '書類を作りたい児童にチェックが入っていることを確認します。<br>チェックボックスを押すとオン/オフできます。',
-              side: "right",
               align: 'start'
             }
           },
           {
             element: '#tutorial-generate-btn',
             popover: {
-              title: '⑥ 書類を生成',
-              description: '準備ができたら、このボタンを押してAIに書類を一括生成させます。',
+              title: '④ 書類の一括生成',
+              description: 'メモが溜まったらこのボタン。AIが一括で本格的な支援記録の文章を作成します。',
               side: "top",
               align: 'start'
             }
           },
           {
-            element: '.tutorial-action-buttons',
             popover: {
-              title: '⑦ 生成完了',
-              description: '生成が完了すると、この場所に 📄（書類マーク）が表示されます。<br>それを押すと書類の中身を確認・編集できます。',
+              title: 'アーカイブと復元',
+              description: '削除（リセット）した児童データは「ゴミ箱」に1週間保存。いつでも戻せるので安心です。',
               side: "left",
               align: 'start'
             }
@@ -400,18 +398,13 @@
         doneBtnText: '完了',
         onHighlightStarted: (element) => {
           if (!element) return;
-          // Freeze interaction using pointer-events only
-          // Avoiding 'disabled' attribute to prevent React reconciliation conflicts
           element.style.pointerEvents = 'none';
         },
         onDeselected: (element) => {
           if (!element) return;
           element.style.pointerEvents = '';
         },
-        onDestroyed: () => {
-          // Cleanup global - simplified to avoid React conflicts
-          // Rely on onDeselected for per-element cleanup.
-        }
+        onDestroyed: () => {}
       });
 
       driverObj.drive();
@@ -521,10 +514,13 @@
       results,
       getStudyText,
       getProgramText,
-      updateChild
+      updateChild,
+      isTransportExpanded,
+      isNotesExpanded
     }) => {
       const data = sheetData[child.id] || {};
       const isPlaceholder = child.name === '未設定';
+      const hasNotes = data.notes && data.notes.trim() !== '';
 
       return (
         <tr className={`divide-x divide-slate-100 hover:bg-slate-50/50 transition-colors ${isWaitlist ? 'bg-amber-50/30' : ''}`}>
@@ -547,7 +543,7 @@
               className={`w-full h-full p-2 text-left font-bold transition-all flex flex-col gap-0.5 ${selectedChildId === child.id ? 'text-indigo-600 bg-indigo-50' : isPlaceholder ? 'text-slate-300 italic' : 'text-slate-700'}`}
             >
               <div className="flex items-center justify-between gap-1">
-                <span className="truncate">{child.name}</span>
+                <span className={`truncate ${hasNotes ? 'text-red-600 font-extrabold underline decoration-red-200' : ''}`}>{child.name}</span>
                 {results[child.id] && (
                   <button
                     onClick={(e) => {
@@ -578,42 +574,32 @@
             )}
           </td>
 
-          {/* 迎え場所 */}
-          <td className="p-1">
-            {!isPlaceholder && (
-              <input
-                list="pickup-locations"
-                type="text"
-                value={data.pickupLocation || ''}
-                onChange={(e) => updateSheetField(child.id, 'pickupLocation', e.target.value)}
-                className="w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs font-bold text-slate-700"
-                placeholder="..."
-              />
-            )}
+          {/* 迎え場所・終了時間・送迎時間 (Expandable with Animation) */}
+          <td className={`animate-col p-1 border-r border-slate-100 ${!isTransportExpanded ? 'col-collapsed' : 'w-32'}`}>
+            <input
+              list="pickup-locations"
+              type="text"
+              value={data.pickupLocation || ''}
+              onChange={(e) => updateSheetField(child.id, 'pickupLocation', e.target.value)}
+              className={`w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs font-bold ${isPlaceholder ? 'text-slate-300' : 'text-slate-700'}`}
+              placeholder="..."
+            />
           </td>
-
-          {/* 終了時間 */}
-          <td className="p-1">
-            {!isPlaceholder && (
-              <input
-                type="time"
-                value={data.endTime || ''}
-                onChange={(e) => updateSheetField(child.id, 'endTime', e.target.value)}
-                className="w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs text-center font-bold text-slate-600"
-              />
-            )}
+          <td className={`animate-col p-1 border-r border-slate-100 ${!isTransportExpanded ? 'col-collapsed' : 'w-20'}`}>
+            <input
+              type="time"
+              value={data.endTime || ''}
+              onChange={(e) => updateSheetField(child.id, 'endTime', e.target.value)}
+              className={`w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs text-center font-bold ${isPlaceholder ? 'text-slate-300' : 'text-slate-600'}`}
+            />
           </td>
-
-          {/* 送迎時間 */}
-          <td className="p-1">
-            {!isPlaceholder && (
-              <input
-                type="time"
-                value={data.transportTime || ''}
-                onChange={(e) => updateSheetField(child.id, 'transportTime', e.target.value)}
-                className="w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs text-center font-bold text-slate-600"
-              />
-            )}
+          <td className={`animate-col p-1 border-r border-slate-100 ${!isTransportExpanded ? 'col-collapsed' : 'w-20'}`}>
+            <input
+              type="time"
+              value={data.transportTime || ''}
+              onChange={(e) => updateSheetField(child.id, 'transportTime', e.target.value)}
+              className={`w-full bg-transparent p-1 focus:bg-white focus:ring-1 focus:ring-indigo-300 rounded outline-none text-xs text-center font-bold ${isPlaceholder ? 'text-slate-300' : 'text-slate-600'}`}
+            />
           </td>
 
           {/* 学習 (Auto-populated from Chat tags) */}
@@ -626,8 +612,8 @@
             {!isPlaceholder && (getProgramText(child.id) || <span className="text-slate-200 italic">---</span>)}
           </td>
 
-          {/* 備考 */}
-          <td className="p-1">
+          {/* 備考 (Expandable with Animation) */}
+          <td className={`animate-col p-1 border-l border-slate-100 ${!isNotesExpanded ? 'col-collapsed' : 'w-[200px]'}`}>
             {!isPlaceholder && (
               <textarea
                 value={data.notes || ''}
@@ -683,6 +669,8 @@
       const [selectedDocChildId, setSelectedDocChildId] = useState(null);
       const [showPreview, setShowPreview] = useState(false);
       const [isWaitlistExpanded, setIsWaitlistExpanded] = useState(false); // DEFAULT COLLAPSED
+      const [isTransportExpanded, setIsTransportExpanded] = useState(true); // NEW: DEFAULT TO TRUE
+      const [isNotesExpanded, setIsNotesExpanded] = useState(false); // NEW: NOTES COLUMN TOGGLE
       const [selectedChildMessages, setSelectedChildMessages] = useState([]); // Derived from dailyMessages for UI
       const [touchStartPos, setTouchStartPos] = useState(null);
       const [showSummary, setShowSummary] = useState(false);
@@ -869,18 +857,53 @@
           setResults(data.results || {});
           setSummaryC(data.summaryC || '');
           setDailyMessages(data.messages || {});
-          setSheetData(data.sheetData || {});
+          const loadedSheetData = data.sheetData || {};
+          setSheetData(loadedSheetData);
 
           // Children Snapshot with Padding
           let loadedChildren = data.children || [];
-          setChildren(padChildren(loadedChildren));
+          const padded = padChildren(loadedChildren);
+          setChildren(padded);
+
+          // Ensure all slots have defaults in sheetData
+          const updatedSheetData = { ...loadedSheetData };
+          let changed = false;
+          padded.forEach(c => {
+            if (!updatedSheetData[c.id] || !updatedSheetData[c.id].pickupLocation) {
+              updatedSheetData[c.id] = {
+                ...(updatedSheetData[c.id] || {}),
+                pickupLocation: '志段味西小学校',
+                endTime: '18:00',
+                transportTime: '15:00'
+              };
+              changed = true;
+            }
+          });
+          if (changed) setSheetData(updatedSheetData);
+
+          // Auto-expand notes if any exist
+          const anyNotes = Object.values(updatedSheetData).some(d => d.notes && d.notes.trim() !== '');
+          if (anyNotes) setIsNotesExpanded(true);
+
         } else {
           // New Date - Start with fresh empty slots
           setResults({});
           setSummaryC('');
           setDailyMessages({});
-          setSheetData({});
-          setChildren(padChildren([]));
+          
+          const padded = padChildren([]);
+          setChildren(padded);
+
+          // Initialize ALL slots with defaults
+          const initialSheetData = {};
+          padded.forEach(c => {
+            initialSheetData[c.id] = {
+              pickupLocation: '志段味西小学校',
+              endTime: '18:00',
+              transportTime: '15:00'
+            };
+          });
+          setSheetData(initialSheetData);
         }
         setIsSyncing(false);
       }, []);
@@ -1061,7 +1084,23 @@
 
           if (targetIndex !== -1) {
             // Fill existing slot
+            const childId = newList[targetIndex].id;
             newList[targetIndex] = { ...newList[targetIndex], name: '新規児童', timestamp: Date.now() };
+
+            // Set defaults in sheetData
+            const newSheetData = {
+              ...sheetData,
+              [childId]: {
+                ...(sheetData[childId] || {}),
+                pickupLocation: '志段味西小学校',
+                endTime: '18:00',
+                transportTime: '15:00'
+              }
+            };
+
+            setSheetData(newSheetData);
+            setChildren(newList);
+            await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newSheetData);
           } else {
             // This case should ideally not be reached because activeCount < 10, 
             // but we keep the dynamic logic just in case the total slots were less than 10.
@@ -1205,9 +1244,27 @@
       const updateChild = async (id, data) => {
         if (!user) return;
         try {
+          const oldChild = children.find(c => c.id === id);
+          const isFillingPlaceholder = oldChild && oldChild.name === '未設定' && data.name && data.name !== '未設定';
+
           const newList = children.map(c => c.id === id ? { ...c, ...data } : c);
           setChildren(newList);
-          await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, sheetData);
+
+          let newSheetData = sheetData;
+          if (isFillingPlaceholder) {
+            newSheetData = {
+              ...sheetData,
+              [id]: {
+                ...(sheetData[id] || {}),
+                pickupLocation: '志段味西小学校',
+                endTime: '18:00',
+                transportTime: '15:00'
+              }
+            };
+            setSheetData(newSheetData);
+          }
+
+          await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newSheetData);
         } catch (e) {
           alert("更新に失敗しました");
         }
@@ -2177,7 +2234,6 @@
                   </span>
                 </div>
 
-                {/* Add Child */}
                 <button
                   onClick={addChild}
                   className="bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-200 rounded-xl px-4 py-2 flex items-center gap-2 font-bold transition-all active:scale-95 shadow-sm"
@@ -2209,6 +2265,26 @@
                   title="データ出力"
                 >
                   <FileSpreadsheet className="w-5 h-5" />
+                </button>
+
+                {/* 時間詳細 */}
+                <button
+                  onClick={() => setIsTransportExpanded(!isTransportExpanded)}
+                  className={`h-[46px] px-4 rounded-xl text-[10px] font-black transition-all flex items-center gap-2 border shadow-sm ${isTransportExpanded ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300'}`}
+                  title={isTransportExpanded ? '時間詳細を隠す' : '時間詳細を表示'}
+                >
+                  <Clock className="w-4 h-4" />
+                  <span>時間詳細</span>
+                </button>
+
+                {/* 備考 */}
+                <button
+                  onClick={() => setIsNotesExpanded(!isNotesExpanded)}
+                  className={`h-[46px] px-4 rounded-xl text-[10px] font-black transition-all flex items-center gap-2 border shadow-sm ${isNotesExpanded ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:border-slate-300'}`}
+                  title={isNotesExpanded ? '備考を隠す' : '備考を表示'}
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>備考</span>
                 </button>
 
                 {/* AI Generate Button */}
@@ -2251,12 +2327,12 @@
                         </th>
                         <th className="sticky left-0 z-30 bg-slate-50 p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-24 min-w-[100px]">氏名</th>
                         <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-12 text-center">LINE</th>
-                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-32">迎え場所</th>
-                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-20">終了時間</th>
-                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter w-20">送迎時間</th>
+                        <th className={`animate-col p-2 text-xs font-black text-slate-500 uppercase tracking-tighter ${!isTransportExpanded ? 'col-collapsed' : 'w-32'}`}>迎え場所</th>
+                        <th className={`animate-col p-2 text-xs font-black text-slate-500 uppercase tracking-tighter ${!isTransportExpanded ? 'col-collapsed' : 'w-20 text-center'}`}>終了時間</th>
+                        <th className={`animate-col p-2 text-xs font-black text-slate-500 uppercase tracking-tighter ${!isTransportExpanded ? 'col-collapsed' : 'w-20 text-center'}`}>送迎時間</th>
                         <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter min-w-[200px]">学習</th>
                         <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter min-w-[200px]">プログラム</th>
-                        <th className="p-2 text-xs font-black text-slate-500 uppercase tracking-tighter min-w-[200px]">備考</th>
+                        <th className={`animate-col p-2 text-xs font-black text-slate-500 uppercase tracking-tighter ${!isNotesExpanded ? 'col-collapsed' : 'w-[200px]'}`}>備考</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 bg-white">
@@ -2276,6 +2352,8 @@
                           getStudyText={getStudyText}
                           getProgramText={getProgramText}
                           updateChild={updateChild}
+                          isTransportExpanded={isTransportExpanded}
+                          isNotesExpanded={isNotesExpanded}
                         />
                       ))}
 
@@ -2309,6 +2387,8 @@
                           getStudyText={getStudyText}
                           getProgramText={getProgramText}
                           updateChild={updateChild}
+                          isTransportExpanded={isTransportExpanded}
+                          isNotesExpanded={isNotesExpanded}
                         />
                       ))}
                     </tbody>
