@@ -2,62 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Prevent auto-zoom on mobile */
-@media screen and (max-width: 768px) {
-
-  input,
-  textarea,
-  select {
-    font-size: 16px !important;
+@layer base {
+  body {
+    background-color: #fcfdfc; /* tree-50 like very faint green */
+    @apply text-slate-800 antialiased;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(40, 167, 69, 0.1) 0px, transparent 50%),   /* tree-500 */
+      radial-gradient(at 100% 0%, rgba(139, 94, 60, 0.08) 0px, transparent 50%), /* wood-500 */
+      radial-gradient(at 100% 100%, rgba(220, 53, 69, 0.03) 0px, transparent 50%), /* apple-500 */
+      radial-gradient(at 0% 100%, rgba(40, 167, 69, 0.05) 0px, transparent 50%);
+    background-attachment: fixed;
   }
 }
 
-/* Custom scrollbar */
+@layer components {
+  /* Glassmorphism Base Card */
+  .glass-card {
+    background-color: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 8px 32px 0 rgba(40, 167, 69, 0.04);
+    @apply border border-white/60;
+  }
+
+  /* Column Animation Group */
+  .animate-col {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+    white-space: nowrap;
+  }
+}
+
+@layer utilities {
+  .col-collapsed {
+    width: 0 !important;
+    max-width: 0 !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    opacity: 0 !important;
+    border: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none;
+  }
+}
+
+/* Custom scrollbar - thinner & smoother */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
+  height: 5px;
 }
-
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.05);
+  background: transparent;
 }
-
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 10px;
+  background: rgba(40, 167, 69, 0.15); /* tree-500 alpha */
+  border-radius: 20px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(40, 167, 69, 0.3);
 }
 
 /* Print styles */
 @media print {
-  body {
-    background: white !important;
-  }
-
-  .no-print {
-    display: none !important;
-  }
-
-  .print-only {
-    display: block !important;
-  }
-
-  .print-page-break {
-    page-break-after: always;
-  }
-
-  .print-avoid-break {
-    page-break-inside: avoid;
-  }
-
-  @page {
-    margin: 2cm;
-    size: A4;
-  }
+  body { background: white !important; background-image: none !important; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  @page { margin: 1cm; size: A4; }
 }
 
-.no-print {
-  display: none;
-}
-
-.print-only {
-  display: none;
-}
+.no-print { display: none; }
+.print-only { display: none; }
