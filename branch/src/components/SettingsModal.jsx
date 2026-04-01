@@ -31,7 +31,7 @@ export default function SettingsModal({ onClose, config, onSaveConfig, tags, onS
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-300">
             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-md" onClick={onClose} />
             
-            <div className="relative w-full max-w-2xl bg-white rounded-[4rem] shadow-2xl overflow-hidden flex flex-col border border-white animate-in zoom-in-95 duration-500">
+            <div className="relative w-full max-w-2xl max-h-[95vh] bg-white rounded-[2rem] md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col border border-white animate-in zoom-in-95 duration-500">
                 {/* Header - Apple Red Brand */}
                 <div className="p-8 md:p-10 bg-apple-600 flex items-center justify-between shadow-xl flex-shrink-0 z-10">
                     <div className="flex items-center gap-5">
@@ -62,8 +62,9 @@ export default function SettingsModal({ onClose, config, onSaveConfig, tags, onS
                                 </label>
                                 <input
                                     type="password"
-                                    value={localConfig.apiKey}
+                                    value={localConfig?.apiKey || ''}
                                     onChange={e => setLocalConfig(p => ({ ...p, apiKey: e.target.value }))}
+                                    onKeyDown={e => e.key === 'Enter' && handleSave()}
                                     placeholder="sk-..."
                                     className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-full focus:border-apple-500 focus:bg-white focus:ring-8 md:focus:ring-[15px] focus:ring-apple-50 outline-none transition-all font-mono text-sm shadow-inner"
                                 />
@@ -110,12 +111,12 @@ export default function SettingsModal({ onClose, config, onSaveConfig, tags, onS
 
                 {/* Footer Actions */}
                 <div className="p-8 md:p-10 bg-slate-50/80 backdrop-blur-sm border-t border-slate-100 flex items-center justify-end gap-6 flex-shrink-0">
-                    <button onClick={onClose} className="px-8 py-4 font-black text-xs text-slate-400 hover:text-slate-600 transition-all uppercase tracking-[0.2em]">
-                        キャンセル
+                    <button onClick={onClose} className="px-6 py-4 font-black text-[10px] md:text-xs text-slate-400 hover:text-slate-600 transition-all uppercase tracking-[0.2em]">
+                        閉じる（保存しない）
                     </button>
-                    <button onClick={handleSave} className="px-12 py-5 bg-apple-600 hover:bg-apple-700 text-white rounded-full font-black text-xs md:text-sm shadow-2xl shadow-apple-100 transition-all active:scale-95 flex items-center gap-4 uppercase tracking-[0.15em]">
+                    <button onClick={handleSave} className="px-8 md:px-12 py-5 bg-apple-600 hover:bg-apple-700 text-white rounded-full font-black text-[10px] md:text-sm shadow-2xl shadow-apple-100 transition-all active:scale-95 flex items-center gap-2 md:gap-4 uppercase tracking-[0.15em]">
                         <Save className="w-5 h-5 md:w-6 md:h-6" />
-                        設定を保存
+                        保存して閉じる
                     </button>
                 </div>
             </div>

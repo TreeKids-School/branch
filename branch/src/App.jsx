@@ -20,14 +20,19 @@ import { printAllDocuments } from './utils/print';
 // ── AI 通信 ────────────────────────────────────────────────────────────────
 const fetchAI = async (prompt, isJson) => {
     const callGeminiDirectly = async (apiKey, prompt, isJson) => {
-        const MODEL = 'gemini-2.0-flash';
-        const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+        const MODEL = 'gemini-2.5-flash';
+        const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey.trim()}`;
         const response = await fetch(ENDPOINT, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7 } })
         });
-        if (!response.ok) throw new Error('AI連携に失敗しました。');
+        if (!response.ok) {
+            const errText = await response.text();
+            let errMsg = errText;
+            try { errMsg = JSON.parse(errText).error.message; } catch(e){}
+            throw new Error(`API連携失敗 (${response.status}): ${errMsg}`);
+        }
         const json = await response.json();
         const text = json.candidates[0].content.parts[0].text;
         if (!isJson) return text;
@@ -35,15 +40,19 @@ const fetchAI = async (prompt, isJson) => {
         return match ? JSON.parse(match[0]) : null;
     };
     const savedKey = localStorage.getItem('care_pro_api_key');
-    if (!savedKey) { alert('APIキーが設定されていません'); return null; }
-    try { return await callGeminiDirectly(savedKey, prompt, isJson); }
-    catch (e) { alert('通信エラー: ' + e.message); return null; }
+    if (!savedKey || !savedKey.trim()) { throw new Error('APIキーが設定されていません。右上の歯車アイコン（設定）からGemini AIのAPIキーを入力してください。'); }
+    try { 
+        return await callGeminiDirectly(savedKey, prompt, isJson); 
+    } catch (e) { 
+        throw new Error(e.message); 
+    }
 };
 
 // ── メインアプリケーション ──────────────────────────────────────────────────
 export default function App() {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [children, setChildren] = useState([]);
+    const [toast, setToast] = useState(null); // Custom Toast state
     const [results, setResults] = useState({});
     const [summaryC, setSummaryC] = useState('');
     const [dailyMessages, setDailyMessages] = useState({});
@@ -160,24 +169,70 @@ export default function App() {
 
     const toggleChildGenerate = (id) => setSelectedGenerateIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
 
+    const showToast = (message) => {
+        setToast(message);
+        setTimeout(() => setToast(null), 5000);
+    };
+
     const generateDocuments = async () => {
         const toGenerate = children.filter(c => selectedGenerateIds.includes(c.id));
-        if (toGenerate.length === 0) return;
+        if (toGenerate.length === 0) {
+            showToast('生成対象の児童が選択されていません。表の左側にあるチェックボックス（☑️）で選んでから押してください。');
+            return;
+        }
+
+        // 【A案】ツリー通信未入力の児童をチェックしてエラースキップ
+        const missingTreeComm = toGenerate.filter(c => !(results[c.id]?.D || '').trim());
+        if (missingTreeComm.length > 0) {
+            const names = missingTreeComm.map(c => c.name).join('さん、');
+            showToast(`${names}さんのツリー通信録が未入力のため、AI生成をスキップしました。まずはツリー通信を記入してください。`);
+            return;
+        }
+
         setLoading(true);
         try {
             const processedResults = { ...results };
             for (const child of toGenerate) {
+                const existing = results[child.id] || {};
+                const treeCommText = existing.D || '';
                 const msgs = (dailyMessages[child.id] || []).filter(m => m.included !== false).map(m => m.text).join('\n');
-                const template = child.forceSheet ? '{"B_result": "...", "B_item": "...", "K_sheet": "..."}' : '{"B_result": "...", "B_item": "..."}';
-                const prompt = `児童メモを元に療育支援記録(B_result)と項目(B_item)を作成してください。\nメモ: ${msgs}\nJSON形式: ${template}`;
-                const response = await fetchAI(prompt, true);
-                if (response) {
-                    const existing = results[child.id] || {};
-                    processedResults[child.id] = { ...existing, ...response, D: existing.D || '', B_plan: existing.B_plan || '' };
+                
+                const template = child.forceSheet 
+                    ? '{"B_result": "...", "B_item": "...", "K_sheet": "..."}' 
+                    : '{"B_result": "...", "B_item": "..."}';
+                
+                const prompt = `以下の「ツリー通信（スタッフが記入した保護者宛の記録）」と「日々のチャットメモ」を元に、公的な療育支援記録(B_result)と該当項目(B_item)を作成してください。児童名や「〇〇君」などの呼称は一切使用しないでください。
+
+【ツリー通信】:
+${treeCommText}
+
+【チャットメモ】:
+${msgs || '特になし'}
+
+【作成ルール】
+- B_result (結果): 150字程度。常体（言い切り）。客観的かつ専門的な支援記録のトーン。
+- B_item (項目): ①健康・生活 ②運動・感覚 ③認知・行動 ④言語・コミュニケーション ⑤人間関係・社会性 から該当するものを全て選択。
+
+JSON形式: ${template}`;
+
+                try {
+                    const response = await fetchAI(prompt, true);
+                    if (response) {
+                        // D（ツリー通信）はそのまま維持し、生成された内容（B_result, B_plan等）を追加
+                        processedResults[child.id] = { ...existing, ...response, D: existing.D }; 
+                    }
+                } catch (apiError) {
+                    showToast(apiError.message);
+                    setLoading(false);
+                    return; // Fail explicitly and stop making further requests
                 }
             }
             await saveResults(processedResults, summaryC);
-        } catch (e) { console.error(e); }
+            showToast('AIによる処理が全て完了しました！🎉'); // Show success toast
+        } catch (e) { 
+            console.error(e);
+            showToast('システムエラーが発生しました: ' + e.message);
+        }
         finally { setLoading(false); }
     };
 
@@ -426,6 +481,17 @@ export default function App() {
                 />
             )}
             <ExportModal show={showExportModal} onClose={() => setShowExportModal(false)} selectedDate={selectedDate} children={children} results={results} summaryC={summaryC} />
+        
+            {/* Custom Toast Notification */}
+            {toast && (
+                <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[110] bg-slate-800 text-white px-8 py-5 rounded-2xl shadow-2xl flex items-center gap-4 animate-in slide-in-from-top-4 fade-in duration-300 max-w-[90%] md:max-w-xl border-l-8 border-apple-500">
+                    <AlertCircle className="w-8 h-8 md:w-10 md:h-10 text-apple-400 flex-shrink-0" />
+                    <p className="font-bold text-xs md:text-sm leading-relaxed tracking-wide drop-shadow-sm">{toast}</p>
+                    <button onClick={() => setToast(null)} className="p-2 ml-4 rounded-full bg-white/10 hover:bg-white/20 transition-colors flex-shrink-0">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+            )}
         </div>
     );
 }

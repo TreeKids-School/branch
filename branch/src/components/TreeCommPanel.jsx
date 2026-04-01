@@ -4,17 +4,19 @@ import { MessageSquare, ChevronDown, ChevronUp, Save, X, Info, Send, FileText } 
 export default function TreeCommPanel({ child, result, messages, onSave, onClose }) {
     const [draftD, setDraftD] = useState('');
     const [draftPlan, setDraftPlan] = useState('');
+    const [draftResult, setDraftResult] = useState('');
     const [showMemos, setShowMemos] = useState(false);
 
     useEffect(() => {
         if (result) {
             setDraftD(result.D || '');
             setDraftPlan(result.B_plan || '');
+            setDraftResult(result.B_result || '');
         }
     }, [result, child]);
 
     const handleSave = () => {
-        onSave(child.id, { ...result, D: draftD, B_plan: draftPlan });
+        onSave(child.id, { ...result, D: draftD, B_plan: draftPlan, B_result: draftResult });
         onClose();
     };
 
@@ -69,31 +71,48 @@ export default function TreeCommPanel({ child, result, messages, onSave, onClose
                     )}
                 </div>
 
+                {/* ★ AI生成された療育結果（B_result）表示・編集欄 */}
+                <div className="space-y-4 md:space-y-6 px-2">
+                    <label className="block text-[10px] md:text-[12px] font-black text-tree-700 uppercase tracking-[0.25em] flex items-center gap-3">
+                        <div className="w-2.5 h-2.5 rounded-full bg-apple-500 border-2 border-white shadow-lg animate-pulse" />
+                        【AI生成】療育の結果（支援記録）
+                        {draftResult && (
+                            <span className="ml-2 px-2.5 py-1 bg-apple-500 text-white text-[8px] font-black rounded-full uppercase tracking-widest shadow-sm">AI生成済み</span>
+                        )}
+                    </label>
+                    <textarea
+                        value={draftResult}
+                        onChange={(e) => setDraftResult(e.target.value)}
+                        placeholder="AI生成ボタンを押すと、ここに療育の結果（支援記録）が自動で入力されます。手動で入力・修正することもできます。"
+                        className={`w-full min-h-[180px] md:min-h-[200px] p-6 md:p-8 text-[14px] md:text-[15px] bg-white border-2 rounded-[2.5rem] md:rounded-[3.5rem] focus:ring-8 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text font-medium text-slate-700 ${draftResult ? 'border-apple-300 focus:border-apple-500 focus:ring-apple-50' : 'border-wood-100/50 focus:border-wood-500 focus:ring-wood-50'}`}
+                    />
+                </div>
+
                 {/* Tree Communication Input */}
                 <div className="space-y-4 md:space-y-6 px-2">
                     <label className="block text-[10px] md:text-[12px] font-black text-wood-600 uppercase tracking-[0.25em] flex items-center gap-3">
                         <div className="w-2.5 h-2.5 rounded-full bg-tree-500 border-2 border-white shadow-lg animate-pulse" />
-                        家庭とのツリー通信
+                        家庭とのツリー通信（手書きメモ）
                     </label>
                     <textarea
                         value={draftD}
                         onChange={(e) => setDraftD(e.target.value)}
-                        placeholder="メッセージを入力..."
-                        className="w-full min-h-[220px] md:min-h-[250px] p-6 md:p-8 text-[14px] md:text-[15px] bg-white border-2 border-wood-100/50 rounded-[2.5rem] md:rounded-[3.5rem] focus:border-wood-500 focus:ring-8 focus:ring-wood-50 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text font-medium text-slate-700"
+                        placeholder="保護者へのメッセージを入力..."
+                        className="w-full min-h-[180px] md:min-h-[200px] p-6 md:p-8 text-[14px] md:text-[15px] bg-white border-2 border-wood-100/50 rounded-[2.5rem] md:rounded-[3.5rem] focus:border-wood-500 focus:ring-8 focus:ring-wood-50 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text font-medium text-slate-700"
                     />
                 </div>
 
                 {/* Future Plan Input */}
                 <div className="space-y-4 md:space-y-6 px-2 pb-6">
                     <label className="block text-[10px] md:text-[12px] font-black text-wood-600 uppercase tracking-[0.25em] flex items-center gap-3">
-                        <div className="w-2.5 h-2.5 rounded-full bg-apple-500 border-2 border-white shadow-lg" />
+                        <div className="w-2.5 h-2.5 rounded-full bg-slate-400 border-2 border-white shadow-lg" />
                         今後の支援の予定
                     </label>
                     <textarea
                         value={draftPlan}
                         onChange={(e) => setDraftPlan(e.target.value)}
-                        placeholder="予定を共有..."
-                        className="w-full min-h-[160px] md:min-h-[180px] p-6 md:p-8 text-[14px] md:text-[15px] bg-white border-2 border-wood-100/50 rounded-[2.5rem] md:rounded-[3.5rem] focus:border-wood-500 focus:ring-8 focus:ring-wood-50 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text font-medium text-slate-700"
+                        placeholder="今後の支援の方針や予定..."
+                        className="w-full min-h-[120px] md:min-h-[140px] p-6 md:p-8 text-[14px] md:text-[15px] bg-white border-2 border-wood-100/50 rounded-[2.5rem] md:rounded-[3.5rem] focus:border-wood-500 focus:ring-8 focus:ring-wood-50 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text font-medium text-slate-700"
                     />
                 </div>
             </div>
