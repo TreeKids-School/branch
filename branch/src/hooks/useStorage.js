@@ -1,10 +1,7 @@
-import { db } from '../firebase';
-import { ref, get, set } from 'firebase/database';
+import { firestore } from '../firebase';
+import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 
-const isLocal = () =>
-    window.location.protocol === 'file:' ||
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1';
+const isLocal = () => false; // Force Firestore for testing/deployment
 
 const localGet = (k) => {
     try { return JSON.parse(localStorage.getItem('care_pro_local_' + k) || 'null'); }
@@ -15,6 +12,8 @@ const localSet = (k, v) => localStorage.setItem('care_pro_local_' + k, JSON.stri
 const performLocalAction = (payload) => {
     const { action, data, childId, date } = payload;
     switch (action) {
+        case 'getMasterChildren': return localGet('master_children') || [];
+        case 'saveMasterChildren': localSet('master_children', data); return { status: 'OK' };
         case 'getChildren': return localGet('children') || [];
         case 'setChildren': localSet('children', data); return { status: 'OK' };
         case 'getReport': return localGet(`report_${date}`) || null;
@@ -46,53 +45,70 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
 
     try {
         switch (action) {
-            case 'getChildren': {
-                const snap = await get(ref(db, 'children'));
+            case 'getMasterChildren': {
+                const docRef = doc(firestore, 'meta', 'children');
+                const snap = await getDoc(docRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
-                return snap.val() || [];
+                return snap.exists() ? (snap.data().list || []) : [];
+            }
+            case 'saveMasterChildren': {
+                const docRef = doc(firestore, 'meta', 'children');
+                await setDoc(docRef, { list: data });
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return { status: 'OK' };
+            }
+            case 'getChildren': {
+                const docRef = doc(firestore, 'meta', 'children');
+                const snap = await getDoc(docRef);
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return snap.exists() ? (snap.data().list || []) : [];
             }
             case 'setChildren': {
-                await set(ref(db, 'children'), data);
+                const docRef = doc(firestore, 'meta', 'children');
+                await setDoc(docRef, { list: data });
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
             }
             case 'getReport': {
-                const snap = await get(ref(db, `reports/${date}`));
+                const docRef = doc(firestore, 'reports', date);
+                const snap = await getDoc(docRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
-                return snap.val() || null;
+                return snap.exists() ? snap.data() : null;
             }
             case 'saveReport': {
-                await set(ref(db, `reports/${date}`), data);
-                const idxSnap = await get(ref(db, 'reports_index'));
-                let index = idxSnap.val() || [];
-                if (!Array.isArray(index)) index = Object.values(index);
-                if (!index.includes(date)) { index.push(date); await set(ref(db, 'reports_index'), index); }
+                const docRef = doc(firestore, 'reports', date);
+                await setDoc(docRef, data);
+                
+                // Update index
+                const idxRef = doc(firestore, 'meta', 'reports_index');
+                const idxSnap = await getDoc(idxRef);
+                let index = idxSnap.exists() ? (idxSnap.data().dates || []) : [];
+                if (!index.includes(date)) { 
+                    index.push(date); 
+                    await setDoc(idxRef, { dates: index }); 
+                }
+                
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
             }
             case 'getReportIndex': {
-                const snap = await get(ref(db, 'reports_index'));
+                const idxRef = doc(firestore, 'meta', 'reports_index');
+                const snap = await getDoc(idxRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
-                const val = snap.val();
-                if (val && !Array.isArray(val)) return Object.values(val);
-                return val || [];
+                return snap.exists() ? (snap.data().dates || []) : [];
             }
             case 'rebuildIndex': {
-                const snap = await get(ref(db, 'reports'));
-                const val = snap.val();
-                if (!val) {
-                    await set(ref(db, 'reports_index'), []);
-                    return [];
-                }
-                const newIndex = Object.keys(val).sort();
-                await set(ref(db, 'reports_index'), newIndex);
+                const querySnap = await getDocs(collection(firestore, 'reports'));
+                const newIndex = querySnap.docs.map(d => d.id).sort();
+                const idxRef = doc(firestore, 'meta', 'reports_index');
+                await setDoc(idxRef, { dates: newIndex });
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return newIndex;
             }
             default: return null;
         }
     } catch (e) {
-        console.warn('Firebase error, falling back to localStorage:', e);
+        console.warn('Firestore error, falling back to localStorage:', e);
         setConnectionStatus?.('offline');
         setLastError?.(e.message || 'Network Error');
         return performLocalAction(payload);

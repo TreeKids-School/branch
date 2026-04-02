@@ -3,11 +3,15 @@ import {
     PlusCircle, MessageSquare, Send, FileSpreadsheet, Printer, 
     Trash2, Clock, CheckCircle2, AlertCircle, Loader2, Sparkles,
     ChevronDown, ChevronUp, ChevronLeft, FileText, LayoutPanelLeft, UserCheck, 
-    FileEdit, X, Calendar as CalendarIcon, Settings
+    FileEdit, X, Calendar as CalendarIcon, Settings, LogOut
 } from 'lucide-react';
 import MemoPanel from './components/MemoPanel';
 import DocViewer from './components/DocViewer';
 import TreeCommPanel from './components/TreeCommPanel';
+import Login from './components/Login';
+import MasterListModal from './components/MasterListModal';
+import { auth, firestore } from './firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { callStorage } from './hooks/useStorage';
 import { STAFF_OPTIONS, APP_VERSION, DAILY_LIMIT, parseForceSheet, buildForceSheet, getStaffInstruction } from './constants';
 import { defaultPrompts } from './constants/defaultPrompts';
@@ -50,34 +54,33 @@ const fetchAI = async (prompt, isJson) => {
 
 // ── メインアプリケーション ──────────────────────────────────────────────────
 export default function App() {
+    // 1. All States (Restored and gathered at the very top)
+    const [user, setUser] = useState(null);
+    const [authLoading, setAuthLoading] = useState(true);
+    const [loading, setLoading] = useState(false); // Restore missing loading state
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [children, setChildren] = useState([]);
-    const [toast, setToast] = useState(null); // Custom Toast state
+    const [toast, setToast] = useState(null);
     const [results, setResults] = useState({});
     const [summaryC, setSummaryC] = useState('');
     const [dailyMessages, setDailyMessages] = useState({});
     const [dailyTable, setDailyTable] = useState({});
     const [globalLog, setGlobalLog] = useState({ admin: '', supervisor: '', notice: '', activities: '' });
-    
-    const [selectedChildId, setSelectedChildId] = useState(null);
-    const [selectedDocChildId, setSelectedDocChildId] = useState(null);
-    const [selectedTreeChildId, setSelectedTreeChildId] = useState(null);
-    
-    const [loading, setLoading] = useState(false);
+    const [selectedGenerateIds, setSelectedGenerateIds] = useState([]);
+    const [selectedChildId, setSelectedChildId] = useState(null); // Restore missing state
+    const [selectedTreeChildId, setSelectedTreeChildId] = useState(null); // Restore missing state
+    const [selectedDocChildId, setSelectedDocChildId] = useState(null); // Restore missing state
+    const [isTransportExpanded, setIsTransportExpanded] = useState(true);
+    const [isNotesExpanded, setIsNotesExpanded] = useState(false);
+    const [isWaitlistExpanded, setIsWaitlistExpanded] = useState(false); // Restore missing state
     const [isSyncing, setIsSyncing] = useState(false);
-    const [existingReportDates, setExistingReportDates] = useState([]);
     const [showCalendarModal, setShowCalendarModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
-    const [selectedGenerateIds, setSelectedGenerateIds] = useState([]);
-    const [isTransportExpanded, setIsTransportExpanded] = useState(true);
-    const [isNotesExpanded, setIsNotesExpanded] = useState(false);
-    const [isWaitlistExpanded, setIsWaitlistExpanded] = useState(false);
-    const [config, setConfig] = useState(() => ({
-        apiKey: localStorage.getItem('care_pro_api_key') || ''
-    }));
-
-    // Dynamic Tags State
+    const [showMasterModal, setShowMasterModal] = useState(false);
+    const [existingReportDates, setExistingReportDates] = useState([]); // Restore missing state
+    
+    const [config, setConfig] = useState(() => ({ apiKey: localStorage.getItem('care_pro_api_key') || '' }));
     const [tags, setTags] = useState(() => {
         try {
             const saved = localStorage.getItem('care_pro_tags');
@@ -86,36 +89,12 @@ export default function App() {
         return ['【ツリー式学習】', '【宿題】', '【プリント】', '【プログラム】', '【おやつ】'];
     });
 
-    const handleUpdateTags = (newTags) => {
-        setTags(newTags);
-        localStorage.setItem('care_pro_tags', JSON.stringify(newTags));
-    };
+    // --- Hooks (MUST be called before any early returns) ---
+    
+    // Storage helper
+    const cs = useCallback((p) => callStorage(p, () => {}, () => {}), []);
 
-    const handleUpdateConfig = (newConfig) => {
-        setConfig(newConfig);
-        localStorage.setItem('care_pro_api_key', newConfig.apiKey);
-    };
-
-    const SLOT_LIMIT = 10;
-    const sortedChildren = [...children].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-    const regularChildren = sortedChildren.slice(0, SLOT_LIMIT);
-    const waitlistChildren = sortedChildren.slice(SLOT_LIMIT);
-
-    const displayRegular = [...regularChildren];
-    while (displayRegular.length < SLOT_LIMIT) {
-        displayRegular.push({ id: `empty-${displayRegular.length}`, name: '未設定', isPlaceholder: true });
-    }
-
-    const cs = (p) => callStorage(p, () => {}, () => {});
-
-    // 保存と取得
-    const saveDailyData = async (date, ch, msgs, res, sum, table, global) => {
-        setIsSyncing(true);
-        const data = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, updatedAt: new Date().toISOString() };
-        await cs({ action: 'saveReport', date, data });
-        setIsSyncing(false);
-    };
-
+    // 1. Data Fetching Callback
     const fetchDailyData = useCallback(async (dateString) => {
         const data = await cs({ action: 'getReport', date: dateString });
         if (data && typeof data === 'object') {
@@ -129,11 +108,68 @@ export default function App() {
             setResults({}); setSummaryC(''); setDailyMessages({}); setChildren([]);
             setDailyTable({}); setGlobalLog({ admin: '', supervisor: '', notice: '', activities: '' });
         }
+    }, [cs]);
+
+    // 2. Auth Listener
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (u) => {
+            setUser(u);
+            setAuthLoading(false);
+        });
+        return () => unsubscribe();
     }, []);
 
-    useEffect(() => { fetchDailyData(selectedDate); }, [selectedDate, fetchDailyData]);
+    useEffect(() => { 
+        if (user) fetchDailyData(selectedDate); 
+    }, [selectedDate, fetchDailyData, user]);
 
-    // ハンドラー
+    // 5. Normal Functions & Handlers
+    const handleUpdateTags = (newTags) => {
+        setTags(newTags);
+        localStorage.setItem('care_pro_tags', JSON.stringify(newTags));
+    };
+
+    const handleUpdateConfig = (newConfig) => {
+        setConfig(newConfig);
+        localStorage.setItem('care_pro_api_key', newConfig.apiKey);
+    };
+
+    const handleLogout = async () => {
+        if (!confirm('ログアウトしますか？')) return;
+        await signOut(auth);
+    };
+
+    const SLOT_LIMIT = 10;
+    const sortedChildren = [...children].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const regularChildren = sortedChildren.slice(0, SLOT_LIMIT);
+    const waitlistChildren = sortedChildren.slice(SLOT_LIMIT);
+    const displayRegular = [...regularChildren];
+    while (displayRegular.length < SLOT_LIMIT) {
+        displayRegular.push({ id: `empty-${displayRegular.length}`, name: '未設定', isPlaceholder: true });
+    }
+
+    const saveDailyData = async (date, ch, msgs, res, sum, table, global) => {
+        setIsSyncing(true);
+        const data = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, updatedAt: new Date().toISOString() };
+        await cs({ action: 'saveReport', date, data });
+        setIsSyncing(false);
+    };
+
+    const handleAddFromMaster = async (masterChild) => {
+        if (children.some(c => c.id === masterChild.id)) {
+            showToast(`${masterChild.name}さんは既に追加されています。`);
+            return;
+        }
+        const newChild = { ...masterChild, timestamp: Date.now() };
+        const newList = [...children, newChild];
+        setChildren(newList);
+        const newTable = { ...dailyTable, [newChild.id]: { ...(dailyTable[newChild.id] || {}), pickupLocation: masterChild.defaultPickupLocation || '' } };
+        setDailyTable(newTable);
+        setSelectedGenerateIds(prev => [...prev, newChild.id]);
+        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newTable, globalLog);
+        showToast(`${masterChild.name}さんを本日のリストに追加しました。`);
+    };
+
     const addChild = async () => {
         const newChild = { id: crypto.randomUUID(), name: '新規児童', timestamp: Date.now() };
         const newList = [...children, newChild];
@@ -248,6 +284,22 @@ JSON形式: ${template}`;
             .map(m => m.text.replace(/【.*?】/g, '').trim()).filter(t => t).join(' / ');
     };
 
+    // 6. JSX Return (Conditional inside to keep hook order)
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <div className="flex flex-col items-center gap-4">
+                    <Loader2 className="w-10 h-10 text-tree-500 animate-spin" />
+                    <p className="font-black text-slate-400 uppercase tracking-widest text-xs">Authenticating...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!user) {
+        return <Login onLoginSuccess={() => {}} />;
+    }
+
     return (
         <div className="min-h-screen p-3 md:p-8 pb-32 space-y-6 md:space-y-8 max-w-[1800px] mx-auto overflow-x-hidden">
             {/* Responsive Header */}
@@ -262,15 +314,17 @@ JSON形式: ${template}`;
                     </div>
                 </div>
                 <div className="flex items-center gap-2 md:gap-4">
-                    <div className="hidden sm:flex flex-col items-end">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">稼働中</span>
+                    <div className="hidden sm:flex flex-col items-end mr-2">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">ユーザー</span>
                         <div className="flex items-center gap-1.5 mt-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-tree-500 animate-pulse" />
-                            <span className="text-[10px] font-bold text-slate-600">同期済み</span>
+                            <span className="text-[10px] font-bold text-slate-600">{user?.email?.replace('@tree-kids.com', '')}</span>
                         </div>
                     </div>
                     <button onClick={() => setShowSettingsModal(true)} className="p-2.5 md:p-3 bg-white hover:bg-tree-50 rounded-xl md:rounded-2xl shadow-sm border border-slate-100 transition-all active:scale-95 group flex-shrink-0">
                         <Settings className="w-5 h-5 text-slate-400 group-hover:rotate-90 transition-transform duration-500" />
+                    </button>
+                    <button onClick={handleLogout} className="p-2.5 md:p-3 bg-white hover:bg-apple-50 rounded-xl md:rounded-2xl shadow-sm border border-slate-100 transition-all active:scale-95 group flex-shrink-0">
+                        <LogOut className="w-5 h-5 text-slate-400 group-hover:text-apple-500" />
                     </button>
                 </div>
             </header>
@@ -288,9 +342,16 @@ JSON形式: ${template}`;
                             <span className="font-black text-slate-800 text-lg md:text-xl tracking-tight">{selectedDate}</span>
                         </div>
                     </div>
-                    <button onClick={addChild} className="h-16 md:h-[72px] px-6 md:px-8 bg-tree-500 hover:bg-tree-600 text-white rounded-[1.5rem] md:rounded-[2rem] flex flex-col items-center justify-center gap-1 font-black shadow-xl shadow-tree-100 transition-all active:scale-95 group/btn">
-                        <PlusCircle className="w-6 h-6 md:w-7 md:h-7 group-hover/btn:rotate-90 transition-transform" />
-                    </button>
+                    <div className="flex flex-col gap-2">
+                        <button onClick={() => setShowMasterModal(true)} className="h-10 md:h-12 px-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl md:rounded-2xl flex items-center justify-center gap-2 font-black shadow-lg shadow-indigo-100 transition-all active:scale-95 group/btn">
+                            <UserCheck className="w-4 h-4 md:w-5 md:h-5" />
+                            <span className="text-[10px] md:text-[11px] uppercase tracking-wide">マスタ</span>
+                        </button>
+                        <button onClick={addChild} className="h-10 md:h-12 px-4 bg-tree-500 hover:bg-tree-600 text-white rounded-xl md:rounded-2xl flex items-center justify-center gap-2 font-black shadow-lg shadow-tree-100 transition-all active:scale-95 group/btn">
+                            <PlusCircle className="w-4 h-4 md:w-5 md:h-5 group-hover/btn:rotate-90 transition-transform" />
+                            <span className="text-[10px] md:text-[11px] uppercase tracking-wide">新規</span>
+                        </button>
+                    </div>
                 </div>
 
                 {/* Batch Actions Card */}
@@ -481,6 +542,12 @@ JSON形式: ${template}`;
                 />
             )}
             <ExportModal show={showExportModal} onClose={() => setShowExportModal(false)} selectedDate={selectedDate} children={children} results={results} summaryC={summaryC} />
+            {showMasterModal && (
+                <MasterListModal 
+                    onClose={() => setShowMasterModal(false)} 
+                    onSelect={handleAddFromMaster}
+                />
+            )}
         
             {/* Custom Toast Notification */}
             {toast && (
