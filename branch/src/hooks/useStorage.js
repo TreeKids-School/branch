@@ -105,6 +105,17 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return newIndex;
             }
+            case 'saveIndividualTreeComm': {
+                const { childId, date, data } = payload;
+                if (!childId || !date) throw new Error('childId and date are required for individual save');
+                const docRef = doc(firestore, 'children', childId, 'tree_communications', date);
+                await setDoc(docRef, {
+                    ...data,
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return { status: 'OK' };
+            }
             default: return null;
         }
     } catch (e) {

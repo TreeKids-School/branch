@@ -150,8 +150,39 @@ export default function App() {
 
     const saveDailyData = async (date, ch, msgs, res, sum, table, global) => {
         setIsSyncing(true);
-        const data = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, updatedAt: new Date().toISOString() };
-        await cs({ action: 'saveReport', date, data });
+        const dailyData = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, updatedAt: new Date().toISOString() };
+        
+        // 1. Save traditional daily bulk report
+        await cs({ action: 'saveReport', date, data: dailyData });
+
+        // 2. Save individual child communications for cross-app synchronization
+        // Path: children/{childId}/tree_communications/{date}
+        for (const child of ch) {
+            if (child.isPlaceholder) continue;
+            
+            const childResult = res[child.id] || {};
+            const childTable = (table || dailyTable)[child.id] || {};
+            
+            const individualData = {
+                name: child.name,
+                tree_comm_text: childResult.D || '',
+                ai_result: childResult.B_result || '',
+                ai_plan: childResult.B_plan || '',
+                ai_item: childResult.B_item || '',
+                pickupLocation: childTable.pickupLocation || '',
+                endTime: childTable.endTime || '',
+                transportTime: childTable.transportTime || '',
+                notes: childTable.notes || ''
+            };
+
+            await cs({ 
+                action: 'saveIndividualTreeComm', 
+                childId: child.id, 
+                date: date, 
+                data: individualData 
+            });
+        }
+        
         setIsSyncing(false);
     };
 
