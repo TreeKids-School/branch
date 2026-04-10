@@ -13,7 +13,7 @@ import MasterListModal from './components/MasterListModal';
 import { auth, firestore } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { callStorage } from './hooks/useStorage';
-import { STAFF_OPTIONS, APP_VERSION, DAILY_LIMIT, parseForceSheet, buildForceSheet, getStaffInstruction } from './constants';
+import { STAFF_OPTIONS, APP_VERSION, DAILY_LIMIT, parseForceSheet, buildForceSheet, getStaffInstruction } from './app_constants';
 import { defaultPrompts } from './constants/defaultPrompts';
 import { CopyButton, ErrorBoundary } from './components/Shared';
 import CalendarModal from './components/CalendarModal';
