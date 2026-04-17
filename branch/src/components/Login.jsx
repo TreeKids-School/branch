@@ -14,11 +14,17 @@ export default function Login({ onLoginSuccess }) {
         setLoading(true);
         setError(null);
 
-        // Map "テスト" to an internal email format
-        const email = id === 'テスト' ? 'test@tree-kids.com' : id;
+        // Map special IDs to an internal email format
+        const specialUsers = {
+            'テスト': { email: 'test@tree-kids.com', paddedPass: '000001' },
+            'ブラック': { email: 'black@tree-kids.com', paddedPass: '000001' }
+        };
+        const special = specialUsers[id];
+        const email = special ? special.email : id;
+        
         // Firebase requires at least 6 characters for passwords.
-        // If the user enters '0001', we internally use '000001' to satisfy the rule.
-        const finalPassword = (id === 'テスト' && password === '0001') ? '000001' : password;
+        // If it's a special user and they enter '0001', we internally use '000001' to satisfy the rule.
+        const finalPassword = (special && password === '0001') ? special.paddedPass : password;
 
         try {
             await signInWithEmailAndPassword(auth, email, finalPassword);
@@ -26,8 +32,8 @@ export default function Login({ onLoginSuccess }) {
         } catch (err) {
             console.warn('Login attempt failed, checking for auto-creation:', err.code);
             
-            // If it's the special test user, try creating it on the fly
-            if (id === 'テスト' && password === '0001' && (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-password')) {
+            // If it's a special user, try creating it on the fly
+            if (special && password === '0001' && (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-password')) {
                 try {
                     await createUserWithEmailAndPassword(auth, email, finalPassword);
                     onLoginSuccess();

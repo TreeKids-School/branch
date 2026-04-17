@@ -10,6 +10,7 @@ import DocViewer from './components/DocViewer';
 import TreeCommPanel from './components/TreeCommPanel';
 import Login from './components/Login';
 import MasterListModal from './components/MasterListModal';
+import DocumentsAPanel from './components/DocumentsAPanel';
 import { auth, firestore } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { callStorage } from './hooks/useStorage';
@@ -78,6 +79,7 @@ export default function App() {
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
     const [showMasterModal, setShowMasterModal] = useState(false);
+    const [masterChildren, setMasterChildren] = useState([]);
     const [existingReportDates, setExistingReportDates] = useState([]); // Restore missing state
     
     const [config, setConfig] = useState(() => ({ apiKey: localStorage.getItem('care_pro_api_key') || '' }));
@@ -110,14 +112,21 @@ export default function App() {
         }
     }, [cs]);
 
+    // 1.5 Fetch Master Children
+    const fetchMasterChildren = useCallback(async () => {
+        const list = await cs({ action: 'getMasterChildren' });
+        setMasterChildren(list || []);
+    }, [cs]);
+
     // 2. Auth Listener
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (u) => {
             setUser(u);
             setAuthLoading(false);
+            if (u) fetchMasterChildren();
         });
         return () => unsubscribe();
-    }, []);
+    }, [fetchMasterChildren]);
 
     useEffect(() => { 
         if (user) fetchDailyData(selectedDate); 
@@ -577,6 +586,8 @@ JSON形式: ${template}`;
                 <MasterListModal 
                     onClose={() => setShowMasterModal(false)} 
                     onSelect={handleAddFromMaster}
+                    user={user}
+                    onMasterUpdate={fetchMasterChildren}
                 />
             )}
         

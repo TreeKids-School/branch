@@ -2,12 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { X, Save, UserPlus, Trash2, User, MapPin, Search, Check, Plus } from 'lucide-react';
 import { callStorage } from '../hooks/useStorage';
 
-export default function MasterListModal({ onClose, onSelect }) {
+export default function MasterListModal({ onClose, onSelect, user, onMasterUpdate }) {
     const [masterList, setMasterList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [newName, setNewName] = useState('');
     const [newPickup, setNewPickup] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
+
+    // Cross-browser UUID fallback
+    const generateId = () => {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+            return crypto.randomUUID();
+        }
+        return 'id-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+    };
 
     useEffect(() => {
         const fetchMaster = async () => {
@@ -21,23 +29,27 @@ export default function MasterListModal({ onClose, onSelect }) {
     const handleAdd = async () => {
         if (!newName.trim()) return;
         const newChild = {
-            id: crypto.randomUUID(),
+            id: generateId(),
             name: newName.trim(),
             defaultPickupLocation: newPickup.trim(),
             timestamp: Date.now()
         };
-        const newList = [...masterList, newChild];
-        setMasterList(newList);
-        await callStorage({ action: 'saveMasterChildren', data: newList });
+        // Update local state for immediate feedback
+        setMasterList(prev => [...prev, newChild]);
+        // Save only the new child as a single document
+        await callStorage({ action: 'saveMasterChildren', data: newChild, userId: user?.uid });
         setNewName('');
         setNewPickup('');
+        // Trigger global refresh
+        if (onMasterUpdate) onMasterUpdate();
     };
 
     const handleDelete = async (id) => {
         if (!confirm('マスタから削除しますか？')) return;
-        const newList = masterList.filter(c => c.id !== id);
-        setMasterList(newList);
-        await callStorage({ action: 'saveMasterChildren', data: newList });
+        setMasterList(prev => prev.filter(c => c.id !== id));
+        await callStorage({ action: 'deleteMasterChild', id });
+        // Trigger global refresh
+        if (onMasterUpdate) onMasterUpdate();
     };
 
     const filteredList = masterList.filter(c => 

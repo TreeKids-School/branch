@@ -1,5 +1,6 @@
 {
     "hosting": {
+        "site": "test-branch-46c5a",
         "public": "dist",
         "ignore": [
             "firebase.json",

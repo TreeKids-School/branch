@@ -1,5 +1,8 @@
 import { firestore } from '../firebase';
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { 
+    doc, getDoc, setDoc, collection, getDocs, deleteDoc, 
+    addDoc, serverTimestamp 
+} from 'firebase/firestore';
 
 const isLocal = () => false; // Force Firestore for testing/deployment
 
@@ -46,26 +49,46 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
     try {
         switch (action) {
             case 'getMasterChildren': {
-                const docRef = doc(firestore, 'meta', 'children');
-                const snap = await getDoc(docRef);
+                const colRef = collection(firestore, 'children');
+                const snap = await getDocs(colRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
-                return snap.exists() ? (snap.data().list || []) : [];
+                return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             }
             case 'saveMasterChildren': {
-                const docRef = doc(firestore, 'meta', 'children');
-                await setDoc(docRef, { list: data });
+                const child = Array.isArray(data) ? null : data;
+                const { userId } = payload;
+                if (child && child.id) {
+                    const docRef = doc(firestore, 'children', child.id);
+                    await setDoc(docRef, { 
+                        ...child, 
+                        createdBy: userId || null,
+                        updatedAt: new Date().toISOString() 
+                    }, { merge: true });
+                }
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return { status: 'OK' };
+            }
+            case 'deleteMasterChild': {
+                const { id } = payload;
+                if (!id) throw new Error('id is required for deletion');
+                const docRef = doc(firestore, 'children', id);
+                await deleteDoc(docRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
             }
             case 'getChildren': {
-                const docRef = doc(firestore, 'meta', 'children');
+                // In the new project, we might still want a per-day children list 
+                // but the master list is now in artifacts/.../children.
+                // For now, let's keep reports and daily children list in their old paths 
+                // (reports/{date}) but they will be on the new project.
+                const docRef = doc(firestore, 'reports', date);
                 const snap = await getDoc(docRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
-                return snap.exists() ? (snap.data().list || []) : [];
+                return snap.exists() ? (snap.data().children || []) : [];
             }
             case 'setChildren': {
-                const docRef = doc(firestore, 'meta', 'children');
-                await setDoc(docRef, { list: data });
+                // This is typically called when saving the daily report.
+                // Handled in saveReport.
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
             }
@@ -108,7 +131,8 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
             case 'saveIndividualTreeComm': {
                 const { childId, date, data } = payload;
                 if (!childId || !date) throw new Error('childId and date are required for individual save');
-                const docRef = doc(firestore, 'children', childId, 'tree_communications', date);
+                // Path: children/{childId}/app_categories/書類管理/tree_communications/{date}
+                const docRef = doc(firestore, 'children', childId, 'app_categories', '書類管理', 'tree_communications', date);
                 await setDoc(docRef, {
                     ...data,
                     updatedAt: new Date().toISOString()

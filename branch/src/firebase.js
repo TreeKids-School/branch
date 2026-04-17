@@ -4,13 +4,12 @@ import { getFirestore } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
-    apiKey: "AIzaSyCY7R1DcN6pAmd5sa4XbVkFYPdeh33SW4U",
-    authDomain: "octopus2-ae965.firebaseapp.com",
-    databaseURL: "https://octopus2-ae965-default-rtdb.firebaseio.com",
-    projectId: "octopus2-ae965",
-    storageBucket: "octopus2-ae965.firebasestorage.app",
-    messagingSenderId: "707672181406",
-    appId: "1:707672181406:web:019558d5c266bce12b098f"
+    apiKey: "AIzaSyDc1jISa-wDqV7Rg-84MRbbswHC-EkUuqI",
+    authDomain: "test-octopus-5b254.firebaseapp.com",
+    projectId: "test-octopus-5b254",
+    storageBucket: "test-octopus-5b254.firebasestorage.app",
+    messagingSenderId: "433348736212",
+    appId: "1:433348736212:web:4a25a3e54a070d0e2b7741"
 };
 
 const app = initializeApp(firebaseConfig);
