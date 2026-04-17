@@ -9,8 +9,6 @@ import MemoPanel from './components/MemoPanel';
 import DocViewer from './components/DocViewer';
 import TreeCommPanel from './components/TreeCommPanel';
 import Login from './components/Login';
-import MasterListModal from './components/MasterListModal';
-import DocumentsAPanel from './components/DocumentsAPanel';
 import { auth, firestore } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { callStorage } from './hooks/useStorage';
@@ -78,7 +76,6 @@ export default function App() {
     const [showCalendarModal, setShowCalendarModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
-    const [showMasterModal, setShowMasterModal] = useState(false);
     const [masterChildren, setMasterChildren] = useState([]);
     const [existingReportDates, setExistingReportDates] = useState([]); // Restore missing state
     
@@ -208,14 +205,6 @@ export default function App() {
         setSelectedGenerateIds(prev => [...prev, newChild.id]);
         await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newTable, globalLog);
         showToast(`${masterChild.name}さんを本日のリストに追加しました。`);
-    };
-
-    const addChild = async () => {
-        const newChild = { id: crypto.randomUUID(), name: '新規児童', timestamp: Date.now() };
-        const newList = [...children, newChild];
-        setChildren(newList);
-        setSelectedGenerateIds(prev => [...prev, newChild.id]);
-        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, dailyTable, globalLog);
     };
 
     const updateDailyTable = async (childId, data) => {
@@ -371,7 +360,6 @@ JSON形式: ${template}`;
 
             {/* Bento Controls - Responsive Stack */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 animate-in fade-in duration-700">
-                {/* Date Selection Card */}
                 <div className="lg:col-span-4 glass-card p-4 md:p-6 rounded-[2.5rem] md:rounded-[3rem] flex items-center gap-4 md:gap-6 shadow-premium">
                     <div onClick={() => setShowCalendarModal(true)} className="flex-1 bg-white border-2 border-slate-50 hover:border-tree-200 p-4 md:p-5 rounded-[2rem] md:rounded-[2.5rem] flex items-center gap-4 md:gap-5 cursor-pointer transition-all shadow-inner">
                         <div className="p-3 md:p-4 bg-tree-50 rounded-xl md:rounded-2xl text-tree-500">
@@ -382,20 +370,36 @@ JSON形式: ${template}`;
                             <span className="font-black text-slate-800 text-lg md:text-xl tracking-tight">{selectedDate}</span>
                         </div>
                     </div>
-                    <div className="flex flex-col gap-2">
-                        <button onClick={() => setShowMasterModal(true)} className="h-10 md:h-12 px-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl md:rounded-2xl flex items-center justify-center gap-2 font-black shadow-lg shadow-indigo-100 transition-all active:scale-95 group/btn">
-                            <UserCheck className="w-4 h-4 md:w-5 md:h-5" />
-                            <span className="text-[10px] md:text-[11px] uppercase tracking-wide">マスタ</span>
-                        </button>
-                        <button onClick={addChild} className="h-10 md:h-12 px-4 bg-tree-500 hover:bg-tree-600 text-white rounded-xl md:rounded-2xl flex items-center justify-center gap-2 font-black shadow-lg shadow-tree-100 transition-all active:scale-95 group/btn">
-                            <PlusCircle className="w-4 h-4 md:w-5 md:h-5 group-hover/btn:rotate-90 transition-transform" />
-                            <span className="text-[10px] md:text-[11px] uppercase tracking-wide">新規</span>
-                        </button>
+                </div>
+
+                {/* Quick Child Selection Card */}
+                <div className="lg:col-span-8 glass-card p-4 md:p-6 rounded-[2.5rem] md:rounded-[3rem] flex flex-col gap-4 shadow-premium">
+                    <div className="flex items-center justify-between px-2">
+                        <h4 className="text-[10px] md:text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                            <PlusCircle className="w-4 h-4 text-tree-500" /> 児童を追加
+                        </h4>
+                        <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">{masterChildren.filter(m => !children.some(c => c.id === m.id)).length} 名待機中</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto pr-2 custom-scrollbar">
+                        {masterChildren.filter(m => !children.some(c => c.id === m.id)).length === 0 ? (
+                            <div className="w-full flex items-center justify-center p-4 border-2 border-dashed border-slate-100 rounded-2xl text-[10px] font-bold text-slate-300 uppercase tracking-widest">全ての児童が追加済みです</div>
+                        ) : (
+                            masterChildren.filter(m => !children.some(c => c.id === m.id)).map(child => (
+                                <button 
+                                    key={child.id} 
+                                    onClick={() => handleAddFromMaster(child)}
+                                    className="px-4 py-2.5 bg-white hover:bg-tree-50 text-slate-600 border border-slate-100 rounded-xl font-black text-[10px] md:text-xs transition-all shadow-sm active:scale-95 flex items-center gap-2 group"
+                                >
+                                    <span className="w-2 h-2 bg-tree-200 rounded-full group-hover:bg-tree-500 transition-colors" />
+                                    {child.name}
+                                </button>
+                            ))
+                        )}
                     </div>
                 </div>
 
                 {/* Batch Actions Card */}
-                <div className="lg:col-span-8 glass-card p-4 md:p-6 rounded-[2.5rem] md:rounded-[3rem] flex flex-col sm:flex-row items-center justify-between gap-4 shadow-premium">
+                <div className="lg:col-span-12 glass-card p-4 md:p-6 rounded-[2.5rem] md:rounded-[3rem] flex flex-col sm:flex-row items-center justify-between gap-4 shadow-premium">
                     <div className="flex items-center gap-4 md:gap-8 sm:pl-4 w-full sm:w-auto overflow-hidden">
                         <div className="flex -space-x-3 overflow-hidden flex-shrink-0">
                             {children.slice(0, 4).map((c, i) => (
@@ -582,14 +586,6 @@ JSON形式: ${template}`;
                 />
             )}
             <ExportModal show={showExportModal} onClose={() => setShowExportModal(false)} selectedDate={selectedDate} children={children} results={results} summaryC={summaryC} />
-            {showMasterModal && (
-                <MasterListModal 
-                    onClose={() => setShowMasterModal(false)} 
-                    onSelect={handleAddFromMaster}
-                    user={user}
-                    onMasterUpdate={fetchMasterChildren}
-                />
-            )}
         
             {/* Custom Toast Notification */}
             {toast && (
