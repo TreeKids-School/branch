@@ -1,7 +1,7 @@
 import { firestore } from '../firebase';
 import { 
     doc, getDoc, setDoc, collection, getDocs, deleteDoc, 
-    addDoc, serverTimestamp 
+    addDoc, serverTimestamp, query, where, orderBy, Timestamp 
 } from 'firebase/firestore';
 
 const isLocal = () => false; // Force Firestore for testing/deployment
@@ -52,7 +52,9 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 const colRef = collection(firestore, 'children');
                 const snap = await getDocs(colRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
-                return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                return snap.docs
+                    .map(doc => ({ id: doc.id, ...doc.data() }))
+                    .filter(child => child.name); // name のないドキュメントは除外してクラッシュを防ぐ
             }
             case 'saveMasterChildren': {
                 const child = Array.isArray(data) ? null : data;
@@ -139,6 +141,57 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 }, { merge: true });
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
+            }
+            case 'getDailyReports': {
+                const { childId } = payload;
+                if (!childId) throw new Error('childId is required');
+                const colRef = collection(firestore, 'daily_reports');
+                const q = query(colRef, where('childId', '==', childId), orderBy('date', 'desc'));
+                const snap = await getDocs(q);
+                return snap.docs.map(d => {
+                    const data = d.data();
+                    return {
+                        id: d.id,
+                        ...data,
+                        date: data.date?.toDate?.() ? data.date.toDate().toISOString().split('T')[0] : data.date // Convert to YYYY-MM-DD
+                    };
+                });
+            }
+            case 'saveDailyReport': {
+                const { childId, date, externalInfo, staffName, id } = payload.data;
+                const dailyRef = collection(firestore, 'daily_reports');
+                
+                const dateObj = new Date(date);
+                const timestamp = Timestamp.fromDate(dateObj);
+                
+                const docData = {
+                    childId,
+                    date: timestamp,
+                    externalInfo,
+                    staffName,
+                    updatedAt: serverTimestamp()
+                };
+
+                if (id) {
+                    await setDoc(doc(firestore, 'daily_reports', id), docData, { merge: true });
+                } else {
+                    await addDoc(dailyRef, docData);
+                }
+                return { status: 'OK' };
+            }
+            case 'deleteDailyReport': {
+                const { id } = payload;
+                if (!id) throw new Error('id is required');
+                await deleteDoc(doc(firestore, 'daily_reports', id));
+                return { status: 'OK' };
+            }
+            case 'getStaffNames': {
+                const colRef = collection(firestore, 'staff');
+                const snap = await getDocs(colRef);
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return snap.docs
+                    .map(doc => ({ id: doc.id, ...doc.data() }))
+                    .map(s => s.name || s.id); // Prefer name field, fall back to id
             }
             default: return null;
         }

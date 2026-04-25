@@ -1,136 +1,265 @@
-import { useState, useEffect } from 'react';
-import { MessageSquare, ChevronDown, ChevronUp, Save, X, Info, Send, FileText } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Save, X, FileText, Trash2, Calendar, User, History, Plus, Edit2, AlertCircle, MessageSquare, ChevronDown, ChevronUp, Clock } from 'lucide-react';
+import { callStorage } from '../hooks/useStorage';
 
-export default function TreeCommPanel({ child, result, messages, onSave, onClose }) {
-    const [draftD, setDraftD] = useState('');
-    const [draftPlan, setDraftPlan] = useState('');
-    const [draftResult, setDraftResult] = useState('');
-    const [showMemos, setShowMemos] = useState(false);
+export default function TreeCommPanel({ child, messages = [], tags = [], result, selectedDate: propSelectedDate, staffList = [], onSave, onClose }) {
+    const [history, setHistory] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [editingId, setEditingId] = useState(null);
+    const [staffName, setStaffName] = useState(localStorage.getItem('last_staff_name') || '');
+    const [content, setContent] = useState('');
+    const [selectedDate, setSelectedDate] = useState(propSelectedDate);
+    const [view, setView] = useState('editor'); // 'editor' or 'history'
+    const [isMemoExpanded, setIsMemoExpanded] = useState(true);
+
+    const fetchHistory = useCallback(async () => {
+        if (!child?.id) return;
+        setLoading(true);
+        const data = await callStorage({ action: 'getDailyReports', childId: child.id });
+        setHistory(data || []);
+        setLoading(false);
+    }, [child?.id]);
 
     useEffect(() => {
-        if (result) {
-            setDraftD(result.D || '');
-            setDraftPlan(result.B_plan || '');
-            setDraftResult(result.B_result || '');
+        fetchHistory();
+        setSelectedDate(propSelectedDate);
+        if (result?.D) {
+            setContent(result.D);
         }
-    }, [result, child]);
+    }, [child, fetchHistory, result, propSelectedDate]);
 
-    const handleSave = () => {
-        onSave(child.id, { ...result, D: draftD, B_plan: draftPlan, B_result: draftResult });
-        onClose();
+    const handleSave = async () => {
+        if (!content.trim()) return;
+        setLoading(true);
+        
+        const payload = {
+            action: 'saveDailyReport',
+            data: {
+                id: editingId,
+                childId: child.id,
+                date: selectedDate,
+                externalInfo: content,
+                staffName: staffName
+            }
+        };
+
+        await callStorage(payload);
+        localStorage.setItem('last_staff_name', staffName);
+        onSave(child.id, { ...result, D: content });
+        
+        setContent('');
+        setEditingId(null);
+        fetchHistory();
+        setView('history');
+        setLoading(false);
+    };
+
+    const handleEdit = (report) => {
+        setEditingId(report.id);
+        setContent(report.externalInfo);
+        setStaffName(report.staffName);
+        setSelectedDate(report.date);
+        setView('editor');
+    };
+
+    const handleDelete = async (id) => {
+        if (!confirm('この記録を削除しますか？')) return;
+        setLoading(true);
+        await callStorage({ action: 'deleteDailyReport', id });
+        fetchHistory();
+        setLoading(false);
+    };
+
+    const [touchStart, setTouchStart] = useState(null);
+    const [touchEnd, setTouchEnd] = useState(null);
+
+    const handleTouchStart = (e) => {
+        setTouchEnd(null);
+        setTouchStart(e.targetTouches[0].clientX);
+    };
+
+    const handleTouchMove = (e) => {
+        setTouchEnd(e.targetTouches[0].clientX);
+    };
+
+    const handleTouchEnd = () => {
+        if (!touchStart || !touchEnd) return;
+        const distance = touchEnd - touchStart;
+        const isLeftToRight = distance > 100;
+        if (isLeftToRight) {
+            onClose();
+        }
     };
 
     if (!child) return null;
 
     return (
-        <div className="h-full flex flex-col bg-white md:bg-slate-50 animate-in slide-in-from-right duration-500 shadow-2xl border-l border-slate-200">
-            {/* Header - Brand Wood Brown Theme */}
-            <header className="flex items-center justify-between p-5 md:p-7 text-white shadow-xl flex-shrink-0 z-20" style={{ backgroundColor: '#8B5E3C' }}>
-                <div className="flex items-center gap-4 md:gap-5">
-                    <div className="p-2.5 md:p-3 bg-white/10 rounded-xl md:rounded-2xl backdrop-blur-md ring-2 ring-white/20">
-                        <FileText className="w-6 h-6 md:w-7 md:h-7" />
+        <div 
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            className="h-full flex flex-col bg-slate-50 shadow-2xl border-l border-slate-200 overflow-hidden"
+        >
+            {/* Header - Apple Red (Unified) */}
+            <header className="flex items-center justify-between p-5 md:p-7 text-white shadow-xl flex-shrink-0 z-30" style={{ backgroundColor: '#DC3545' }}>
+                <div className="flex items-center gap-4">
+                    <div className="p-2.5 bg-white/20 rounded-xl backdrop-blur-md ring-2 ring-white/20">
+                        <FileText className="w-6 h-6" />
                     </div>
-                    <div className="truncate">
-                        <h3 className="font-black text-xl md:text-2xl leading-none drop-shadow-md truncate">{child.name}</h3>
-                        <p className="text-[9px] md:text-[11px] font-black opacity-90 mt-1.5 md:mt-2 uppercase tracking-[0.2em] leading-none text-wood-50">ツリー通信録</p>
+                    <div>
+                        <h3 className="font-black text-lg md:text-xl leading-none">{child.name}</h3>
+                        <p className="text-[9px] font-bold opacity-80 mt-1.5 tracking-widest uppercase">ツリー通信作成</p>
                     </div>
                 </div>
-                <button onClick={onClose} className="p-3 md:p-4 hover:bg-white/10 rounded-xl md:rounded-2xl transition-all shadow-sm active:scale-95">
-                    <X className="w-5 h-5 md:w-6 md:h-6" />
-                </button>
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setView(view === 'editor' ? 'history' : 'editor')}
+                        className="p-2.5 hover:bg-white/10 rounded-xl transition-all active:scale-95"
+                    >
+                        {view === 'editor' ? <History className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+                    </button>
+                    <button onClick={onClose} className="p-2.5 hover:bg-white/10 rounded-xl transition-all active:scale-95">
+                        <X className="w-6 h-6" />
+                    </button>
+                </div>
             </header>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-10 space-y-8 md:space-y-12 bg-wood-50/10">
-                {/* Reference Memos (Wood Style) */}
-                <div className="bg-white rounded-[2.5rem] md:rounded-[3.5rem] shadow-premium border border-wood-100/50 overflow-hidden group transition-all duration-500">
-                    <button 
-                        onClick={() => setShowMemos(!showMemos)}
-                        className={`w-full px-6 md:px-10 py-5 md:py-6 flex items-center justify-between font-black text-[10px] md:text-xs transition-all ${showMemos ? 'bg-wood-600 text-white' : 'bg-wood-50 text-wood-700 hover:bg-wood-100'}`}
-                    >
-                        <div className="flex items-center gap-3">
-                            <Info className={`w-4 h-4 md:w-5 md:h-5 ${showMemos ? 'text-white' : 'text-wood-400'}`} />
-                            <span className="uppercase tracking-[0.15em]">メモ履歴 ({messages.length})</span>
-                        </div>
-                        {showMemos ? <ChevronUp className="w-4 h-4 md:w-5 md:h-5" /> : <ChevronDown className="w-4 h-4 md:w-5 md:h-5" />}
-                    </button>
-                    {showMemos && (
-                        <div className="p-4 md:p-8 max-h-[300px] overflow-y-auto space-y-4 bg-white/40 animate-in fade-in slide-in-from-top-4 duration-500">
-                            {messages.length === 0 ? (
-                                <p className="text-center py-8 text-[9px] text-wood-300 italic font-black uppercase tracking-widest">履歴データがありません</p>
-                            ) : (
-                                messages.map((m, i) => (
-                                    <div key={i} className="p-5 bg-white border border-wood-50 rounded-3xl text-[12px] md:text-[13px] text-slate-700 leading-relaxed shadow-sm">
-                                        <div className="flex items-start gap-3">
-                                            <div className="w-2 h-2 rounded-full bg-wood-400 mt-1.5 shadow-inner flex-shrink-0" />
-                                            {m.text}
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                {/* ★ AI生成された療育結果（B_result）表示・編集欄 */}
-                <div className="space-y-4 md:space-y-6 px-2">
-                    <label className="block text-[10px] md:text-[12px] font-black text-tree-700 uppercase tracking-[0.25em] flex items-center gap-3">
-                        <div className="w-2.5 h-2.5 rounded-full bg-apple-500 border-2 border-white shadow-lg animate-pulse" />
-                        【AI生成】療育の結果（支援記録）
-                        {draftResult && (
-                            <span className="ml-2 px-2.5 py-1 bg-apple-500 text-white text-[8px] font-black rounded-full uppercase tracking-widest shadow-sm">AI生成済み</span>
-                        )}
-                    </label>
-                    <textarea
-                        value={draftResult}
-                        onChange={(e) => setDraftResult(e.target.value)}
-                        placeholder="AI生成ボタンを押すと、ここに療育の結果（支援記録）が自動で入力されます。手動で入力・修正することもできます。"
-                        className={`w-full min-h-[180px] md:min-h-[200px] p-6 md:p-8 text-[14px] md:text-[15px] bg-white border-2 rounded-[2.5rem] md:rounded-[3.5rem] focus:ring-8 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text font-medium text-slate-700 ${draftResult ? 'border-apple-300 focus:border-apple-500 focus:ring-apple-50' : 'border-wood-100/50 focus:border-wood-500 focus:ring-wood-50'}`}
-                    />
-                </div>
-
-                {/* Tree Communication Input */}
-                <div className="space-y-4 md:space-y-6 px-2">
-                    <label className="block text-[10px] md:text-[12px] font-black text-wood-600 uppercase tracking-[0.25em] flex items-center gap-3">
-                        <div className="w-2.5 h-2.5 rounded-full bg-tree-500 border-2 border-white shadow-lg animate-pulse" />
-                        家庭とのツリー通信（手書きメモ）
-                    </label>
-                    <textarea
-                        value={draftD}
-                        onChange={(e) => setDraftD(e.target.value)}
-                        placeholder="保護者へのメッセージを入力..."
-                        className="w-full min-h-[180px] md:min-h-[200px] p-6 md:p-8 text-[14px] md:text-[15px] bg-white border-2 border-wood-100/50 rounded-[2.5rem] md:rounded-[3.5rem] focus:border-wood-500 focus:ring-8 focus:ring-wood-50 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text font-medium text-slate-700"
-                    />
-                </div>
-
-                {/* Future Plan Input */}
-                <div className="space-y-4 md:space-y-6 px-2 pb-6">
-                    <label className="block text-[10px] md:text-[12px] font-black text-wood-600 uppercase tracking-[0.25em] flex items-center gap-3">
-                        <div className="w-2.5 h-2.5 rounded-full bg-slate-400 border-2 border-white shadow-lg" />
-                        今後の支援の予定
-                    </label>
-                    <textarea
-                        value={draftPlan}
-                        onChange={(e) => setDraftPlan(e.target.value)}
-                        placeholder="今後の支援の方針や予定..."
-                        className="w-full min-h-[120px] md:min-h-[140px] p-6 md:p-8 text-[14px] md:text-[15px] bg-white border-2 border-wood-100/50 rounded-[2.5rem] md:rounded-[3.5rem] focus:border-wood-500 focus:ring-8 focus:ring-wood-50 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text font-medium text-slate-700"
-                    />
-                </div>
+            {/* View Toggle Tabs */}
+            <div className="flex border-b border-slate-200 bg-white flex-shrink-0 z-20">
+                <button 
+                    onClick={() => setView('editor')}
+                    className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${view === 'editor' ? 'text-apple-600 border-b-4 border-apple-600 bg-apple-50/30' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                    {editingId ? '編集' : '作成'}
+                </button>
+                <button 
+                    onClick={() => setView('history')}
+                    className={`flex-1 py-4 text-[10px] font-black uppercase tracking-widest transition-all ${view === 'history' ? 'text-apple-600 border-b-4 border-apple-600 bg-apple-50/30' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                    作成履歴 ({history.length})
+                </button>
             </div>
 
-            {/* Action Footer - Wood Thema */}
-            <div className="p-6 md:p-10 bg-white border-t border-wood-50 flex flex-col gap-4 md:gap-5 shadow-[0_-20px_50px_rgba(0,0,0,0.02)] flex-shrink-0">
-                <button 
-                    onClick={handleSave}
-                    className="w-full py-5 md:py-7 bg-wood-700 hover:bg-wood-800 text-white rounded-[2rem] md:rounded-[3rem] font-black text-xs md:text-sm shadow-premium shadow-wood-100 flex items-center justify-center gap-3 md:gap-4 transition-all active:scale-95 group/btn uppercase tracking-widest"
-                >
-                    <Save className="w-5 h-5 md:w-6 md:h-6 group-hover/btn:scale-110 transition-transform" />
-                    保存して記録を確定
-                </button>
-                <div className="flex items-center justify-center gap-2 opacity-50">
-                    <Info className="w-3.5 h-3.5 text-wood-400" />
-                    <p className="text-[9px] text-wood-500 font-black uppercase tracking-[0.15em] text-center">
-                        保護者ポータルと自動同期されます
-                    </p>
+            {/* Combined Scroll Area */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col">
+                
+                {/* 1. Chat Memo Reference Section (Collapsible) */}
+                {view === 'editor' && (
+                    <div className="border-b border-slate-200 bg-white">
+                        <button 
+                            onClick={() => setIsMemoExpanded(!isMemoExpanded)}
+                            className="w-full px-6 py-4 flex items-center justify-between text-slate-500 hover:bg-slate-50 transition-all font-black text-[11px] uppercase tracking-widest"
+                        >
+                            <div className="flex items-center gap-3">
+                                <MessageSquare className="w-4 h-4 text-tree-600" />
+                                <span>チャットメモの内容を参照</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] bg-tree-50 text-tree-600 px-2 py-0.5 rounded-full">{messages.length} 件</span>
+                                {isMemoExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </div>
+                        </button>
+                        
+                        <div className={`overflow-hidden transition-all duration-300 ${isMemoExpanded ? 'max-h-[400px] border-t border-slate-100 bg-slate-50/50' : 'max-h-0'}`}>
+                            <div className="p-4 space-y-3 overflow-y-auto max-h-[350px] custom-scrollbar">
+                                {messages.length === 0 ? (
+                                    <p className="text-center py-8 text-[10px] font-bold text-slate-300 uppercase tracking-widest">メッセージなし</p>
+                                ) : (
+                                    messages.map((m, i) => (
+                                        <div key={m.id || i} className="bg-white p-3 rounded-2xl shadow-sm border border-slate-100">
+                                            <div className="flex items-center gap-2 mb-1.5 opacity-40">
+                                                <Clock className="w-3 h-3" />
+                                                <span className="text-[9px] font-black">{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                            </div>
+                                            <p className="text-xs font-bold text-slate-700 leading-relaxed">{m.text}</p>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* 2. Main content area for Editor/History */}
+                <div className="p-6 md:p-8 flex-1">
+                    {view === 'editor' ? (
+                            <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                                <div className="space-y-2">
+                                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                        <User className="w-3 h-3" /> 担当者
+                                    </label>
+                                    <select 
+                                        value={staffName}
+                                        onChange={(e) => setStaffName(e.target.value)}
+                                        className="w-full p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-apple-400 appearance-none"
+                                    >
+                                        <option value="">選択してください</option>
+                                        {staffList.map((s, idx) => (
+                                            <option key={idx} value={s}>{s}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                            <div className="space-y-3">
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                    <Edit2 className="w-3 h-3" /> ツリー通信 内容入力
+                                </label>
+                                <textarea
+                                    value={content}
+                                    onChange={(e) => setContent(e.target.value)}
+                                    placeholder="本日の記録を入力..."
+                                    className="w-full min-h-[300px] p-6 text-[14px] bg-white border-2 border-slate-100 rounded-[2rem] focus:border-apple-400 focus:ring-8 focus:ring-apple-50 outline-none transition-all leading-relaxed resize-none font-medium text-slate-700 shadow-inner"
+                                />
+                            </div>
+
+                            <button
+                                onClick={handleSave}
+                                disabled={loading || !content.trim()}
+                                className="w-full py-5 bg-apple-600 hover:bg-apple-700 disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-xl flex items-center justify-center gap-3 transition-all active:scale-95 tracking-widest uppercase"
+                            >
+                                <Save className="w-5 h-5" />
+                                {editingId ? '更新して保存' : '記録を保存'}
+                            </button>
+                        </div>
+                    ) : (
+                        /* History view remains similar but with red theme */
+                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            {loading && (
+                                <div className="flex justify-center py-12">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-apple-600"></div>
+                                </div>
+                            )}
+                            {!loading && history.length === 0 && (
+                                <div className="text-center py-20 px-8 opacity-40">
+                                    <AlertCircle className="w-12 h-12 mx-auto mb-4" />
+                                    <p className="text-sm font-bold">履歴がありません</p>
+                                </div>
+                            )}
+                            {history.map((report) => (
+                                <div 
+                                    key={report.id}
+                                    className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 hover:shadow-md transition-all group relative"
+                                >
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-3">
+                                            <div className="px-3 py-1 bg-apple-50 text-apple-600 rounded-full text-[10px] font-black tracking-widest">
+                                                {report.date}
+                                            </div>
+                                            <div className="flex items-center gap-1.5 text-slate-400">
+                                                <User className="w-3 h-3" />
+                                                <span className="text-[10px] font-bold">{report.staffName || '---'}</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button onClick={() => handleEdit(report)} className="p-2 hover:bg-slate-50 text-slate-400 hover:text-apple-600 rounded-lg transition-colors"><Edit2 className="w-4 h-4" /></button>
+                                            <button onClick={() => handleDelete(report.id)} className="p-2 hover:bg-slate-50 text-slate-400 hover:text-red-500 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                                        </div>
+                                    </div>
+                                    <p className="text-[14px] text-slate-600 leading-relaxed font-medium whitespace-pre-wrap">{report.externalInfo}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

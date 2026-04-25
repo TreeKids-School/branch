@@ -45,31 +45,148 @@
     overflow: hidden !important;
     pointer-events: none;
   }
+
+  .row-placeholder {
+    height: 32px !important;
+    opacity: 0.4;
+    transition: all 0.3s ease;
+  }
+
+  .row-placeholder:hover {
+    opacity: 0.7;
+    background-color: rgba(255, 255, 255, 0.8) !important;
+  }
+
+  .row-placeholder td {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    font-size: 10px !important;
+  }
+  .custom-scrollbar-hidden::-webkit-scrollbar {
+    display: none;
+  }
 }
 
-/* Custom scrollbar - thinner & smoother */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+/* Floating Panel Animations */
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(40, 167, 69, 0.15); /* tree-500 alpha */
-  border-radius: 20px;
+@keyframes slide-out-right {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
 }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(40, 167, 69, 0.3);
+
+.animate-left {
+  animation: slide-in-left 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.animate-right {
+  animation: slide-in-right 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.animate-out-right {
+  animation: slide-out-right 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Help Guide Animations */
+@keyframes guide-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(40, 167, 69, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+}
+
+.guide-highlight {
+  animation: guide-pulse 2s infinite;
+  position: relative;
+  z-index: 201 !important;
 }
 
 /* Print styles */
 @media print {
-  body { background: white !important; background-image: none !important; }
-  .no-print { display: none !important; }
-  .print-only { display: block !important; }
-  @page { margin: 1cm; size: A4; }
-}
+  @page { 
+    margin: 0.5cm; 
+    size: A4 landscape; 
+  }
 
-.no-print { display: none; }
-.print-only { display: none; }
+  body { 
+    background: white !important; 
+    background-image: none !important; 
+    color: black !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 8pt !important;
+  }
+
+  /* Force display of hidden items */
+  .no-print, 
+  button, 
+  .fixed,
+  #guide-help,
+  .animate-in,
+  svg { 
+    display: none !important; 
+  }
+
+  /* Show collapsed columns and expand them */
+  .col-collapsed {
+    display: table-cell !important;
+    width: auto !important;
+    max-width: none !important;
+    padding: 6px !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    border: 1px solid #cbd5e1 !important;
+    white-space: normal !important;
+    min-width: unset !important;
+    margin: unset !important;
+  }
+
+  .print-only { 
+    display: block !important; 
+  }
+
+  /* Table styling for print */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: auto !important;
+  }
+
+  th, td {
+    border: 1px solid #94a3b8 !important;
+    padding: 4px 6px !important;
+    font-size: 7.5pt !important;
+    color: black !important;
+    background: white !important;
+  }
+
+  th {
+    background: #f8fafc !important;
+    font-weight: bold !important;
+    text-align: center !important;
+  }
+
+  /* Header adjustments */
+  header {
+    position: static !important;
+    padding: 0 !important;
+    margin-bottom: 8px !important;
+    box-shadow: none !important;
+    border-bottom: 2px solid black !important;
+  }
+
+  /* Disable truncations in print */
+  .truncate {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+  }
+}

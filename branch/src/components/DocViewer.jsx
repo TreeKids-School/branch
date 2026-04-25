@@ -163,51 +163,9 @@ export default function DocViewer({ child, result, selectedDate, onSaveResult, o
 
             {/* Content Area */}
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-10 space-y-8 md:space-y-12 pb-32 md:pb-24">
-                <Section title="専門的支援・記録内容" sectionKey="plan" icon={LayoutPanelLeft} colorClass="text-tree-600">
-                    <Field label="実施した支援の内容・結果" value={result.B_result} draftKey="B_result" />
-                    <Field label="今後の支援の予定" value={result.B_plan} draftKey="B_plan" />
-                    <Field label="該当項目" value={result.B_item} draftKey="B_item" multiline={false} />
-                </Section>
-
                 <Section title="保護者様への連絡" sectionKey="comm" icon={MessageSquare} colorClass="text-wood-600">
-                    <Field label="ツリー通信内容" value={result.D} draftKey="D" />
+                    <Field label="今日の様子・連絡事項" value={result.D} draftKey="D" />
                 </Section>
-
-                {result.K_sheet && (
-                    <Section title="療育活動のまとめ" sectionKey="force" icon={FileText} colorClass="text-apple-600">
-                        {editing ? (
-                            ['learning', 'play', 'program', 'snack'].map((key, i) => {
-                                const labels = ['学習内容', '自由遊び', 'プログラム内容', 'おやつ・食事'];
-                                return (
-                                    <div key={key} className="group space-y-4 last:mb-0">
-                                        <div className="text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] pl-4 flex items-center gap-3">
-                                            <div className="w-2 h-2 rounded-full bg-apple-200 shadow-inner" />
-                                            {labels[i]}
-                                        </div>
-                                        <textarea
-                                            value={draft.force[key]}
-                                            onChange={e => setDraft(p => ({ ...p, force: { ...p.force, [key]: e.target.value } }))}
-                                            className="w-full text-sm bg-slate-50 border-2 border-slate-100 rounded-[2rem] p-5 md:p-7 focus:border-apple-500 focus:bg-white focus:ring-8 md:focus:ring-[15px] focus:ring-apple-50 outline-none transition-all shadow-inner leading-relaxed resize-none cursor-text"
-                                            rows={3}
-                                        />
-                                    </div>
-                                );
-                            })
-                        ) : (
-                            <div className="grid grid-cols-1 gap-6 md:gap-8">
-                              {[['LEARNING', draft.force.learning], ['PLAY', draft.force.play], ['PROGRAM', draft.force.program], ['SNACK', draft.force.snack]].map(([label, val]) => (
-                                  <div key={label} className="group bg-white p-6 md:p-10 rounded-[2.5rem] md:rounded-[3.5rem] border border-slate-50 hover:shadow-2xl hover:border-apple-100 transition-all ring-1 ring-slate-100/50 shadow-sm">
-                                      <div className="text-[10px] md:text-[11px] font-black text-apple-400 uppercase tracking-[0.2em] mb-4 md:mb-5 flex items-center gap-2">
-                                          <div className="w-2 h-2 rounded-full bg-apple-500 shadow-md" />
-                                          {label}
-                                      </div>
-                                      <p className="text-[14px] md:text-[15px] text-slate-700 whitespace-pre-wrap leading-relaxed font-bold">{val || <span className="opacity-20 italic font-black uppercase tracking-widest text-[8px]">No Data</span>}</p>
-                                  </div>
-                              ))}
-                            </div>
-                        )}
-                    </Section>
-                )}
             </div>
 
             {/* Brand Footer Responsive */}

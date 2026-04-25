@@ -1,18 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Settings, Key, Tag, Plus, Trash2, Cpu } from 'lucide-react';
 
-export default function SettingsModal({ onClose, config, onSaveConfig, tags, onSaveTags }) {
-    const [localConfig, setLocalConfig] = useState(config);
+export default function SettingsModal({ onClose, tags, onSaveTags }) {
     const [localTags, setLocalTags] = useState(tags);
     const [newTag, setNewTag] = useState('');
 
     useEffect(() => {
-        setLocalConfig(config);
         setLocalTags(tags);
-    }, [config, tags]);
+    }, [tags]);
 
     const handleSave = () => {
-        onSaveConfig(localConfig);
         onSaveTags(localTags);
         onClose();
     };
@@ -49,29 +46,6 @@ export default function SettingsModal({ onClose, config, onSaveConfig, tags, onS
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-8 md:p-12 space-y-12 custom-scrollbar bg-slate-50/30">
-                    {/* AI Configuration Section */}
-                    <div className="space-y-6">
-                        <div className="flex items-center gap-3 px-2">
-                            <div className="w-2 h-2 rounded-full bg-apple-500 shadow-md animate-pulse" />
-                            <h4 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.25em]">基本構成</h4>
-                        </div>
-                        <div className="glass-card p-8 md:p-10 rounded-[3.5rem] border border-white shadow-premium space-y-8">
-                            <div className="space-y-5">
-                                <label className="block text-[11px] font-black text-slate-500 uppercase tracking-widest pl-3 flex items-center gap-2">
-                                    <Key className="w-3.5 h-3.5 text-apple-400" /> AI APIキー設定
-                                </label>
-                                <input
-                                    type="password"
-                                    value={localConfig?.apiKey || ''}
-                                    onChange={e => setLocalConfig(p => ({ ...p, apiKey: e.target.value }))}
-                                    onKeyDown={e => e.key === 'Enter' && handleSave()}
-                                    placeholder="sk-..."
-                                    className="w-full px-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-full focus:border-apple-500 focus:bg-white focus:ring-8 md:focus:ring-[15px] focus:ring-apple-50 outline-none transition-all font-mono text-sm shadow-inner"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
                     {/* Tag Management Section */}
                     <div className="space-y-6">
                         <div className="flex items-center gap-3 px-2">

@@ -3,6 +3,26 @@ import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
 export default function CalendarModal({ show, onClose, selectedDate, setSelectedDate, existingReportDates, onRebuild }) {
     const [viewDate, setViewDate] = useState(new Date());
+    const [touchStart, setTouchStart] = useState(null);
+    const [touchEnd, setTouchEnd] = useState(null);
+
+    const handleTouchStart = (e) => {
+        setTouchEnd(null);
+        setTouchStart(e.targetTouches[0].clientY);
+    };
+
+    const handleTouchMove = (e) => {
+        setTouchEnd(e.targetTouches[0].clientY);
+    };
+
+    const handleTouchEnd = () => {
+        if (!touchStart || !touchEnd) return;
+        const distance = touchStart - touchEnd;
+        const isBottomToTop = distance > 100;
+        if (isBottomToTop) {
+            onClose();
+        }
+    };
 
 
 
@@ -36,7 +56,12 @@ export default function CalendarModal({ show, onClose, selectedDate, setSelected
     return (
         <div className={`fixed inset-0 z-[100] transition-opacity duration-300 ${show ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-            <div className={`absolute top-0 left-0 right-0 bg-white shadow-2xl flex flex-col items-center pt-8 pb-10 px-4 rounded-b-3xl border-b border-indigo-100 transition-transform duration-300 ease-out ${show ? 'translate-y-0' : '-translate-y-full'}`}>
+            <div 
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                className={`absolute top-0 left-0 right-0 bg-white shadow-2xl flex flex-col items-center pt-8 pb-10 px-4 rounded-b-3xl border-b border-indigo-100 transition-transform duration-300 ease-out ${show ? 'translate-y-0' : '-translate-y-full'}`}
+            >
                 <div className="w-full max-w-lg">
                     <div className="flex items-center justify-between mb-8">
                         <button onClick={() => { const d = new Date(viewDate); d.setMonth(d.getMonth() - 1); setViewDate(d); }}

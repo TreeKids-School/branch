@@ -1,62 +1,35 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { 
     PlusCircle, MessageSquare, Send, FileSpreadsheet, Printer, 
     Trash2, Clock, CheckCircle2, AlertCircle, Loader2, Sparkles,
     ChevronDown, ChevronUp, ChevronLeft, FileText, LayoutPanelLeft, UserCheck, 
-    FileEdit, X, Calendar as CalendarIcon, Settings, LogOut
+    FileEdit, X, Calendar as CalendarIcon, Settings, LogOut, HelpCircle
 } from 'lucide-react';
 import MemoPanel from './components/MemoPanel';
 import DocViewer from './components/DocViewer';
 import TreeCommPanel from './components/TreeCommPanel';
+import HelpGuide from './components/HelpGuide';
 import Login from './components/Login';
 import { auth, firestore } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { callStorage } from './hooks/useStorage';
-import { STAFF_OPTIONS, APP_VERSION, DAILY_LIMIT, parseForceSheet, buildForceSheet, getStaffInstruction } from './app_constants';
+import { APP_VERSION, DAILY_LIMIT, parseForceSheet, buildForceSheet, getStaffInstruction } from './app_constants';
 import { defaultPrompts } from './constants/defaultPrompts';
 import { CopyButton, ErrorBoundary } from './components/Shared';
 import CalendarModal from './components/CalendarModal';
 import SettingsModal from './components/SettingsModal';
 import ExportModal from './components/ExportModal';
+import AddChildModal from './components/AddChildModal';
 import { printAllDocuments } from './utils/print';
 
-// ── AI 通信 ────────────────────────────────────────────────────────────────
-const fetchAI = async (prompt, isJson) => {
-    const callGeminiDirectly = async (apiKey, prompt, isJson) => {
-        const MODEL = 'gemini-2.5-flash';
-        const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey.trim()}`;
-        const response = await fetch(ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.7 } })
-        });
-        if (!response.ok) {
-            const errText = await response.text();
-            let errMsg = errText;
-            try { errMsg = JSON.parse(errText).error.message; } catch(e){}
-            throw new Error(`API連携失敗 (${response.status}): ${errMsg}`);
-        }
-        const json = await response.json();
-        const text = json.candidates[0].content.parts[0].text;
-        if (!isJson) return text;
-        const match = text.match(/\{[\s\S]*\}/);
-        return match ? JSON.parse(match[0]) : null;
-    };
-    const savedKey = localStorage.getItem('care_pro_api_key');
-    if (!savedKey || !savedKey.trim()) { throw new Error('APIキーが設定されていません。右上の歯車アイコン（設定）からGemini AIのAPIキーを入力してください。'); }
-    try { 
-        return await callGeminiDirectly(savedKey, prompt, isJson); 
-    } catch (e) { 
-        throw new Error(e.message); 
-    }
-};
+
 
 // ── メインアプリケーション ──────────────────────────────────────────────────
 export default function App() {
     // 1. All States (Restored and gathered at the very top)
     const [user, setUser] = useState(null);
     const [authLoading, setAuthLoading] = useState(true);
-    const [loading, setLoading] = useState(false); // Restore missing loading state
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [children, setChildren] = useState([]);
     const [toast, setToast] = useState(null);
@@ -65,27 +38,79 @@ export default function App() {
     const [dailyMessages, setDailyMessages] = useState({});
     const [dailyTable, setDailyTable] = useState({});
     const [globalLog, setGlobalLog] = useState({ admin: '', supervisor: '', notice: '', activities: '' });
-    const [selectedGenerateIds, setSelectedGenerateIds] = useState([]);
-    const [selectedChildId, setSelectedChildId] = useState(null); // Restore missing state
-    const [selectedTreeChildId, setSelectedTreeChildId] = useState(null); // Restore missing state
-    const [selectedDocChildId, setSelectedDocChildId] = useState(null); // Restore missing state
-    const [isTransportExpanded, setIsTransportExpanded] = useState(true);
+    const [selectedChildId, setSelectedChildId] = useState(null); 
+    const [selectedTreeChildId, setSelectedTreeChildId] = useState(null); 
+    const [selectedDocChildId, setSelectedDocChildId] = useState(null); 
+    const [isTransportExpanded, setIsTransportExpanded] = useState(false);
     const [isNotesExpanded, setIsNotesExpanded] = useState(false);
-    const [isWaitlistExpanded, setIsWaitlistExpanded] = useState(false); // Restore missing state
+    const [isWaitlistExpanded, setIsWaitlistExpanded] = useState(false); 
     const [isSyncing, setIsSyncing] = useState(false);
     const [showCalendarModal, setShowCalendarModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
+    const [showAddChildModal, setShowAddChildModal] = useState(false);
+    const [sortConfig, setSortConfig] = useState({ key: 'default', direction: 'asc' });
     const [masterChildren, setMasterChildren] = useState([]);
-    const [existingReportDates, setExistingReportDates] = useState([]); // Restore missing state
+    const [existingReportDates, setExistingReportDates] = useState([]); 
+    const [showHelpGuide, setShowHelpGuide] = useState(false);
+    const [staffList, setStaffList] = useState([]);
+
+    const [isPanelClosing, setIsPanelClosing] = useState(false);
+    const [lastPanelData, setLastPanelData] = useState(null);
+
+    // Track the last active panel to keep content stable during exit animation
+    useEffect(() => {
+        if (selectedChildId || selectedTreeChildId || selectedDocChildId) {
+            setLastPanelData({
+                memo: selectedChildId,
+                tree: selectedTreeChildId,
+                doc: selectedDocChildId
+            });
+        }
+    }, [selectedChildId, selectedTreeChildId, selectedDocChildId]);
+
+    const handlePanelClose = () => {
+        setIsPanelClosing(true);
+        setTimeout(() => {
+            setSelectedChildId(null);
+            setSelectedTreeChildId(null);
+            setSelectedDocChildId(null);
+            setIsPanelClosing(false);
+        }, 500);
+    };
+
+    // Prevent background scrolling when panel is open
+    useEffect(() => {
+        const isAnyPanelOpen = !!(selectedChildId || selectedTreeChildId || selectedDocChildId || isPanelClosing);
+        if (isAnyPanelOpen) {
+            document.body.style.overflow = 'hidden';
+            document.body.style.touchAction = 'none'; // Further restrict gestures on body
+        } else {
+            document.body.style.overflow = '';
+            document.body.style.touchAction = '';
+        }
+        return () => {
+            document.body.style.overflow = '';
+            document.body.style.touchAction = '';
+        };
+    }, [selectedChildId, selectedTreeChildId, selectedDocChildId, isPanelClosing]);
     
-    const [config, setConfig] = useState(() => ({ apiKey: localStorage.getItem('care_pro_api_key') || '' }));
+
     const [tags, setTags] = useState(() => {
+        const defaultTags = ['【ツリー式学習】', '【宿題】', '【プリント】', '【プログラム】', '【おやつ】', '【自由時間】'];
         try {
             const saved = localStorage.getItem('care_pro_tags');
-            if (saved) return JSON.parse(saved);
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (!parsed.includes('【自由時間】')) {
+                    const newTags = [...parsed, '【自由時間】'];
+                    localStorage.setItem('care_pro_tags', JSON.stringify(newTags));
+                    return newTags;
+                }
+                return parsed;
+            }
         } catch (e) { console.error('Tags load error', e); }
-        return ['【ツリー式学習】', '【宿題】', '【プリント】', '【プログラム】', '【おやつ】'];
+        return defaultTags;
     });
 
     // --- Hooks (MUST be called before any early returns) ---
@@ -115,15 +140,24 @@ export default function App() {
         setMasterChildren(list || []);
     }, [cs]);
 
+    // 1.6 Fetch Staff Names
+    const fetchStaffNames = useCallback(async () => {
+        const list = await cs({ action: 'getStaffNames' });
+        setStaffList(list || []);
+    }, [cs]);
+
     // 2. Auth Listener
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (u) => {
             setUser(u);
             setAuthLoading(false);
-            if (u) fetchMasterChildren();
+            if (u) {
+                fetchMasterChildren();
+                fetchStaffNames();
+            }
         });
         return () => unsubscribe();
-    }, [fetchMasterChildren]);
+    }, [fetchMasterChildren, fetchStaffNames]);
 
     useEffect(() => { 
         if (user) fetchDailyData(selectedDate); 
@@ -135,18 +169,30 @@ export default function App() {
         localStorage.setItem('care_pro_tags', JSON.stringify(newTags));
     };
 
-    const handleUpdateConfig = (newConfig) => {
-        setConfig(newConfig);
-        localStorage.setItem('care_pro_api_key', newConfig.apiKey);
-    };
-
     const handleLogout = async () => {
         if (!confirm('ログアウトしますか？')) return;
         await signOut(auth);
     };
 
     const SLOT_LIMIT = 10;
-    const sortedChildren = [...children].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    const sortedChildren = [...children].sort((a, b) => {
+        if (sortConfig.key === 'transportTime') {
+            const timeA = dailyTable[a.id]?.transportTime || '';
+            const timeB = dailyTable[b.id]?.transportTime || '';
+            if (!timeA && timeB) return 1;
+            if (timeA && !timeB) return -1;
+            if (timeA === timeB) return (a.timestamp || 0) - (b.timestamp || 0);
+            return sortConfig.direction === 'asc' ? timeA.localeCompare(timeB) : timeB.localeCompare(timeA);
+        } else if (sortConfig.key === 'endTime') {
+            const timeA = dailyTable[a.id]?.endTime || '';
+            const timeB = dailyTable[b.id]?.endTime || '';
+            if (!timeA && timeB) return 1;
+            if (timeA && !timeB) return -1;
+            if (timeA === timeB) return (a.timestamp || 0) - (b.timestamp || 0);
+            return sortConfig.direction === 'asc' ? timeA.localeCompare(timeB) : timeB.localeCompare(timeA);
+        }
+        return (a.timestamp || 0) - (b.timestamp || 0);
+    });
     const regularChildren = sortedChildren.slice(0, SLOT_LIMIT);
     const waitlistChildren = sortedChildren.slice(SLOT_LIMIT);
     const displayRegular = [...regularChildren];
@@ -172,9 +218,6 @@ export default function App() {
             const individualData = {
                 name: child.name,
                 tree_comm_text: childResult.D || '',
-                ai_result: childResult.B_result || '',
-                ai_plan: childResult.B_plan || '',
-                ai_item: childResult.B_item || '',
                 pickupLocation: childTable.pickupLocation || '',
                 endTime: childTable.endTime || '',
                 transportTime: childTable.transportTime || '',
@@ -192,6 +235,12 @@ export default function App() {
         setIsSyncing(false);
     };
 
+    const updateGlobalLog = async (field, value) => {
+        const newLog = { ...globalLog, [field]: value };
+        setGlobalLog(newLog);
+        await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, dailyTable, newLog);
+    };
+
     const handleAddFromMaster = async (masterChild) => {
         if (children.some(c => c.id === masterChild.id)) {
             showToast(`${masterChild.name}さんは既に追加されています。`);
@@ -202,7 +251,6 @@ export default function App() {
         setChildren(newList);
         const newTable = { ...dailyTable, [newChild.id]: { ...(dailyTable[newChild.id] || {}), pickupLocation: masterChild.defaultPickupLocation || '' } };
         setDailyTable(newTable);
-        setSelectedGenerateIds(prev => [...prev, newChild.id]);
         await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newTable, globalLog);
         showToast(`${masterChild.name}さんを本日のリストに追加しました。`);
     };
@@ -220,9 +268,34 @@ export default function App() {
         await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, dailyTable, globalLog);
     };
 
+    const handleSort = (key) => {
+        setSortConfig(prev => {
+            if (prev.key === key) {
+                if (prev.direction === 'asc') return { key, direction: 'desc' };
+                return { key: 'default', direction: 'asc' }; // Reset to manual order
+            }
+            return { key, direction: 'asc' };
+        });
+    };
+
     const sendMessage = async (childId, text) => {
         const newMsg = { id: crypto.randomUUID(), text, timestamp: new Date().toISOString(), included: true };
         const newMessages = { ...dailyMessages, [childId]: [...(dailyMessages[childId] || []), newMsg] };
+        setDailyMessages(newMessages);
+        await saveDailyData(selectedDate, children, newMessages, results, summaryC, dailyTable, globalLog);
+    };
+
+    const deleteMessage = async (childId, msgId) => {
+        if (!confirm('メッセージを削除しますか？')) return;
+        const newMsgs = (dailyMessages[childId] || []).filter(m => m.id !== msgId);
+        const newMessages = { ...dailyMessages, [childId]: newMsgs };
+        setDailyMessages(newMessages);
+        await saveDailyData(selectedDate, children, newMessages, results, summaryC, dailyTable, globalLog);
+    };
+
+    const updateMessage = async (childId, msgId, newText) => {
+        const newMsgs = (dailyMessages[childId] || []).map(m => m.id === msgId ? { ...m, text: newText } : m);
+        const newMessages = { ...dailyMessages, [childId]: newMsgs };
         setDailyMessages(newMessages);
         await saveDailyData(selectedDate, children, newMessages, results, summaryC, dailyTable, globalLog);
     };
@@ -232,85 +305,21 @@ export default function App() {
         await saveDailyData(selectedDate, children, dailyMessages, res, sum, dailyTable, globalLog); 
     };
 
-    const toggleChildGenerate = (id) => setSelectedGenerateIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
-
     const showToast = (message) => {
         setToast(message);
         setTimeout(() => setToast(null), 5000);
-    };
-
-    const generateDocuments = async () => {
-        const toGenerate = children.filter(c => selectedGenerateIds.includes(c.id));
-        if (toGenerate.length === 0) {
-            showToast('生成対象の児童が選択されていません。表の左側にあるチェックボックス（☑️）で選んでから押してください。');
-            return;
-        }
-
-        // 【A案】ツリー通信未入力の児童をチェックしてエラースキップ
-        const missingTreeComm = toGenerate.filter(c => !(results[c.id]?.D || '').trim());
-        if (missingTreeComm.length > 0) {
-            const names = missingTreeComm.map(c => c.name).join('さん、');
-            showToast(`${names}さんのツリー通信録が未入力のため、AI生成をスキップしました。まずはツリー通信を記入してください。`);
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const processedResults = { ...results };
-            for (const child of toGenerate) {
-                const existing = results[child.id] || {};
-                const treeCommText = existing.D || '';
-                const msgs = (dailyMessages[child.id] || []).filter(m => m.included !== false).map(m => m.text).join('\n');
-                
-                const template = child.forceSheet 
-                    ? '{"B_result": "...", "B_item": "...", "K_sheet": "..."}' 
-                    : '{"B_result": "...", "B_item": "..."}';
-                
-                const prompt = `以下の「ツリー通信（スタッフが記入した保護者宛の記録）」と「日々のチャットメモ」を元に、公的な療育支援記録(B_result)と該当項目(B_item)を作成してください。児童名や「〇〇君」などの呼称は一切使用しないでください。
-
-【ツリー通信】:
-${treeCommText}
-
-【チャットメモ】:
-${msgs || '特になし'}
-
-【作成ルール】
-- B_result (結果): 150字程度。常体（言い切り）。客観的かつ専門的な支援記録のトーン。
-- B_item (項目): ①健康・生活 ②運動・感覚 ③認知・行動 ④言語・コミュニケーション ⑤人間関係・社会性 から該当するものを全て選択。
-
-JSON形式: ${template}`;
-
-                try {
-                    const response = await fetchAI(prompt, true);
-                    if (response) {
-                        // D（ツリー通信）はそのまま維持し、生成された内容（B_result, B_plan等）を追加
-                        processedResults[child.id] = { ...existing, ...response, D: existing.D }; 
-                    }
-                } catch (apiError) {
-                    showToast(apiError.message);
-                    setLoading(false);
-                    return; // Fail explicitly and stop making further requests
-                }
-            }
-            await saveResults(processedResults, summaryC);
-            showToast('AIによる処理が全て完了しました！🎉'); // Show success toast
-        } catch (e) { 
-            console.error(e);
-            showToast('システムエラーが発生しました: ' + e.message);
-        }
-        finally { setLoading(false); }
     };
 
     // タグ抽出
     const getStudyText = (childId) => {
         const msgs = dailyMessages[childId] || [];
         return msgs.filter(m => m.text.includes('【ツリー式学習】') || m.text.includes('【学習】') || m.text.includes('【宿題】') || m.text.includes('【プリント】'))
-            .map(m => m.text.replace(/【.*?】/g, '').trim()).filter(t => t).join(' / ');
+            .map(m => m.text.trim()).filter(t => t).join('\n');
     };
     const getProgramText = (childId) => {
         const msgs = dailyMessages[childId] || [];
         return msgs.filter(m => m.text.includes('【プログラム】'))
-            .map(m => m.text.replace(/【.*?】/g, '').trim()).filter(t => t).join(' / ');
+            .map(m => m.text.trim()).filter(t => t).join(' / ');
     };
 
     // 6. JSX Return (Conditional inside to keep hook order)
@@ -330,128 +339,103 @@ JSON形式: ${template}`;
     }
 
     return (
-        <div className="min-h-screen p-3 md:p-8 pb-32 space-y-6 md:space-y-8 max-w-[1800px] mx-auto overflow-x-hidden">
-            {/* Responsive Header */}
-            <header className="sticky top-0 z-[60] py-3 px-4 md:py-4 md:px-6 glass-card rounded-[1.5rem] md:rounded-[2rem] flex items-center justify-between mb-4 md:mb-8 animate-in fade-in slide-in-from-top-4 duration-700">
-                <div className="flex items-center gap-3 md:gap-4 truncate">
-                    <div className="p-2 md:p-3 bg-tree-500 rounded-xl md:rounded-2xl shadow-xl shadow-tree-100 flex-shrink-0">
-                        <FileText className="w-5 h-5 md:w-6 md:h-6 text-white" />
+        <div className="min-h-screen p-3 md:p-6 pb-24 space-y-4 md:space-y-6 max-w-[1800px] mx-auto overflow-x-hidden">
+            {/* Ultra Compact Responsive Header */}
+            <header className="sticky top-0 z-[60] bg-white/70 backdrop-blur-xl rounded-2xl md:rounded-[2.5rem] flex items-center justify-between px-4 py-2.5 md:px-6 md:py-3.5 mb-6 border border-white/40 shadow-premium no-print">
+                {/* Left Side: Logo, Title, Date */}
+                <div className="flex items-center gap-3 md:gap-6">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-tree-600 rounded-xl shadow-lg flex-shrink-0">
+                            <FileText className="w-4 h-4 md:w-5 md:h-5 text-white" />
+                        </div>
+                        <h1 className="hidden sm:block text-sm md:text-xl font-black text-slate-800 tracking-tighter">Tree Kids School</h1>
                     </div>
-                    <div className="truncate">
-                        <h1 className="text-lg md:text-2xl font-black text-slate-800 tracking-tight truncate leading-tight">Tree Kids School</h1>
-                        <p className="hidden xs:block text-[9px] md:text-[10px] text-tree-600 font-bold uppercase tracking-[0.2em] opacity-80">支援管理システム</p>
+
+                    <div id="guide-date-picker" onClick={() => setShowCalendarModal(true)} className="flex items-center gap-2 px-3 py-2 bg-slate-50/80 hover:bg-tree-50 rounded-full border border-slate-100 cursor-pointer transition-all group">
+                        <CalendarIcon className="w-3.5 h-3.5 text-tree-600 group-hover:scale-110 transition-transform" />
+                        <span className="font-black text-slate-700 text-[10px] md:text-xs tracking-tight">{selectedDate}</span>
+                        <ChevronDown className="w-3 h-3 text-slate-300" />
                     </div>
                 </div>
+
+                {/* Right Side: Action Buttons */}
                 <div className="flex items-center gap-2 md:gap-4">
-                    <div className="hidden sm:flex flex-col items-end mr-2">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">ユーザー</span>
-                        <div className="flex items-center gap-1.5 mt-1">
-                            <span className="text-[10px] font-bold text-slate-600">{user?.email?.replace('@tree-kids.com', '')}</span>
-                        </div>
+                    <div className="flex items-center gap-2 mr-2">
+                        <button 
+                            id="guide-add-child"
+                            onClick={() => setShowAddChildModal(true)}
+                            className="px-3 py-2 md:px-5 md:py-2.5 bg-tree-600 hover:bg-tree-700 text-white rounded-full font-black text-[10px] md:text-sm shadow-md transition-all active:scale-95 flex items-center gap-2"
+                        >
+                            <PlusCircle className="w-4 h-4" />
+                            <span className="hidden sm:inline">児童追加</span>
+                        </button>
+
+                        <button 
+                            id="guide-print" 
+                            onClick={() => printAllDocuments(children, results, summaryC, selectedDate, dailyTable, dailyMessages, globalLog)} 
+                            className="px-3 py-2 md:px-5 md:py-2.5 bg-wood-600 hover:bg-wood-700 text-white rounded-full font-black text-[10px] md:text-sm shadow-md transition-all active:scale-95 flex items-center gap-2"
+                        >
+                            <Printer className="w-4 h-4" /> 
+                            <span className="hidden sm:inline">一括印刷</span>
+                        </button>
+
+                        <button 
+                            onClick={() => setShowExportModal(true)} 
+                            className="p-2 text-slate-400 hover:text-tree-600 transition-all active:scale-90"
+                            title="データ出力"
+                        >
+                            <FileSpreadsheet className="w-5 h-5" />
+                        </button>
                     </div>
-                    <button onClick={() => setShowSettingsModal(true)} className="p-2.5 md:p-3 bg-white hover:bg-tree-50 rounded-xl md:rounded-2xl shadow-sm border border-slate-100 transition-all active:scale-95 group flex-shrink-0">
-                        <Settings className="w-5 h-5 text-slate-400 group-hover:rotate-90 transition-transform duration-500" />
-                    </button>
-                    <button onClick={handleLogout} className="p-2.5 md:p-3 bg-white hover:bg-apple-50 rounded-xl md:rounded-2xl shadow-sm border border-slate-100 transition-all active:scale-95 group flex-shrink-0">
-                        <LogOut className="w-5 h-5 text-slate-400 group-hover:text-apple-500" />
-                    </button>
+
+                    <div className="w-px h-6 bg-slate-200 hidden md:block" />
+
+                    <div className="flex items-center gap-1">
+                        <button id="guide-help" onClick={() => setShowHelpGuide(true)} className="p-2 hover:bg-tree-50 rounded-xl transition-all active:scale-95 group">
+                            <HelpCircle className="w-4.5 h-4.5 text-tree-600 group-hover:scale-110 transition-transform" />
+                        </button>
+                        <button onClick={() => setShowSettingsModal(true)} className="p-2 hover:bg-tree-50 rounded-xl transition-all active:scale-95 group">
+                            <Settings id="guide-settings" className="w-4.5 h-4.5 text-slate-400 group-hover:rotate-45 transition-transform" />
+                        </button>
+                        <button onClick={handleLogout} className="p-2 hover:bg-apple-50 rounded-xl transition-all active:scale-95 group">
+                            <LogOut className="w-4.5 h-4.5 text-slate-400 group-hover:text-apple-500" />
+                        </button>
+                    </div>
                 </div>
             </header>
 
-            {/* Bento Controls - Responsive Stack */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 animate-in fade-in duration-700">
-                <div className="lg:col-span-4 glass-card p-4 md:p-6 rounded-[2.5rem] md:rounded-[3rem] flex items-center gap-4 md:gap-6 shadow-premium">
-                    <div onClick={() => setShowCalendarModal(true)} className="flex-1 bg-white border-2 border-slate-50 hover:border-tree-200 p-4 md:p-5 rounded-[2rem] md:rounded-[2.5rem] flex items-center gap-4 md:gap-5 cursor-pointer transition-all shadow-inner">
-                        <div className="p-3 md:p-4 bg-tree-50 rounded-xl md:rounded-2xl text-tree-500">
-                            <CalendarIcon className="w-5 h-5 md:w-6 md:h-6" />
-                        </div>
-                        <div>
-                            <p className="text-[9px] md:text-[11px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">対象日</p>
-                            <span className="font-black text-slate-800 text-lg md:text-xl tracking-tight">{selectedDate}</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Quick Child Selection Card */}
-                <div className="lg:col-span-8 glass-card p-4 md:p-6 rounded-[2.5rem] md:rounded-[3rem] flex flex-col gap-4 shadow-premium">
-                    <div className="flex items-center justify-between px-2">
-                        <h4 className="text-[10px] md:text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-                            <PlusCircle className="w-4 h-4 text-tree-500" /> 児童を追加
-                        </h4>
-                        <span className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">{masterChildren.filter(m => !children.some(c => c.id === m.id)).length} 名待機中</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto pr-2 custom-scrollbar">
-                        {masterChildren.filter(m => !children.some(c => c.id === m.id)).length === 0 ? (
-                            <div className="w-full flex items-center justify-center p-4 border-2 border-dashed border-slate-100 rounded-2xl text-[10px] font-bold text-slate-300 uppercase tracking-widest">全ての児童が追加済みです</div>
-                        ) : (
-                            masterChildren.filter(m => !children.some(c => c.id === m.id)).map(child => (
-                                <button 
-                                    key={child.id} 
-                                    onClick={() => handleAddFromMaster(child)}
-                                    className="px-4 py-2.5 bg-white hover:bg-tree-50 text-slate-600 border border-slate-100 rounded-xl font-black text-[10px] md:text-xs transition-all shadow-sm active:scale-95 flex items-center gap-2 group"
-                                >
-                                    <span className="w-2 h-2 bg-tree-200 rounded-full group-hover:bg-tree-500 transition-colors" />
-                                    {child.name}
-                                </button>
-                            ))
-                        )}
-                    </div>
-                </div>
-
-                {/* Batch Actions Card */}
-                <div className="lg:col-span-12 glass-card p-4 md:p-6 rounded-[2.5rem] md:rounded-[3rem] flex flex-col sm:flex-row items-center justify-between gap-4 shadow-premium">
-                    <div className="flex items-center gap-4 md:gap-8 sm:pl-4 w-full sm:w-auto overflow-hidden">
-                        <div className="flex -space-x-3 overflow-hidden flex-shrink-0">
-                            {children.slice(0, 4).map((c, i) => (
-                                <div key={i} className="inline-block h-10 w-10 md:h-12 md:w-12 rounded-full ring-4 ring-white bg-tree-50 flex items-center justify-center text-[10px] md:text-[12px] font-black text-tree-600 shadow-md">{c.name[0]}</div>
-                            ))}
-                        </div>
-                        <div className="truncate">
-                            <p className="text-[9px] md:text-[11px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">登録されている児童</p>
-                            <span className="text-lg md:text-xl font-black text-slate-700 tracking-tight">{children.length} 名の記録</span>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-3 md:gap-4 w-full sm:w-auto">
-                        <button onClick={() => setShowExportModal(true)} className="flex-1 sm:flex-none p-4 md:p-5 bg-white hover:bg-slate-50 rounded-2xl md:rounded-[2rem] border border-slate-100 shadow-sm transition-all active:scale-95 text-slate-400">
-                            <FileSpreadsheet className="w-6 h-6 md:w-7 md:h-7" />
-                        </button>
-                        <button onClick={generateDocuments} disabled={loading} className="flex-[3] sm:flex-none px-6 md:px-12 h-16 md:h-[72px] bg-apple-500 hover:bg-apple-600 text-white rounded-[1.8rem] md:rounded-[2rem] font-black shadow-2xl shadow-apple-100 flex items-center justify-center gap-3 md:gap-4 transition-all active:scale-95 disabled:grayscale">
-                            {loading ? <Loader2 className="w-6 h-6 md:w-7 md:h-7 animate-spin" /> : <Sparkles className="w-6 h-6 md:w-7 md:h-7" />}
-                            <span className="text-xs md:text-sm tracking-tight uppercase">AI生成</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
             {/* Main Information Bento */}
-            <div className="flex flex-col lg:flex-row gap-10 animate-in fade-in duration-1000">
+            <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in duration-1000">
                 <div className="flex-1 min-w-0">
                     <div className="bg-white/90 backdrop-blur-3xl rounded-[2.5rem] md:rounded-[3.5rem] shadow-premium border border-white/60 overflow-hidden hover:shadow-2xl transition-all duration-700">
                         <div className="overflow-x-auto custom-scrollbar-hidden md:custom-scrollbar">
                             <table className="w-full border-collapse">
                                 <thead>
                                     <tr className="bg-slate-50/50 border-b border-slate-100">
-                                        <th className="p-3 md:p-6 text-center w-12 md:w-16 flex-shrink-0">
-                                            <input type="checkbox" checked={selectedGenerateIds.length === children.length && children.length > 0} onChange={e => setSelectedGenerateIds(e.target.checked ? children.map(c=>c.id) : [])} className="w-5 h-5 md:w-6 md:h-6 rounded-lg accent-tree-600" />
-                                        </th>
                                         <th className="sticky left-0 z-30 bg-slate-50 border-r border-slate-100 w-32 md:w-44 min-w-[120px] md:min-w-[180px] p-4 md:p-6 text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] text-left">児童氏名</th>
                                         <th className="border-r border-slate-100 w-16 md:w-24 p-3 md:p-6 text-[10px] md:text-[12px] font-black text-slate-400 text-center relative bg-slate-50/20">
-                                            <span>支援</span>
+                                            <span className="whitespace-nowrap">ツリー通信</span>
                                             <button 
+                                                id="guide-transport-toggle"
                                                 onClick={() => setIsTransportExpanded(!isTransportExpanded)}
                                                 className={`absolute top-2 -right-3 md:top-4 md:-right-5 z-40 p-2 md:px-4 md:py-2.5 rounded-xl md:rounded-2xl flex items-center gap-2 transition-all shadow-premium active:scale-90 ${isTransportExpanded ? 'bg-wood-500 text-white ring-4 md:ring-8 ring-wood-50' : 'bg-white text-wood-500 hover:bg-wood-50 border border-wood-100'}`}
                                             >
                                                 {isTransportExpanded ? <><ChevronLeft className="hidden md:inline w-4 h-4" /> <span className="text-[8px] md:text-[10px] font-extrabold uppercase">OFF</span></> : <Clock className="w-4 h-4 md:w-5 md:h-5" />}
                                             </button>
                                         </th>
-                                        <th className={`animate-col text-[10px] md:text-[11px] font-black text-wood-600 border-r border-t-4 border-wood-200 ${!isTransportExpanded ? 'col-collapsed' : 'p-2 w-24 md:w-36 bg-wood-50/30'}`}>迎え場所</th>
-                                        <th className={`animate-col p-2 md:p-4 text-[10px] md:text-[11px] font-black text-wood-600 border-r border-t-4 border-wood-200 ${!isTransportExpanded ? 'col-collapsed' : 'w-16 md:w-24 text-center bg-wood-50/30'}`}>終了</th>
-                                        <th className={`animate-col p-2 md:p-4 text-[10px] md:text-[11px] font-black text-wood-600 border-t-4 border-wood-200 ${!isTransportExpanded ? 'col-collapsed' : 'w-16 md:w-24 text-center bg-wood-50/30 border-r-2 font-bold'}`}>送迎</th>
+                                        <th onClick={() => handleSort('transportTime')} className={`animate-col p-2 md:p-4 text-[10px] md:text-[11px] font-black text-wood-600 border-r border-t-4 border-wood-200 cursor-pointer hover:bg-wood-50/50 transition-colors ${!isTransportExpanded ? 'col-collapsed' : 'w-16 md:w-24 text-center bg-wood-50/30'}`}>
+                                            送迎時間 {sortConfig.key === 'transportTime' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th onClick={() => handleSort('endTime')} className={`animate-col p-2 md:p-4 text-[10px] md:text-[11px] font-black text-wood-600 border-r border-t-4 border-wood-200 cursor-pointer hover:bg-wood-50/50 transition-colors ${!isTransportExpanded ? 'col-collapsed' : 'w-16 md:w-24 text-center bg-wood-50/30'}`}>
+                                            終了時間 {sortConfig.key === 'endTime' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                                        </th>
+                                        <th className={`animate-col text-[10px] md:text-[11px] font-black text-wood-600 border-t-4 border-wood-200 ${!isTransportExpanded ? 'col-collapsed' : 'p-2 w-24 md:w-36 bg-wood-50/30 border-r-2 font-bold'}`}>迎え場所</th>
                                         
                                         <th className="p-3 md:p-4 text-[10px] md:text-[12px] font-black text-slate-400 w-[140px] md:w-[220px] border-r border-slate-100 bg-slate-50/10 text-center">学習</th>
                                         <th className={`p-4 md:p-6 text-[10px] md:text-[12px] font-black text-slate-400 w-[140px] md:w-[220px] border-r border-slate-100 relative bg-slate-50/10 text-center`}>
                                             <span>プログラム</span>
                                             <button 
+                                                id="guide-program-toggle"
                                                 onClick={() => setIsNotesExpanded(!isNotesExpanded)}
                                                 className={`absolute top-2 -right-3 md:top-4 md:-right-5 z-40 p-2 md:px-4 md:py-2.5 rounded-xl md:rounded-2xl flex items-center gap-2 transition-all shadow-premium active:scale-90 ${isNotesExpanded ? 'bg-tree-600 text-white ring-4 md:ring-8 ring-tree-50' : 'bg-white text-tree-600 hover:bg-tree-50 border border-tree-100'}`}
                                             >
@@ -462,46 +446,46 @@ JSON形式: ${template}`;
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {displayRegular.map((child) => {
+                                    {displayRegular.map((child, index) => {
                                         const row = dailyTable[child.id] || {};
                                         const isPlaceholder = !!child.isPlaceholder;
                                         return (
-                                            <tr key={child.id} className={`border-b border-slate-100 group transition-all ${selectedChildId === child.id ? 'bg-tree-50/30' : 'hover:bg-slate-50/20'}`}>
-                                                <td className="p-3 md:p-5 text-center">
-                                                    {!isPlaceholder && <input type="checkbox" checked={selectedGenerateIds.includes(child.id)} onChange={() => toggleChildGenerate(child.id)} className="w-5 h-5 rounded-lg accent-tree-600" />}
+                                            <tr key={child.id} className={`border-b border-slate-100 group transition-all ${isPlaceholder ? 'row-placeholder bg-slate-50/10 no-print' : selectedChildId === child.id ? 'bg-tree-50/30' : 'hover:bg-slate-50/20'}`}>
+                                                <td className={`sticky left-0 z-10 p-4 md:p-6 font-black border-r border-slate-100 ${selectedChildId === child.id ? 'bg-tree-100/40' : 'bg-white group-hover:bg-slate-50'} ${isPlaceholder ? 'text-[10px] py-2' : 'text-[12px] md:text-sm'}`}>
+                                                    <button 
+                                                        id={index === 0 ? "guide-child-name" : undefined}
+                                                        onClick={() => !isPlaceholder && setSelectedChildId(child.id)} 
+                                                        className={`w-full text-left truncate transition-colors text-ellipsis overflow-hidden ${isPlaceholder ? 'text-slate-300' : 'hover:text-tree-600'}`}>{child.name ?? '名称未設定'}</button>
                                                 </td>
-                                                <td className={`sticky left-0 z-10 p-4 md:p-6 font-black text-[12px] md:text-sm border-r border-slate-100 ${selectedChildId === child.id ? 'bg-tree-100/40' : 'bg-white group-hover:bg-slate-50'}`}>
-                                                    <button onClick={() => !isPlaceholder && setSelectedChildId(child.id)} className="w-full text-left truncate hover:text-tree-600 transition-colors text-ellipsis overflow-hidden">{child.name}</button>
-                                                    {!isPlaceholder && results[child.id] && <div className="text-[8px] bg-apple-500 text-white px-2 py-0.5 mt-1 rounded-full w-fit font-black shadow-sm tracking-tighter uppercase">AI同期済み</div>}
-                                                </td>
-                                                <td className="p-0 border-r border-slate-100 text-center">
+                                                <td className="p-0 border-r border-slate-100 text-center relative" id={index === 0 ? "guide-tree-comm" : undefined}>
                                                     {!isPlaceholder && (
-                                                        <button onClick={() => { setSelectedTreeChildId(child.id); setSelectedChildId(null); setSelectedDocChildId(null); }} className={`w-full h-full p-4 md:p-5 flex items-center justify-center transition-all ${results[child.id]?.D ? 'text-tree-600 bg-tree-50/50' : 'text-slate-200 hover:text-tree-500'}`}>
+                                                        <button 
+                                                            onClick={() => { setSelectedTreeChildId(child.id); setSelectedChildId(null); setSelectedDocChildId(null); }} className={`w-full h-full p-4 md:p-5 flex items-center justify-center transition-all ${results[child.id]?.D ? 'text-tree-600 bg-tree-50/50' : 'text-slate-200 hover:text-tree-500'}`}>
                                                             <FileEdit className="w-5 h-5 md:w-6 md:h-6 font-bold" />
                                                         </button>
                                                     )}
                                                 </td>
-                                                <td className={`animate-col p-0 border-r border-slate-100 transition-all ${!isTransportExpanded ? 'col-collapsed' : 'bg-wood-50/10'}`}>
-                                                    {!isPlaceholder && <input value={row.pickupLocation || ''} onChange={e => updateDailyTable(child.id, { pickupLocation: e.target.value })} className="w-full h-full p-4 md:p-6 text-[10px] md:text-[12px] border-none bg-transparent outline-none font-black text-wood-700" placeholder="---" />}
+                                                <td className={`animate-col p-0 border-r border-slate-100 transition-all ${!isTransportExpanded ? 'col-collapsed' : 'bg-wood-50/20'}`}>
+                                                    {!isPlaceholder && <input type="time" value={row.transportTime || ''} onChange={e => updateDailyTable(child.id, { transportTime: e.target.value })} className="w-full h-full p-4 md:p-6 text-[10px] border-none bg-transparent outline-none text-center font-black text-tree-600" />}
                                                 </td>
                                                 <td className={`animate-col p-0 border-r border-slate-100 transition-all ${!isTransportExpanded ? 'col-collapsed' : 'bg-wood-50/10'}`}>
                                                     {!isPlaceholder && <input type="time" value={row.endTime || ''} onChange={e => updateDailyTable(child.id, { endTime: e.target.value })} className="w-full h-full p-4 md:p-6 text-[10px] border-none bg-transparent outline-none text-center font-bold text-slate-500" />}
                                                 </td>
-                                                <td className={`animate-col p-0 border-r border-slate-100 transition-all ${!isTransportExpanded ? 'col-collapsed' : 'bg-wood-50/20'}`}>
-                                                    {!isPlaceholder && <input type="time" value={row.transportTime || ''} onChange={e => updateDailyTable(child.id, { transportTime: e.target.value })} className="w-full h-full p-4 md:p-6 text-[10px] border-none bg-transparent outline-none text-center font-black text-tree-600" />}
+                                                <td className={`animate-col p-0 border-r border-slate-100 transition-all ${!isTransportExpanded ? 'col-collapsed' : 'bg-wood-50/10'}`}>
+                                                    {!isPlaceholder && <input value={row.pickupLocation || ''} onChange={e => updateDailyTable(child.id, { pickupLocation: e.target.value })} className="w-full h-full p-4 md:p-6 text-[10px] md:text-[12px] border-none bg-transparent outline-none font-black text-wood-700" placeholder="---" />}
                                                 </td>
-                                                <td className="p-3 md:p-5 text-[10px] md:text-[12px] text-slate-600 border-r border-slate-100 leading-relaxed font-bold align-top">
+                                                <td onClick={() => { if(!isPlaceholder) { setSelectedChildId(child.id); setSelectedTreeChildId(null); setSelectedDocChildId(null); } }} className="p-3 md:p-5 text-[10px] md:text-[12px] text-slate-600 border-r border-slate-100 leading-relaxed font-bold align-top cursor-pointer hover:bg-slate-50 transition-colors">
                                                     {!isPlaceholder && (
                                                         getStudyText(child.id) ? (
-                                                            <div className="text-tree-600 tracking-tight gap-1.5"><div className="inline-block w-1.5 h-3 bg-tree-500 rounded-full mr-1 translate-y-[2px]" /> {getStudyText(child.id)}</div>
-                                                        ) : <div className="opacity-20 italic text-center text-[10px]">---</div>
+                                                            <div className="text-tree-600 tracking-tight whitespace-pre-wrap">{getStudyText(child.id)}</div>
+                                                        ) : <div className="opacity-0 italic text-center text-[10px]">---</div>
                                                     )}
                                                 </td>
-                                                <td className="p-3 md:p-5 text-[10px] md:text-[12px] text-slate-600 border-r border-slate-100 leading-relaxed font-bold align-top">
+                                                <td onClick={() => { if(!isPlaceholder) { setSelectedChildId(child.id); setSelectedTreeChildId(null); setSelectedDocChildId(null); } }} className="p-3 md:p-5 text-[10px] md:text-[12px] text-slate-600 border-r border-slate-100 leading-relaxed font-bold align-top cursor-pointer hover:bg-slate-50 transition-colors">
                                                     {!isPlaceholder && (
                                                         getProgramText(child.id) ? (
-                                                            <div className="text-wood-600 tracking-tight gap-1.5"><div className="inline-block w-1.5 h-3 bg-wood-400 rounded-full mr-1 translate-y-[2px]" /> {getProgramText(child.id)}</div>
-                                                        ) : <div className="opacity-20 italic text-center text-[10px]">---</div>
+                                                            <div className="text-wood-600 tracking-tight whitespace-pre-wrap">{getProgramText(child.id)}</div>
+                                                        ) : <div className="opacity-0 italic text-center text-[10px]">---</div>
                                                     )}
                                                 </td>
                                                 <td className={`animate-col p-0 ${!isNotesExpanded ? 'col-collapsed' : ''}`}>
@@ -524,68 +508,79 @@ JSON形式: ${template}`;
                                 </div>
                             ))}
                         </div>
+                        
+                        {/* Global Notes Section */}
+                        <div className="bg-white/50 p-6 md:p-8 mt-4 border-t border-slate-100 flex flex-col gap-4">
+                            <div className="flex items-center gap-3 px-4">
+                                <div className="w-1.5 h-6 bg-apple-500 rounded-full" />
+                                <h3 className="text-[12px] md:text-sm font-black text-slate-800 uppercase tracking-widest">【全体的な様子、特記事項】</h3>
+                            </div>
+                            <textarea
+                                value={globalLog.notice || ''}
+                                onChange={(e) => updateGlobalLog('notice', e.target.value)}
+                                placeholder="本日の全体的な様子や特記事項を入力してください（印刷用日誌に反映されます）"
+                                className="w-full min-h-[120px] p-6 md:p-8 bg-white/80 border-2 border-slate-100 rounded-[2.5rem] focus:border-apple-500 focus:ring-8 focus:ring-apple-50 focus:bg-white outline-none transition-all text-[13px] md:text-[15px] font-medium leading-relaxed shadow-inner resize-none"
+                            />
+                        </div>
                     </div>
                 </div>
 
-                {/* Floating Action Panels */}
-                {(selectedChildId || selectedTreeChildId || selectedDocChildId) && (
-                    <div className="fixed inset-y-0 right-0 z-[100] w-full md:w-[540px] p-4 flex">
-                        <div className="glass-card w-full h-full rounded-[4rem] shadow-2xl overflow-hidden flex flex-col border-white animate-in slide-in-from-right duration-500 shadow-tree-100">
-                            {selectedChildId && (
-                                <MemoPanel
-                                    child={children.find(c => c.id === selectedChildId)}
-                                    messages={dailyMessages[selectedChildId] || []}
-                                    tags={tags}
-                                    onSave={sendMessage}
-                                    onClose={() => setSelectedChildId(null)}
-                                />
-                            )}
-                            {selectedTreeChildId && (
-                                <TreeCommPanel
-                                    child={children.find(c => c.id === selectedTreeChildId)}
-                                    result={results[selectedTreeChildId] || {}}
-                                    messages={dailyMessages[selectedTreeChildId] || []}
-                                    onSave={(id, res) => saveResults({ ...results, [id]: res }, summaryC)}
-                                    onClose={() => setSelectedTreeChildId(null)}
-                                />
-                            )}
-                            {selectedDocChildId && (
-                                <DocViewer
-                                    child={children.find(c => c.id === selectedDocChildId)}
-                                    result={results[selectedDocChildId]}
-                                    selectedDate={selectedDate}
-                                    onSaveResult={(id, res) => saveResults({ ...results, [id]: res }, summaryC)}
-                                    onClose={() => setSelectedDocChildId(null)}
-                                />
-                            )}
-                        </div>
+            {/* Floating Action Panels */}
+            {(selectedChildId || selectedTreeChildId || selectedDocChildId || isPanelClosing) && (
+                <div className="fixed inset-y-0 right-0 z-[100] w-full md:w-[540px] p-4 flex">
+                    <div className={`glass-card w-full h-full rounded-[4rem] shadow-2xl overflow-hidden flex flex-col border-white shadow-tree-100 ${isPanelClosing ? 'animate-out-right' : 'animate-right'}`}>
+                        {(selectedChildId || (isPanelClosing && lastPanelData?.memo)) && !selectedTreeChildId && !selectedDocChildId && (
+                            <MemoPanel
+                                child={children.find(c => c.id === (selectedChildId || lastPanelData?.memo))}
+                                messages={dailyMessages[selectedChildId || lastPanelData?.memo] || []}
+                                tags={tags}
+                                onSave={sendMessage}
+                                onDelete={deleteMessage}
+                                onUpdate={updateMessage}
+                                onClose={handlePanelClose}
+                            />
+                        )}
+                        {(selectedTreeChildId || (isPanelClosing && lastPanelData?.tree)) && !selectedDocChildId && (
+                            <TreeCommPanel
+                                child={children.find(c => c.id === (selectedTreeChildId || lastPanelData?.tree))}
+                                messages={dailyMessages[selectedTreeChildId || lastPanelData?.tree] || []}
+                                tags={tags}
+                                result={results[selectedTreeChildId || lastPanelData?.tree] || {}}
+                                selectedDate={selectedDate}
+                                staffList={staffList}
+                                onSave={(id, res) => saveResults({ ...results, [id]: res }, summaryC)}
+                                onClose={handlePanelClose}
+                            />
+                        )}
+                        {(selectedDocChildId || (isPanelClosing && lastPanelData?.doc)) && (
+                            <DocViewer
+                                child={children.find(c => c.id === (selectedDocChildId || lastPanelData?.doc))}
+                                result={results[selectedDocChildId || lastPanelData?.doc]}
+                                selectedDate={selectedDate}
+                                onSaveResult={(id, res) => saveResults({ ...results, [id]: res }, summaryC)}
+                                onClose={handlePanelClose}
+                            />
+                        )}
                     </div>
-                )}
-            </div>
-
-            {/* Bottom Floating Bar - Ultra Responsive */}
-            <div className="fixed bottom-4 md:bottom-10 left-1/2 -translate-x-1/2 z-[80] glass-card px-4 md:px-10 py-3 md:py-6 rounded-full flex items-center gap-4 md:gap-8 transition-all hover:scale-105 active:scale-95 shadow-2xl no-print border-white/60 w-[95%] max-w-[600px] justify-center">
-                <button onClick={() => printAllDocuments(children, results, summaryC, selectedDate)} className="flex-1 md:flex-none flex items-center justify-center gap-2 md:gap-3 px-6 md:px-10 py-4 md:py-5 bg-tree-600 text-white rounded-full font-black text-[10px] md:text-xs shadow-2xl shadow-tree-100 transition-all hover:bg-tree-700 uppercase tracking-widest truncate">
-                    <Printer className="w-4 h-4 md:w-5 md:h-5" /> <span>一括印刷</span>
-                </button>
-                <div className="hidden xs:block w-px h-8 md:h-10 bg-slate-200/50" />
-                <button onClick={() => setSelectedDocChildId(children[0]?.id)} className="flex-1 md:flex-none flex items-center justify-center gap-2 md:gap-3 px-6 md:px-10 py-4 md:py-5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-100 rounded-full font-black text-[10px] md:text-xs transition-all shadow-premium uppercase tracking-widest truncate">
-                    <LayoutPanelLeft className="w-4 h-4 md:w-5 md:h-5" /> <span>内容確認</span>
-                </button>
+                </div>
+            )}
             </div>
 
             {/* Modals */}
             <CalendarModal show={showCalendarModal} onClose={() => setShowCalendarModal(false)} setSelectedDate={setSelectedDate} selectedDate={selectedDate} existingReportDates={existingReportDates} />
+            <AddChildModal show={showAddChildModal} onClose={() => setShowAddChildModal(false)} masterChildren={masterChildren} currentChildren={children} onAddChild={handleAddFromMaster} />
             {showSettingsModal && (
                 <SettingsModal 
                     onClose={() => setShowSettingsModal(false)} 
-                    config={config}
-                    onSaveConfig={handleUpdateConfig}
                     tags={tags} 
                     onSaveTags={handleUpdateTags} 
                 />
             )}
             <ExportModal show={showExportModal} onClose={() => setShowExportModal(false)} selectedDate={selectedDate} children={children} results={results} summaryC={summaryC} />
+            
+            {showHelpGuide && (
+                <HelpGuide onClose={() => setShowHelpGuide(false)} />
+            )}
         
             {/* Custom Toast Notification */}
             {toast && (

@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 // constants.jsのパス
-const constantsPath = path.join(process.cwd(), 'src', 'constants.js');
+const constantsPath = path.join(process.cwd(), 'src', 'app_constants.js');
 
 try {
     let content = fs.readFileSync(constantsPath, 'utf-8');

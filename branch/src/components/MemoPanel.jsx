@@ -1,13 +1,43 @@
 import { useState } from 'react';
-import { Send, X, MessageCircle, Clock, CheckCircle2, Tags } from 'lucide-react';
+import { Send, X, MessageCircle, Clock, CheckCircle2, Tags, Edit2, Trash2, Check } from 'lucide-react';
 
-export default function MemoPanel({ child, messages, tags, onSave, onClose }) {
+export default function MemoPanel({ child, messages, tags, onSave, onDelete, onUpdate, onClose }) {
     const [text, setText] = useState('');
+    const [editingId, setEditingId] = useState(null);
+    const [editContent, setEditContent] = useState('');
+
+    const [touchStart, setTouchStart] = useState(null);
+    const [touchEnd, setTouchEnd] = useState(null);
+
+    const handleTouchStart = (e) => {
+        setTouchEnd(null);
+        setTouchStart(e.targetTouches[0].clientX);
+    };
+
+    const handleTouchMove = (e) => {
+        setTouchEnd(e.targetTouches[0].clientX);
+    };
+
+    const handleTouchEnd = () => {
+        if (!touchStart || !touchEnd) return;
+        const distance = touchEnd - touchStart;
+        const isLeftToRight = distance > 100;
+        if (isLeftToRight) {
+            onClose();
+        }
+    };
 
     const handleSend = () => {
         if (!text.trim()) return;
         onSave(child.id, text);
         setText('');
+    };
+
+    const handleEditSave = (msgId) => {
+        if (!editContent.trim()) return;
+        onUpdate(child.id, msgId, editContent);
+        setEditingId(null);
+        setEditContent('');
     };
 
     const addTag = (tag) => {
@@ -17,7 +47,12 @@ export default function MemoPanel({ child, messages, tags, onSave, onClose }) {
     if (!child) return null;
 
     return (
-        <div className="h-full flex flex-col bg-slate-50 animate-in slide-in-from-right duration-500 shadow-2xl border-l border-slate-200">
+        <div 
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            className="h-full flex flex-col bg-slate-50 shadow-2xl border-l border-slate-200"
+        >
             {/* Header - Brand Tree Green */}
             <div className="flex items-center justify-between p-5 md:p-7 text-white shadow-xl flex-shrink-0 z-20" style={{ backgroundColor: '#21913c' }}>
                 <div className="flex items-center gap-4 md:gap-5">
@@ -45,16 +80,52 @@ export default function MemoPanel({ child, messages, tags, onSave, onClose }) {
                     </div>
                 ) : (
                     messages.map((m, i) => (
-                        <div key={i} className={`flex flex-col ${m.included ? 'items-end' : 'items-start opacity-70'}`}>
-                            <div className={`max-w-[90%] md:max-w-[85%] p-4 md:p-6 rounded-[1.8rem] md:rounded-[2.5rem] shadow-lg text-[13px] md:text-[14px] leading-relaxed font-bold ${m.included ? 'bg-tree-600 text-white rounded-tr-none shadow-tree-100' : 'bg-white text-slate-700 rounded-tl-none border border-slate-100 shadow-sm'}`}>
-                                {m.text}
-                            </div>
-                            <div className="flex items-center gap-2 mt-2 md:mt-3 px-4 md:px-6">
-                                <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-tighter">
-                                    {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                                {m.included && <CheckCircle2 className="w-3.5 h-3.5 md:w-4 h-4 text-tree-500" />}
-                            </div>
+                        <div key={m.id || i} className={`group flex flex-col ${m.included ? 'items-end' : 'items-start opacity-70'}`}>
+                            {editingId === m.id ? (
+                                <div className="w-full max-w-[90%] md:max-w-[85%] bg-white p-4 rounded-3xl border-2 border-tree-400 shadow-xl space-y-3">
+                                    <textarea
+                                        value={editContent}
+                                        onChange={(e) => setEditContent(e.target.value)}
+                                        className="w-full text-sm font-medium text-slate-800 rounded-xl p-2 bg-slate-50 outline-none focus:bg-white transition-all resize-none"
+                                        rows={3}
+                                    />
+                                    <div className="flex justify-end gap-2">
+                                        <button onClick={() => setEditingId(null)} className="px-4 py-2 text-[10px] font-black text-slate-400 hover:text-slate-600 uppercase">キャンセル</button>
+                                        <button onClick={() => handleEditSave(m.id)} className="px-4 py-2 bg-tree-600 text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-2">
+                                            <Check className="w-3 h-3" /> 保存
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="relative group/msg">
+                                        <div className={`max-w-[100%] p-4 md:p-6 rounded-[1.8rem] md:rounded-[2.5rem] shadow-lg text-[13px] md:text-[14px] leading-relaxed font-bold ${m.included ? 'bg-tree-600 text-white rounded-tr-none shadow-tree-100' : 'bg-white text-slate-700 rounded-tl-none border border-slate-100 shadow-sm'}`}>
+                                            {m.text}
+                                        </div>
+                                        {/* Hover Actions */}
+                                        <div className={`absolute -bottom-2 ${m.included ? '-left-8' : '-right-8'} flex flex-col gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity`}>
+                                            <button 
+                                                onClick={() => { setEditingId(m.id); setEditContent(m.text); }}
+                                                className="p-2 bg-white text-slate-400 hover:text-tree-600 rounded-full shadow-md border border-slate-100 transition-colors"
+                                            >
+                                                <Edit2 className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button 
+                                                onClick={() => onDelete(child.id, m.id)}
+                                                className="p-2 bg-white text-slate-400 hover:text-red-500 rounded-full shadow-md border border-slate-100 transition-colors"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-2 md:mt-3 px-4 md:px-6">
+                                        <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-tighter">
+                                            {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                        {m.included && <CheckCircle2 className="w-3.5 h-3.5 md:w-4 h-4 text-tree-500" />}
+                                    </div>
+                                </>
+                            )}
                         </div>
                     ))
                 )}
