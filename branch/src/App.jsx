@@ -1030,7 +1030,7 @@ export default function App() {
             alert('この児童のツリー通信はまだ入力されていません。');
             return;
         }
-        const textToCopy = `${childName}\n${text}`;
+        const textToCopy = `${childName}さん\n${text}`;
         navigator.clipboard.writeText(textToCopy)
             .then(() => {
                 setCopiedChildId(childId);

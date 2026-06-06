@@ -76,7 +76,7 @@ export default function MemoPanel({
 
     const handleCopyEditor = () => {
         if (!treeContent.trim()) return;
-        const textToCopy = `${child.name}\n${treeContent}`;
+        const textToCopy = `${child.name}さん\n${treeContent}`;
         navigator.clipboard.writeText(textToCopy)
             .then(() => {
                 setCopiedEditor(true);
