@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronUp, MessageSquare, FileText, CheckSquare, Square } from 'lucide-react';
 
-const STAFF_OPTIONS = ['ブラック', 'スタッフA', 'スタッフB', 'スタッフC'];
+
 
 export default function ChildList({
     children, selectedChildId, selectedGenerateIds,
     onSelectChild, onAddChild, onRemoveChild, onUpdateChild,
-    onToggleGenerate, results, dailyMessages
+    onToggleGenerate, results, dailyMessages, staffList = []
 }) {
     const [expandedId, setExpandedId] = useState(null);
 
@@ -99,7 +99,7 @@ export default function ChildList({
                                             className="flex-1 text-sm border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                                         >
                                             <option value="">未設定</option>
-                                            {STAFF_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                                            {staffList.map(s => <option key={s} value={s}>{s}</option>)}
                                         </select>
                                     </div>
                                     <div className="flex items-center gap-2">

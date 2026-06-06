@@ -44,14 +44,14 @@ async function fetchAI(prompt, isJson = false) {
     return data.text || data.result || '';
 }
 
-function getStaffInstruction(staffName) {
-    if (staffName === 'ブラック') {
+function getStaffInstruction(staff) {
+    if (staff && staff.instruction) {
         return `
-      - 【重要】事実中心の客観的な描写に徹底すること。
-      - スタッフの主観的な感想、感情（「〜と感じました」「嬉しかったです」など）は一切記述しないこと。
-      - 「〜しました」「〜という場面がありました」のように、実際に起きた出来事を淡々と記述すること。
-    `;
+【スタッフ個別指示】
+${staff.instruction}
+`;
     }
+    // デフォルト指示
     return `- 記述方針: 事実ベースで、評価や断定は避ける。「取り組む様子」「考える過程」「本人の選択」を大切に描写する。`;
 }
 
@@ -68,7 +68,7 @@ export function useAI() {
     }, []);
 
     const generateDocuments = useCallback(async ({
-        children, selectedGenerateIds, dailyMessages, results, summaryC, selectedDate, onComplete
+        children, selectedGenerateIds, dailyMessages, results, summaryC, selectedDate, staffList = [], onComplete
     }) => {
         const toGenerate = children.filter(c => selectedGenerateIds.includes(c.id));
         const quota = ensureReset(getQuota());
@@ -131,7 +131,7 @@ export function useAI() {
 - 冒頭固定: こんにちは、${child.staff || '〇〇'}です！ 今日のツリー通信です！
 - 文字数: 300文字前後
 - トーン: 保護者向けのやわらかい文章。療育記録調や専門用語は禁止。
-${getStaffInstruction(child.staff)}
+${getStaffInstruction(staffList.find(s => s.name === child.staff))}
 - 否定的な表現は使わず、つまずきは「時間がかかった」「迷う様子」などで表現する。
 ${forceSheetInstruction}
 

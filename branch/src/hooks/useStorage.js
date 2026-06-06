@@ -1,4 +1,4 @@
-import { firestore } from '../firebase';
+import { firestore, auth } from '../firebase';
 import { 
     doc, getDoc, setDoc, collection, getDocs, deleteDoc, 
     addDoc, serverTimestamp, query, where, orderBy, Timestamp 
@@ -13,26 +13,46 @@ const localGet = (k) => {
 const localSet = (k, v) => localStorage.setItem('care_pro_local_' + k, JSON.stringify(v));
 
 const performLocalAction = (payload) => {
-    const { action, data, childId, date } = payload;
+    const { action, data, childId, date, officeId } = payload;
     switch (action) {
         case 'getMasterChildren': return localGet('master_children') || [];
         case 'saveMasterChildren': localSet('master_children', data); return { status: 'OK' };
         case 'getChildren': return localGet('children') || [];
         case 'setChildren': localSet('children', data); return { status: 'OK' };
-        case 'getReport': return localGet(`report_${date}`) || null;
+        case 'getReport': {
+            const reportKey = officeId ? `report_${officeId}_${date}` : `report_${date}`;
+            return localGet(reportKey) || null;
+        }
         case 'saveReport': {
-            localSet(`report_${date}`, data);
-            let index = localGet('reports_index') || [];
+            const reportKey = officeId ? `report_${officeId}_${date}` : `report_${date}`;
+            localSet(reportKey, data);
+            const indexKey = officeId ? `reports_index_${officeId}` : 'reports_index';
+            let index = localGet(indexKey) || [];
             if (!Array.isArray(index)) index = [];
-            if (!index.includes(date)) { index.push(date); localSet('reports_index', index); }
+            if (!index.includes(date)) { index.push(date); localSet(indexKey, index); }
             return { status: 'OK' };
         }
-        case 'getReportIndex': return localGet('reports_index') || [];
+        case 'getReportIndex': {
+            const indexKey = officeId ? `reports_index_${officeId}` : 'reports_index';
+            return localGet(indexKey) || [];
+        }
         case 'rebuildIndex': {
-            const keys = Object.keys(localStorage).filter(k => k.startsWith('care_pro_local_report_'));
-            const dates = keys.map(k => k.replace('care_pro_local_report_', '')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
-            localSet('reports_index', dates);
+            const indexKey = officeId ? `reports_index_${officeId}` : 'reports_index';
+            const prefix = officeId ? `report_${officeId}_` : 'report_';
+            const fullPrefix = 'care_pro_local_' + prefix;
+            const keys = Object.keys(localStorage).filter(k => k.startsWith(fullPrefix));
+            const dates = keys.map(k => k.replace(fullPrefix, '')).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+            localSet(indexKey, dates);
             return dates;
+        }
+        case 'getAttendance': {
+            const attendanceKey = officeId ? `attendance_${officeId}_${date}` : `attendance_${date}`;
+            return localGet(attendanceKey) || {};
+        }
+        case 'saveAttendance': {
+            const attendanceKey = officeId ? `attendance_${officeId}_${date}` : `attendance_${date}`;
+            localSet(attendanceKey, data);
+            return { status: 'OK' };
         }
         default: return null;
     }
@@ -49,12 +69,15 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
     try {
         switch (action) {
             case 'getMasterChildren': {
+                const projectId = firestore.app.options.projectId;
+                console.log(`[Firestore Debug] Fetching children from project: ${projectId}`);
                 const colRef = collection(firestore, 'children');
                 const snap = await getDocs(colRef);
+                console.log(`[Firestore Debug] Successfully fetched ${snap.docs.length} children.`);
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return snap.docs
                     .map(doc => ({ id: doc.id, ...doc.data() }))
-                    .filter(child => child.name); // name のないドキュメントは除外してクラッシュを防ぐ
+                    .filter(child => child.name || child.lastName); // name または lastName があるドキュメントを表示
             }
             case 'saveMasterChildren': {
                 const child = Array.isArray(data) ? null : data;
@@ -94,18 +117,28 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
             }
+            case 'getOffices': {
+                const colRef = collection(firestore, 'offices');
+                const snap = await getDocs(colRef);
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            }
             case 'getReport': {
-                const docRef = doc(firestore, 'reports', date);
+                const reportId = payload.officeId ? `${payload.officeId}_${date}` : date;
+                const docRef = doc(firestore, 'reports', reportId);
                 const snap = await getDoc(docRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return snap.exists() ? snap.data() : null;
             }
             case 'saveReport': {
-                const docRef = doc(firestore, 'reports', date);
-                await setDoc(docRef, data);
+                const reportId = payload.officeId ? `${payload.officeId}_${date}` : date;
+                const docRef = doc(firestore, 'reports', reportId);
+                const fieldsToOverwrite = ['children', 'messages', 'results', 'summaryC', 'dailyTable', 'globalLog', 'updatedAt'];
+                await setDoc(docRef, data, { mergeFields: fieldsToOverwrite });
                 
                 // Update index
-                const idxRef = doc(firestore, 'meta', 'reports_index');
+                const indexDocId = payload.officeId ? `reports_index_${payload.officeId}` : 'reports_index';
+                const idxRef = doc(firestore, 'meta', indexDocId);
                 const idxSnap = await getDoc(idxRef);
                 let index = idxSnap.exists() ? (idxSnap.data().dates || []) : [];
                 if (!index.includes(date)) { 
@@ -117,7 +150,8 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 return { status: 'OK' };
             }
             case 'getReportIndex': {
-                const idxRef = doc(firestore, 'meta', 'reports_index');
+                const indexDocId = payload.officeId ? `reports_index_${payload.officeId}` : 'reports_index';
+                const idxRef = doc(firestore, 'meta', indexDocId);
                 const snap = await getDoc(idxRef);
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return snap.exists() ? (snap.data().dates || []) : [];
@@ -186,17 +220,67 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 return { status: 'OK' };
             }
             case 'getStaffNames': {
-                const colRef = collection(firestore, 'staff');
-                const snap = await getDocs(colRef);
+                const projectId = firestore.app.options.projectId;
+                const currentUser = auth.currentUser;
+                console.log(`[Firestore Debug] User: ${currentUser ? currentUser.email : 'NOT LOGGED IN'} (${currentUser ? currentUser.uid : 'N/A'})`);
+                console.log(`[Firestore Debug] Fetching staff from project: ${projectId}`);
+                
+                let snap;
+                try {
+                    const colRef = collection(firestore, 'staff');
+                    snap = await getDocs(colRef);
+                } catch (e) {
+                    console.warn('[Firestore Debug] Failed to fetch from "staff" collection, trying "staffs"...', e.message);
+                    const colRef = collection(firestore, 'staffs');
+                    snap = await getDocs(colRef);
+                }
+
+                console.log(`[Firestore Debug] Successfully fetched ${snap.docs.length} staff members.`);
+                const results = snap.docs.map(doc => {
+                    const data = doc.data();
+                    console.log(`[Firestore Debug] Staff Doc ID: ${doc.id}, Data:`, data);
+                    return { id: doc.id, ...data, name: data.name || doc.id };
+                });
                 setConnectionStatus?.('online'); setLastError?.(null);
-                return snap.docs
-                    .map(doc => ({ id: doc.id, ...doc.data() }))
-                    .map(s => s.name || s.id); // Prefer name field, fall back to id
+                return results;
+            }
+            case 'getStaffList': {
+                let snap;
+                try {
+                    const colRef = collection(firestore, 'staff');
+                    snap = await getDocs(colRef);
+                } catch (e) {
+                    console.warn('[Firestore Debug] getStaffList failed on "staff", trying "staffs"...', e.message);
+                    const colRef = collection(firestore, 'staffs');
+                    snap = await getDocs(colRef);
+                }
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return snap.docs.map(doc => {
+                    const data = doc.data();
+                    return { id: doc.id, name: data.name || doc.id };
+                });
+            }
+            case 'getAttendance': {
+                if (!date) throw new Error('date is required for getAttendance');
+                const attendanceId = payload.officeId ? `${payload.officeId}_${date}` : date;
+                const docRef = doc(firestore, 'attendance', attendanceId);
+                const snap = await getDoc(docRef);
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return snap.exists() ? snap.data() : {};
+            }
+            case 'saveAttendance': {
+                if (!date) throw new Error('date is required for saveAttendance');
+                const attendanceId = payload.officeId ? `${payload.officeId}_${date}` : date;
+                const docRef = doc(firestore, 'attendance', attendanceId);
+                await setDoc(docRef, data, { merge: true });
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return { status: 'OK' };
             }
             default: return null;
         }
     } catch (e) {
-        console.warn('Firestore error, falling back to localStorage:', e);
+        const projectId = firestore.app.options.projectId;
+        console.error(`[Firestore Error] Failed during action: ${action} on project: ${projectId}`, e);
         setConnectionStatus?.('offline');
         setLastError?.(e.message || 'Network Error');
         return performLocalAction(payload);

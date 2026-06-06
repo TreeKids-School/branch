@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Save, X, FileText, Trash2, Calendar, User, History, Plus, Edit2, AlertCircle, MessageSquare, ChevronDown, ChevronUp, Clock } from 'lucide-react';
+import { Save, X, FileText, Trash2, Calendar, User, History, Plus, Edit2, AlertCircle, MessageSquare, ChevronDown, ChevronUp, Clock, HelpCircle } from 'lucide-react';
 import { callStorage } from '../hooks/useStorage';
 
 export default function TreeCommPanel({ child, messages = [], tags = [], result, selectedDate: propSelectedDate, staffList = [], onSave, onClose }) {
     const [history, setHistory] = useState([]);
     const [loading, setLoading] = useState(false);
     const [editingId, setEditingId] = useState(null);
-    const [staffName, setStaffName] = useState(localStorage.getItem('last_staff_name') || '');
+    const [staffName, setStaffName] = useState(() => {
+        const saved = localStorage.getItem('last_staff_name') || '';
+        return result?.staffName || child?.staff || saved;
+    });
     const [content, setContent] = useState('');
     const [selectedDate, setSelectedDate] = useState(propSelectedDate);
     const [view, setView] = useState('editor'); // 'editor' or 'history'
     const [isMemoExpanded, setIsMemoExpanded] = useState(true);
+    const [showHelp, setShowHelp] = useState(false);
 
     const fetchHistory = useCallback(async () => {
         if (!child?.id) return;
@@ -45,7 +49,7 @@ export default function TreeCommPanel({ child, messages = [], tags = [], result,
 
         await callStorage(payload);
         localStorage.setItem('last_staff_name', staffName);
-        onSave(child.id, { ...result, D: content });
+        onSave(child.id, { ...result, D: content, staffName: staffName });
         
         setContent('');
         setEditingId(null);
@@ -118,11 +122,71 @@ export default function TreeCommPanel({ child, messages = [], tags = [], result,
                     >
                         {view === 'editor' ? <History className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
                     </button>
+                    <button onClick={() => setShowHelp(true)} className="p-2.5 hover:bg-white/10 rounded-xl transition-all active:scale-95">
+                        <HelpCircle className="w-5 h-5 md:w-6 md:h-6" />
+                    </button>
                     <button onClick={onClose} className="p-2.5 hover:bg-white/10 rounded-xl transition-all active:scale-95">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
             </header>
+
+            {/* Help Modal */}
+            {showHelp && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-[2.5rem] md:rounded-[3rem] shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-300">
+                        <div className="p-6 md:p-8 flex items-center justify-between border-b border-slate-100 bg-slate-50/50">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-apple-100 rounded-xl">
+                                    <HelpCircle className="w-5 h-5 text-apple-600" />
+                                </div>
+                                <h4 className="font-black text-slate-800 text-sm md:text-base tracking-tight uppercase">操作ガイド：ツリー通信作成</h4>
+                            </div>
+                            <button onClick={() => setShowHelp(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors">
+                                <X className="w-5 h-5 text-slate-400" />
+                            </button>
+                        </div>
+                        <div className="p-6 md:p-8 space-y-6">
+                            <div className="flex gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-apple-50 flex items-center justify-center text-apple-600 font-black text-xs">1</div>
+                                <div className="space-y-1">
+                                    <p className="text-sm font-black text-slate-700">作成と履歴の切り替え</p>
+                                    <p className="text-xs font-bold text-slate-500 leading-relaxed">右上の時計(履歴)アイコンまたは「作成履歴」タブから過去の記録を確認できます。＋アイコンで新規作成に戻ります。</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-apple-50 flex items-center justify-center text-apple-600 font-black text-xs">2</div>
+                                <div className="space-y-1">
+                                    <p className="text-sm font-black text-slate-700">チャットメモの参照</p>
+                                    <p className="text-xs font-bold text-slate-500 leading-relaxed">「チャットメモの内容を参照」をタップすると、その日に入力されたスタッフ間メモが表示されます。内容を確認しながら文章を作成できます。</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-apple-50 flex items-center justify-center text-apple-600 font-black text-xs">3</div>
+                                <div className="space-y-1">
+                                    <p className="text-sm font-black text-slate-700">担当者の選択</p>
+                                    <p className="text-xs font-bold text-slate-500 leading-relaxed">担当者名を選択してください。最後に選択した名前は次回から自動的に入力されます。</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-4">
+                                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-apple-50 flex items-center justify-center text-apple-600 font-black text-xs">4</div>
+                                <div className="space-y-1">
+                                    <p className="text-sm font-black text-slate-700">記録の保存</p>
+                                    <p className="text-xs font-bold text-slate-500 leading-relaxed">「記録を保存」ボタンを押すと保存され、履歴に追加されます。保存された内容は家庭への配布用として印刷可能です。</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-6 md:p-8 bg-slate-50 border-t border-slate-100">
+                            <button 
+                                onClick={() => setShowHelp(false)}
+                                className="w-full py-4 bg-apple-600 hover:bg-apple-700 text-white rounded-2xl font-black text-xs md:text-sm shadow-lg transition-all active:scale-95 uppercase tracking-widest"
+                            >
+                                わかった！
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* View Toggle Tabs */}
             <div className="flex border-b border-slate-200 bg-white flex-shrink-0 z-20">
@@ -194,9 +258,10 @@ export default function TreeCommPanel({ child, messages = [], tags = [], result,
                                         className="w-full p-4 bg-white border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 outline-none focus:border-apple-400 appearance-none"
                                     >
                                         <option value="">選択してください</option>
-                                        {staffList.map((s, idx) => (
-                                            <option key={idx} value={s}>{s}</option>
-                                        ))}
+                                        {staffList.map((s, idx) => {
+                                            const name = typeof s === 'string' ? s : s.name;
+                                            return <option key={idx} value={name}>{name}</option>;
+                                        })}
                                     </select>
                                 </div>
 

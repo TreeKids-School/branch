@@ -37,7 +37,7 @@ export default function SettingsModal({ onClose, tags, onSaveTags }) {
                         </div>
                         <div>
                             <h3 className="font-black text-2xl text-white tracking-tight">システム設定</h3>
-                            <p className="text-[10px] font-black text-apple-100 uppercase tracking-[0.2em] mt-1.5 opacity-80">AI & Environment Config</p>
+                            <p className="text-[10px] font-black text-apple-100 uppercase tracking-[0.2em] mt-1.5 opacity-80">Environment Config</p>
                         </div>
                     </div>
                     <button onClick={onClose} className="p-4 hover:bg-white/10 rounded-2xl transition-all text-white/80 hover:text-white">

@@ -9,31 +9,39 @@ export default function Login({ onLoginSuccess }) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
 
-    const handleLogin = async (e) => {
-        e.preventDefault();
+    const handleLogin = async (e, demoId, demoPass) => {
+        if (e) e.preventDefault();
+        const targetId = demoId || id;
+        const targetPass = demoPass || password;
+        
         setLoading(true);
         setError(null);
 
-        // Map special IDs to an internal email format
+        const trimmedId = targetId.trim();
+
+        // Map special IDs to an internal email format (standardizing on @tree-kids.jp)
         const specialUsers = {
-            'テスト': { email: 'test@tree-kids.com', paddedPass: '000001' },
-            'ブラック': { email: 'black@tree-kids.com', paddedPass: '000001' }
+            'テスト': { email: 'テスト@tree-kids.jp', paddedPass: '000001' },
+            'ブラック': { email: 'ブラック@tree-kids.jp', paddedPass: '000001' },
+            'ネイビー': { email: 'ネイビー@tree-kids.jp', paddedPass: '000001' },
+            'ボス': { email: 'ボス@tree-kids.jp', paddedPass: '000001' }
         };
-        const special = specialUsers[id];
-        const email = special ? special.email : id;
+        const special = specialUsers[trimmedId];
+        
+        // Automatic domain completion if '@' is missing
+        const email = trimmedId.includes('@') ? trimmedId : (special ? special.email : `${trimmedId}@tree-kids.jp`);
         
         // Firebase requires at least 6 characters for passwords.
-        // If it's a special user and they enter '0001', we internally use '000001' to satisfy the rule.
-        const finalPassword = (special && password === '0001') ? special.paddedPass : password;
+        const finalPassword = (special && targetPass === '0001') ? special.paddedPass : targetPass;
 
         try {
             await signInWithEmailAndPassword(auth, email, finalPassword);
             onLoginSuccess();
         } catch (err) {
-            console.warn('Login attempt failed, checking for auto-creation:', err.code);
+            console.warn('Login attempt failed for:', email, err.code);
             
             // If it's a special user, try creating it on the fly
-            if (special && password === '0001' && (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-password')) {
+            if (special && targetPass === '0001' && (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential')) {
                 try {
                     await createUserWithEmailAndPassword(auth, email, finalPassword);
                     onLoginSuccess();
@@ -43,7 +51,7 @@ export default function Login({ onLoginSuccess }) {
                 }
             }
             
-            setError('IDまたはパスワードが正しくありません。（FirebaseコンソールでEmail/Password認証が有効になっているか確認してください）');
+            setError(`ログイン失敗: ${email} (IDまたはパスワードを確認してください)`);
         } finally {
             setLoading(false);
         }
@@ -93,7 +101,7 @@ export default function Login({ onLoginSuccess }) {
 
                     {error && (
                         <div className="flex items-center gap-2 p-4 bg-apple-50 text-apple-600 rounded-2xl text-xs font-bold border border-apple-100 animate-in fade-in slide-in-from-top-2">
-                            <AlertCircle className="w-4 h-4" />
+                            <AlertCircle className="w-4 h-4 flex-shrink-0" />
                             <span>{error}</span>
                         </div>
                     )}

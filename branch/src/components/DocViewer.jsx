@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Printer, Download, Edit2, Check, X, ChevronDown, ChevronUp, FileText, LayoutPanelLeft, MessageSquare, Info, Sparkles } from 'lucide-react';
+import { Printer, Download, Edit2, Check, X, ChevronDown, ChevronUp, FileText, LayoutPanelLeft, MessageSquare, Info } from 'lucide-react';
 import { parseForceSheet, buildForceSheet } from '../utils/parseForceSheet';
 import { printChildDocument } from '../utils/print';
 
@@ -42,12 +42,12 @@ export default function DocViewer({ child, result, selectedDate, onSaveResult, o
     if (!result) {
         return (
             <div className="h-full flex flex-col items-center justify-center p-8 text-center space-y-8 md:space-y-10 animate-in fade-in duration-700 bg-white/60 backdrop-blur-3xl">
-                <div className="p-10 md:p-12 bg-apple-50 rounded-[3.5rem] md:rounded-[4rem] shadow-premium text-apple-500 ring-8 ring-apple-100/50">
-                    <Sparkles className="w-16 h-16 md:w-20 md:h-20 stroke-[1.2] animate-pulse" />
+                <div className="p-10 md:p-12 bg-slate-50 rounded-[3.5rem] md:rounded-[4rem] shadow-premium text-slate-300 ring-8 ring-slate-100/50">
+                    <FileText className="w-16 h-16 md:w-20 md:h-20 stroke-[1.2]" />
                 </div>
                 <div className="space-y-3 md:space-y-4">
                   <p className="font-black text-slate-900 text-3xl md:text-4xl tracking-tight leading-none">{child.name}</p>
-                  <div className="px-6 py-2 bg-apple-500 rounded-full shadow-lg text-[10px] font-black text-white uppercase tracking-[0.3em] inline-block">AI連携待ち</div>
+                  <div className="px-6 py-2 bg-slate-100 rounded-full shadow-sm text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] inline-block">書類未作成</div>
                 </div>
             </div>
         );

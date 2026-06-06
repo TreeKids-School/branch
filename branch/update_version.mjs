@@ -39,6 +39,10 @@ try {
     content = content.replace(match[0], `export const APP_VERSION = '${newVersion}';`);
     fs.writeFileSync(constantsPath, content, 'utf-8');
 
+    // public/version.json の書き出し
+    const versionJsonPath = path.join(process.cwd(), 'public', 'version.json');
+    fs.writeFileSync(versionJsonPath, JSON.stringify({ version: newVersion }), 'utf-8');
+
     console.log(`バージョンを ${curDate}.${curBuild} から ${newVersion} に更新しました`);
 } catch (error) {
     console.error("エラーが発生しました:", error.message);

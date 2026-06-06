@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    background-color: #fcfdfc;
+  }
   body {
     background-color: #fcfdfc; /* tree-50 like very faint green */
     @apply text-slate-800 antialiased;
@@ -11,7 +14,12 @@
       radial-gradient(at 100% 0%, rgba(139, 94, 60, 0.08) 0px, transparent 50%), /* wood-500 */
       radial-gradient(at 100% 100%, rgba(220, 53, 69, 0.03) 0px, transparent 50%), /* apple-500 */
       radial-gradient(at 0% 100%, rgba(40, 167, 69, 0.05) 0px, transparent 50%);
-    background-attachment: fixed;
+    background-attachment: scroll;
+  }
+  @media (min-width: 768px) {
+    body {
+      background-attachment: fixed;
+    }
   }
 }
 
@@ -91,6 +99,53 @@
   animation: slide-out-right 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
+/* Date text slide animations - from neighbor position */
+@keyframes date-slide-in-left {
+  from { transform: translateX(-110px) scale(0.85); opacity: 0; }
+  to   { transform: translateX(0) scale(1); opacity: 1; }
+}
+@keyframes date-slide-in-right {
+  from { transform: translateX(110px) scale(0.85); opacity: 0; }
+  to   { transform: translateX(0) scale(1); opacity: 1; }
+}
+.date-slide-left {
+  animation: date-slide-in-left 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.date-slide-right {
+  animation: date-slide-in-right 0.28s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+/* Modal and Element Animations */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes zoom-in {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.animate-in {
+  animation-fill-mode: both;
+}
+
+.fade-in {
+  animation-name: fade-in;
+}
+
+.zoom-in-95 {
+  animation-name: zoom-in;
+}
+
+.duration-200 {
+  animation-duration: 200ms;
+}
+
+.duration-300 {
+  animation-duration: 300ms;
+}
+
 /* Help Guide Animations */
 @keyframes guide-pulse {
   0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
@@ -111,10 +166,15 @@
     size: A4 landscape; 
   }
 
+  html, body {
+    background-color: #ffffff !important;
+    background-image: none !important;
+    color: #000000 !important;
+    color-scheme: light !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   body { 
-    background: white !important; 
-    background-image: none !important; 
-    color: black !important;
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -189,4 +249,25 @@
   tr {
     page-break-inside: avoid !important;
   }
+}
+
+/* Long-press protection utility */
+.longpress-safe {
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  -khtml-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+/* Long-press loading animation */
+@keyframes long-press-fill {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+.animate-long-press {
+  animation: long-press-fill 600ms linear forwards !important;
 }

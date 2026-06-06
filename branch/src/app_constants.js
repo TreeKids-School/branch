@@ -1,6 +1,6 @@
 // ── App Constants ─────────────────────────────────────────────────────────────
 
-export const APP_VERSION = '26.04.25.17';
+export const APP_VERSION = '26.06.04.6';
 
 export const DAILY_LIMIT = 20;
 
@@ -21,3 +21,14 @@ export function getStaffInstruction(staff) {
 
 // parseForceSheet / buildForceSheet
 export { parseForceSheet, buildForceSheet } from './utils/parseForceSheet';
+
+export function getRoleFromPost(post) {
+    if (!post) return '';
+    const posts = Array.isArray(post) ? post : [post];
+    if (posts.includes('管理者')) return '管理者';
+    if (posts.includes('児発管')) return '児発管';
+    if (posts.includes('児童指導員・保育士')) return '児童指導員・保育士';
+    if (posts.includes('指導員')) return '指導員';
+    if (posts.includes('スタッフ')) return 'スタッフ';
+    return '';
+}
