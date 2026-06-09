@@ -807,6 +807,51 @@ export default function App() {
         }
     };
 
+    const saveDailyDataGranular = async ({ childId, result, tableRow, messagesList }) => {
+        setIsSyncing(true);
+        const savePromise = (async () => {
+            await cs({
+                action: 'updateDailyReportChildData',
+                date: selectedDate,
+                officeId: selectedOffice?.id,
+                childId,
+                result,
+                tableRow,
+                messagesList,
+                childrenList: children
+            });
+
+            const childObj = children.find(c => c.id === childId);
+            if (childObj && !childObj.isPlaceholder) {
+                const childResult = result !== undefined ? result : (results[childId] || {});
+                const childTable = tableRow !== undefined ? tableRow : (dailyTable[childId] || {});
+
+                const individualData = {
+                    name: childObj.name,
+                    tree_comm_text: childResult.D || '',
+                    pickupLocation: childTable.pickupLocation || '',
+                    endTime: childTable.endTime || '',
+                    transportTime: childTable.transportTime || '',
+                    notes: childTable.notes || ''
+                };
+
+                await cs({
+                    action: 'saveIndividualTreeComm',
+                    childId,
+                    date: selectedDate,
+                    data: individualData
+                });
+            }
+        })();
+
+        activeSavePromiseRef.current = savePromise;
+        try {
+            await savePromise;
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
     const updateGlobalLog = async (field, value) => {
         const newLog = { ...globalLog, [field]: value };
         setGlobalLog(newLog);
@@ -932,9 +977,10 @@ export default function App() {
     };
 
     const updateDailyTable = async (childId, data) => {
-        const newTable = { ...dailyTable, [childId]: { ...(dailyTable[childId] || {}), ...data } };
+        const childRow = { ...(dailyTable[childId] || {}), ...data };
+        const newTable = { ...dailyTable, [childId]: childRow };
         setDailyTable(newTable);
-        await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, newTable, globalLog);
+        await saveDailyDataGranular({ childId, tableRow: childRow });
     };
 
     const removeChild = async (id) => {
@@ -964,29 +1010,35 @@ export default function App() {
             staffName: staffName,
             tag: tag || null
         };
-        const newMessages = { ...dailyMessages, [childId]: [...(dailyMessages[childId] || []), newMsg] };
+        const childMsgs = [...(dailyMessages[childId] || []), newMsg];
+        const newMessages = { ...dailyMessages, [childId]: childMsgs };
         setDailyMessages(newMessages);
-        await saveDailyData(selectedDate, children, newMessages, results, summaryC, dailyTable, globalLog);
+        await saveDailyDataGranular({ childId, messagesList: childMsgs });
     };
 
     const deleteMessage = async (childId, msgId) => {
         if (!confirm('メッセージを削除しますか？')) return;
-        const newMsgs = (dailyMessages[childId] || []).filter(m => m.id !== msgId);
-        const newMessages = { ...dailyMessages, [childId]: newMsgs };
+        const childMsgs = (dailyMessages[childId] || []).filter(m => m.id !== msgId);
+        const newMessages = { ...dailyMessages, [childId]: childMsgs };
         setDailyMessages(newMessages);
-        await saveDailyData(selectedDate, children, newMessages, results, summaryC, dailyTable, globalLog);
+        await saveDailyDataGranular({ childId, messagesList: childMsgs });
     };
 
     const updateMessage = async (childId, msgId, newText) => {
-        const newMsgs = (dailyMessages[childId] || []).map(m => m.id === msgId ? { ...m, text: newText } : m);
-        const newMessages = { ...dailyMessages, [childId]: newMsgs };
+        const childMsgs = (dailyMessages[childId] || []).map(m => m.id === msgId ? { ...m, text: newText } : m);
+        const newMessages = { ...dailyMessages, [childId]: childMsgs };
         setDailyMessages(newMessages);
-        await saveDailyData(selectedDate, children, newMessages, results, summaryC, dailyTable, globalLog);
+        await saveDailyDataGranular({ childId, messagesList: childMsgs });
     };
 
-    const saveResults = async (res, sum) => {
+    const saveResults = async (res, sum, changedChildId) => {
         setResults(res); setSummaryC(sum);
-        await saveDailyData(selectedDate, children, dailyMessages, res, sum, dailyTable, globalLog);
+        if (changedChildId) {
+            const childResult = res[changedChildId] || {};
+            await saveDailyDataGranular({ childId: changedChildId, result: childResult });
+        } else {
+            await saveDailyData(selectedDate, children, dailyMessages, res, sum, dailyTable, globalLog);
+        }
     };
 
     const copyAllTreeCommunications = () => {
@@ -1930,7 +1982,7 @@ export default function App() {
                                 result={results[selectedChildId || lastPanelData?.memo] || {}}
                                 selectedDate={selectedDate}
                                 staffList={filteredStaffList}
-                                onSaveTree={(id, res) => saveResults({ ...results, [id]: { ...res, staffName: getCurrentStaffName() } }, summaryC)}
+                                onSaveTree={(id, res) => saveResults({ ...results, [id]: { ...res, staffName: getCurrentStaffName() } }, summaryC, id)}
                                 onClose={handlePanelClose}
                                 activeTab={memoActiveTab}
                                 setActiveTab={setMemoActiveTab}
@@ -1948,7 +2000,7 @@ export default function App() {
                                 child={children.find(c => c.id === (selectedDocChildId || lastPanelData?.doc))}
                                 result={results[selectedDocChildId || lastPanelData?.doc]}
                                 selectedDate={selectedDate}
-                                onSaveResult={(id, res) => saveResults({ ...results, [id]: { ...res, staffName: getCurrentStaffName() } }, summaryC)}
+                                onSaveResult={(id, res) => saveResults({ ...results, [id]: { ...res, staffName: getCurrentStaffName() } }, summaryC, id)}
                                 onClose={handlePanelClose}
                             />
                         )}

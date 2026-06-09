@@ -1,6 +1,6 @@
 import { firestore, auth } from '../firebase';
 import { 
-    doc, getDoc, setDoc, collection, getDocs, deleteDoc, 
+    doc, getDoc, setDoc, updateDoc, collection, getDocs, deleteDoc, 
     addDoc, serverTimestamp, query, where, orderBy, Timestamp 
 } from 'firebase/firestore';
 
@@ -52,6 +52,35 @@ const performLocalAction = (payload) => {
         case 'saveAttendance': {
             const attendanceKey = officeId ? `attendance_${officeId}_${date}` : `attendance_${date}`;
             localSet(attendanceKey, data);
+            return { status: 'OK' };
+        }
+        case 'updateDailyReportChildData': {
+            const reportKey = officeId ? `report_${officeId}_${date}` : `report_${date}`;
+            const report = localGet(reportKey) || {
+                children: payload.childrenList || [],
+                messages: {},
+                results: {},
+                summaryC: '',
+                dailyTable: {},
+                globalLog: { admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' },
+                updatedAt: new Date().toISOString()
+            };
+            
+            const { childId, result, tableRow, messagesList } = payload;
+            if (result !== undefined) {
+                if (!report.results) report.results = {};
+                report.results[childId] = result;
+            }
+            if (tableRow !== undefined) {
+                if (!report.dailyTable) report.dailyTable = {};
+                report.dailyTable[childId] = tableRow;
+            }
+            if (messagesList !== undefined) {
+                if (!report.messages) report.messages = {};
+                report.messages[childId] = messagesList;
+            }
+            report.updatedAt = new Date().toISOString();
+            localSet(reportKey, report);
             return { status: 'OK' };
         }
         default: return null;
@@ -173,6 +202,42 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                     ...data,
                     updatedAt: new Date().toISOString()
                 }, { merge: true });
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return { status: 'OK' };
+            }
+            case 'updateDailyReportChildData': {
+                const reportId = payload.officeId ? `${payload.officeId}_${date}` : date;
+                const docRef = doc(firestore, 'reports', reportId);
+                const { childId, result, tableRow, messagesList, childrenList } = payload;
+                
+                const updateData = {
+                    updatedAt: new Date().toISOString()
+                };
+                if (result !== undefined) {
+                    updateData[`results.${childId}`] = result;
+                }
+                if (tableRow !== undefined) {
+                    updateData[`dailyTable.${childId}`] = tableRow;
+                }
+                if (messagesList !== undefined) {
+                    updateData[`messages.${childId}`] = messagesList;
+                }
+                
+                const snap = await getDoc(docRef);
+                if (snap.exists()) {
+                    await updateDoc(docRef, updateData);
+                } else {
+                    const initialData = {
+                        children: childrenList || [],
+                        messages: messagesList ? { [childId]: messagesList } : {},
+                        results: result ? { [childId]: result } : {},
+                        summaryC: '',
+                        dailyTable: tableRow ? { [childId]: tableRow } : {},
+                        globalLog: { admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' },
+                        updatedAt: new Date().toISOString()
+                    };
+                    await setDoc(docRef, initialData);
+                }
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
             }
