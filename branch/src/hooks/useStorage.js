@@ -63,10 +63,11 @@ const performLocalAction = (payload) => {
                 summaryC: '',
                 dailyTable: {},
                 globalLog: { admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' },
+                changeLogs: [],
                 updatedAt: new Date().toISOString()
             };
             
-            const { childId, result, tableRow, messagesList } = payload;
+            const { childId, result, tableRow, messagesList, changeLogs } = payload;
             if (result !== undefined) {
                 if (!report.results) report.results = {};
                 report.results[childId] = result;
@@ -78,6 +79,9 @@ const performLocalAction = (payload) => {
             if (messagesList !== undefined) {
                 if (!report.messages) report.messages = {};
                 report.messages[childId] = messagesList;
+            }
+            if (changeLogs !== undefined) {
+                report.changeLogs = changeLogs;
             }
             report.updatedAt = new Date().toISOString();
             localSet(reportKey, report);
@@ -162,7 +166,7 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
             case 'saveReport': {
                 const reportId = payload.officeId ? `${payload.officeId}_${date}` : date;
                 const docRef = doc(firestore, 'reports', reportId);
-                const fieldsToOverwrite = ['children', 'messages', 'results', 'summaryC', 'dailyTable', 'globalLog', 'updatedAt'];
+                const fieldsToOverwrite = ['children', 'messages', 'results', 'summaryC', 'dailyTable', 'globalLog', 'changeLogs', 'updatedAt'];
                 await setDoc(docRef, data, { mergeFields: fieldsToOverwrite });
                 
                 // Update index
@@ -208,7 +212,7 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
             case 'updateDailyReportChildData': {
                 const reportId = payload.officeId ? `${payload.officeId}_${date}` : date;
                 const docRef = doc(firestore, 'reports', reportId);
-                const { childId, result, tableRow, messagesList, childrenList } = payload;
+                const { childId, result, tableRow, messagesList, childrenList, changeLogs } = payload;
                 
                 const updateData = {
                     updatedAt: new Date().toISOString()
@@ -222,6 +226,9 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 if (messagesList !== undefined) {
                     updateData[`messages.${childId}`] = messagesList;
                 }
+                if (changeLogs !== undefined) {
+                    updateData.changeLogs = changeLogs;
+                }
                 
                 const snap = await getDoc(docRef);
                 if (snap.exists()) {
@@ -234,6 +241,7 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                         summaryC: '',
                         dailyTable: tableRow ? { [childId]: tableRow } : {},
                         globalLog: { admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' },
+                        changeLogs: changeLogs || [],
                         updatedAt: new Date().toISOString()
                     };
                     await setDoc(docRef, initialData);

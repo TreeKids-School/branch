@@ -5,7 +5,7 @@ import {
     Trash2, Clock, CheckCircle2, AlertCircle, Loader2,
     ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileText, LayoutPanelLeft, UserCheck,
     FileEdit, X, Calendar as CalendarIcon, Settings, LogOut, HelpCircle, Menu,
-    Copy, Check, ClipboardList
+    Copy, Check, ClipboardList, History
 } from 'lucide-react';
 import MemoPanel from './components/MemoPanel';
 import DocViewer from './components/DocViewer';
@@ -25,6 +25,7 @@ import AddChildModal from './components/AddChildModal';
 import AttendanceModal from './components/AttendanceModal';
 import ActivitiesModal from './components/ActivitiesModal';
 import NoticeModal from './components/NoticeModal';
+import LogModal from './components/LogModal';
 
 import { printAllDocuments, GROUP1_ITEMS, GROUP2_ITEMS } from './utils/print';
 
@@ -81,6 +82,8 @@ export default function App() {
     const [children, setChildren] = useState([]);
     const [toast, setToast] = useState(null);
     const [results, setResults] = useState({});
+    const [changeLogs, setChangeLogs] = useState([]);
+    const [showLogModal, setShowLogModal] = useState(false);
     const [summaryC, setSummaryC] = useState('');
     const [dailyMessages, setDailyMessages] = useState({});
     const [dailyTable, setDailyTable] = useState({});
@@ -432,9 +435,11 @@ export default function App() {
             setChildren(Array.isArray(data.children) ? data.children : []);
             setDailyTable(data.dailyTable || {});
             setGlobalLog(data.globalLog || { admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
+            setChangeLogs(data.changeLogs || []);
         } else {
             setResults({}); setSummaryC(''); setDailyMessages({}); setChildren([]);
             setDailyTable({}); setGlobalLog({ admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
+            setChangeLogs([]);
         }
 
         const att = await cs({ action: 'getAttendance', date: dateString, officeId });
@@ -583,6 +588,7 @@ export default function App() {
                     setChildren(Array.isArray(data.children) ? data.children : []);
                     setDailyTable(data.dailyTable || {});
                     setGlobalLog(data.globalLog || { admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
+                    setChangeLogs(data.changeLogs || []);
                 }
             } else {
                 setActiveLocks({});
@@ -593,6 +599,7 @@ export default function App() {
                     setChildren([]);
                     setDailyTable({});
                     setGlobalLog({ admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
+                    setChangeLogs([]);
                 }
             }
             setIsSyncing(false);
@@ -767,7 +774,7 @@ export default function App() {
 
     const saveDailyData = async (date, ch, msgs, res, sum, table, global) => {
         setIsSyncing(true);
-        const dailyData = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, updatedAt: new Date().toISOString() };
+        const dailyData = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, changeLogs: changeLogs, updatedAt: new Date().toISOString() };
 
         const savePromise = (async () => {
             // 1. Save traditional daily bulk report
@@ -809,6 +816,149 @@ export default function App() {
 
     const saveDailyDataGranular = async ({ childId, result, tableRow, messagesList }) => {
         setIsSyncing(true);
+        
+        // ── 変更ログの作成 ──
+        const childObj = children.find(c => c.id === childId);
+        const childName = childObj ? (childObj.lastName ? `${childObj.lastName} ${childObj.firstName}` : childObj.name) : '児童';
+        const staffName = getCurrentStaffName();
+        const newLogs = [];
+
+        if (result !== undefined) {
+            const prevResult = results[childId] || {};
+            const fields = [
+                { key: 'D', label: '連絡帳', prev: prevResult.D, curr: result.D },
+                { key: 'B_result', label: '支援結果', prev: prevResult.B_result, curr: result.B_result },
+                { key: 'B_plan', label: '支援計画', prev: prevResult.B_plan, curr: result.B_plan },
+                { key: 'B_item', label: '支援内容', prev: prevResult.B_item, curr: result.B_item },
+                { key: 'K_sheet', label: 'Forceシート', prev: prevResult.K_sheet, curr: result.K_sheet }
+            ];
+            for (const f of fields) {
+                if ((f.prev || '') !== (f.curr || '')) {
+                    newLogs.push({
+                        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+                        timestamp: new Date().toISOString(),
+                        staffName,
+                        childId,
+                        childName,
+                        type: 'result',
+                        field: f.key,
+                        description: f.label,
+                        prevDisplay: f.prev || '（未入力）',
+                        newDisplay: f.curr || '（未入力）',
+                        restoreValue: f.prev || ''
+                    });
+                }
+            }
+        }
+
+        if (tableRow !== undefined) {
+            const prevTable = dailyTable[childId] || {};
+            const fields = [
+                { key: 'transportTime', label: '送迎時間', prev: prevTable.transportTime, curr: tableRow.transportTime },
+                { key: 'endTime', label: '退室時間', prev: prevTable.endTime, curr: tableRow.endTime },
+                { key: 'pickupLocation', label: '送迎場所', prev: prevTable.pickupLocation, curr: tableRow.pickupLocation },
+                { key: 'assignedStaff', label: '担当職員', prev: prevTable.assignedStaff, curr: tableRow.assignedStaff },
+                { key: 'sentChecked', label: '送信チェック', prev: prevTable.sentChecked, curr: tableRow.sentChecked }
+            ];
+            for (const f of fields) {
+                const pVal = f.key === 'sentChecked' ? !!f.prev : (f.prev || '');
+                const cVal = f.key === 'sentChecked' ? !!f.curr : (f.curr || '');
+                if (pVal !== cVal) {
+                    let pDisp = pVal;
+                    let cDisp = cVal;
+                    if (f.key === 'sentChecked') {
+                        pDisp = pVal ? '送信済' : '未送信';
+                        cDisp = cVal ? '送信済' : '未送信';
+                    } else {
+                        if (!pDisp) pDisp = '（未入力）';
+                        if (!cDisp) cDisp = '（未入力）';
+                    }
+                    newLogs.push({
+                        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+                        timestamp: new Date().toISOString(),
+                        staffName,
+                        childId,
+                        childName,
+                        type: 'tableRow',
+                        field: f.key,
+                        description: f.label,
+                        prevDisplay: String(pDisp),
+                        newDisplay: String(cDisp),
+                        restoreValue: f.prev === undefined ? '' : f.prev
+                    });
+                }
+            }
+        }
+
+        if (messagesList !== undefined) {
+            const prevMsgs = dailyMessages[childId] || [];
+            const currMsgs = messagesList || [];
+            
+            const deleted = prevMsgs.filter(pm => !currMsgs.some(cm => cm.id === pm.id));
+            const added = currMsgs.filter(cm => !prevMsgs.some(pm => pm.id === cm.id));
+            const updated = currMsgs.filter(cm => {
+                const pm = prevMsgs.find(p => p.id === cm.id);
+                return pm && pm.text !== cm.text;
+            });
+
+            if (deleted.length > 0) {
+                for (const dm of deleted) {
+                    newLogs.push({
+                        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+                        timestamp: new Date().toISOString(),
+                        staffName,
+                        childId,
+                        childName,
+                        type: 'messagesList',
+                        field: 'messagesList',
+                        description: 'チャットメモ削除',
+                        prevDisplay: dm.text || '',
+                        newDisplay: '（削除されました）',
+                        restoreValue: prevMsgs
+                    });
+                }
+            } else if (added.length > 0) {
+                for (const am of added) {
+                    newLogs.push({
+                        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+                        timestamp: new Date().toISOString(),
+                        staffName,
+                        childId,
+                        childName,
+                        type: 'messagesList',
+                        field: 'messagesList',
+                        description: 'チャットメモ追加',
+                        prevDisplay: '（なし）',
+                        newDisplay: am.text || '',
+                        restoreValue: prevMsgs
+                    });
+                }
+            } else if (updated.length > 0) {
+                for (const um of updated) {
+                    const pm = prevMsgs.find(p => p.id === um.id);
+                    newLogs.push({
+                        id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+                        timestamp: new Date().toISOString(),
+                        staffName,
+                        childId,
+                        childName,
+                        type: 'messagesList',
+                        field: 'messagesList',
+                        description: 'チャットメモ編集',
+                        prevDisplay: pm ? (pm.text || '') : '',
+                        newDisplay: um.text || '',
+                        restoreValue: prevMsgs
+                    });
+                }
+            }
+        }
+
+        let updatedLogs = [...changeLogs];
+        if (newLogs.length > 0) {
+            updatedLogs = [...newLogs, ...updatedLogs].slice(0, 10);
+            setChangeLogs(updatedLogs);
+        }
+
         const savePromise = (async () => {
             await cs({
                 action: 'updateDailyReportChildData',
@@ -818,7 +968,8 @@ export default function App() {
                 result,
                 tableRow,
                 messagesList,
-                childrenList: children
+                childrenList: children,
+                changeLogs: updatedLogs
             });
 
             const childObj = children.find(c => c.id === childId);
@@ -847,6 +998,112 @@ export default function App() {
         activeSavePromiseRef.current = savePromise;
         try {
             await savePromise;
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    const handleRestoreLog = async (log) => {
+        if (!confirm(`${log.childName}の「${log.description}」を復元しますか？\n（復元前の値に書き戻されます）`)) return;
+        
+        setIsSyncing(true);
+        try {
+            const childId = log.childId;
+            const staffName = getCurrentStaffName();
+            const childObj = children.find(c => c.id === childId);
+            const childName = childObj ? (childObj.lastName ? `${childObj.lastName} ${childObj.firstName}` : childObj.name) : '児童';
+            
+            let currVal = '';
+            let prevVal = log.restoreValue;
+            
+            let updatePayload = {
+                action: 'updateDailyReportChildData',
+                date: selectedDate,
+                officeId: selectedOffice?.id,
+                childId,
+                childrenList: children
+            };
+            
+            if (log.type === 'result') {
+                const currentResult = results[childId] || {};
+                currVal = currentResult[log.field] || '';
+                const restoredResult = { ...currentResult, [log.field]: prevVal };
+                restoredResult.staffName = staffName;
+                
+                setResults(prev => ({ ...prev, [childId]: restoredResult }));
+                updatePayload.result = restoredResult;
+            } else if (log.type === 'tableRow') {
+                const currentTableRow = dailyTable[childId] || {};
+                currVal = currentTableRow[log.field] || '';
+                const restoredTableRow = { ...currentTableRow, [log.field]: prevVal };
+                
+                setDailyTable(prev => ({ ...prev, [childId]: restoredTableRow }));
+                updatePayload.tableRow = restoredTableRow;
+            } else if (log.type === 'messagesList') {
+                const currentMessages = dailyMessages[childId] || [];
+                currVal = `（メッセージ数: ${currentMessages.length}件）`;
+                
+                setDailyMessages(prev => ({ ...prev, [childId]: prevVal }));
+                updatePayload.messagesList = prevVal;
+            }
+            
+            let prevDisp = prevVal;
+            let currDisp = currVal;
+            if (log.field === 'sentChecked') {
+                prevDisp = prevVal ? '送信済' : '未送信';
+                currDisp = currVal ? '送信済' : '未送信';
+            } else if (log.type === 'messagesList') {
+                prevDisp = `（メッセージ数: ${prevVal.length}件）`;
+            } else {
+                if (!prevDisp) prevDisp = '（未入力）';
+                if (!currDisp) currDisp = '（未入力）';
+            }
+            
+            const restoreLog = {
+                id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+                timestamp: new Date().toISOString(),
+                staffName,
+                childId,
+                childName,
+                type: log.type,
+                field: log.field,
+                description: `${log.description}復元`,
+                prevDisplay: String(currDisp),
+                newDisplay: String(prevDisp),
+                restoreValue: currVal
+            };
+            
+            const updatedLogs = [restoreLog, ...changeLogs].slice(0, 10);
+            setChangeLogs(updatedLogs);
+            updatePayload.changeLogs = updatedLogs;
+            
+            await cs(updatePayload);
+            
+            if (childObj && !childObj.isPlaceholder) {
+                const childResult = log.type === 'result' ? updatePayload.result : (results[childId] || {});
+                const childTable = log.type === 'tableRow' ? updatePayload.tableRow : (dailyTable[childId] || {});
+                
+                const individualData = {
+                    name: childObj.name,
+                    tree_comm_text: childResult.D || '',
+                    pickupLocation: childTable.pickupLocation || '',
+                    endTime: childTable.endTime || '',
+                    transportTime: childTable.transportTime || '',
+                    notes: childTable.notes || ''
+                };
+                
+                await cs({
+                    action: 'saveIndividualTreeComm',
+                    childId,
+                    date: selectedDate,
+                    data: individualData
+                });
+            }
+            
+            setToast({ type: 'success', message: 'データを復元しました。' });
+        } catch (error) {
+            console.error("Failed to restore log:", error);
+            setToast({ type: 'error', message: '復元に失敗しました。' });
         } finally {
             setIsSyncing(false);
         }
@@ -1056,7 +1313,7 @@ export default function App() {
             const content = result.D || '';
             if (content.trim()) {
                 const staff = result.staffName ? ` (担当: ${result.staffName})` : '';
-                text += `【${child.lastName ? `${child.lastName} ${child.firstName}` : child.name} 様】${staff}\n${content.trim()}\n\n`;
+                text += `【${child.lastName ? `${child.lastName} ${child.firstName}` : child.name}さん】${staff}\n${content.trim()}\n\n`;
                 text += `--------------------------------\n\n`;
                 count++;
             }
@@ -1270,6 +1527,9 @@ export default function App() {
 
                         <div className="flex flex-col items-end gap-0.5">
                             <div className="flex items-center gap-1">
+                                <button onClick={() => setShowLogModal(true)} className="p-2 hover:bg-tree-50 rounded-xl transition-all active:scale-95 group" title="変更履歴">
+                                    <History className="w-4.5 h-4.5 text-slate-400 group-hover:scale-110 transition-transform" />
+                                </button>
                                 <button id="guide-help" onClick={() => setShowHelpGuide(true)} className="p-2 hover:bg-tree-50 rounded-xl transition-all active:scale-95 group">
                                     <HelpCircle className="w-4.5 h-4.5 text-tree-600 group-hover:scale-110 transition-transform" />
                                 </button>
@@ -2216,6 +2476,13 @@ export default function App() {
                 onSave={(val) => updateGlobalLog('activities', val)}
             />
 
+            <LogModal
+                show={showLogModal}
+                onClose={() => setShowLogModal(false)}
+                logs={changeLogs}
+                onRestore={handleRestoreLog}
+            />
+
 
 
             {/* Mobile Floating Action Menu (FAB) */}
@@ -2295,6 +2562,14 @@ export default function App() {
                         >
                             <Settings className="w-4 h-4 text-slate-400" />
                             <span>設定</span>
+                        </button>
+
+                        <button
+                            onClick={() => { setShowLogModal(true); setIsMobileMenuOpen(false); }}
+                            className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
+                        >
+                            <History className="w-4 h-4 text-slate-400" />
+                            <span>変更履歴</span>
                         </button>
 
                         <div className="h-px bg-slate-100 my-1" />
