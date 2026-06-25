@@ -1100,10 +1100,10 @@ export default function App() {
                 });
             }
             
-            setToast({ type: 'success', message: 'データを復元しました。' });
+            showToast('データを復元しました。');
         } catch (error) {
             console.error("Failed to restore log:", error);
-            setToast({ type: 'error', message: '復元に失敗しました。' });
+            showToast('復元に失敗しました。');
         } finally {
             setIsSyncing(false);
         }
