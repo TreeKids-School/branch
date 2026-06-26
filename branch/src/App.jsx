@@ -83,6 +83,7 @@ export default function App() {
     const [toast, setToast] = useState(null);
     const [results, setResults] = useState({});
     const [changeLogs, setChangeLogs] = useState([]);
+    const [greetingTemplates, setGreetingTemplates] = useState({});
     const [showLogModal, setShowLogModal] = useState(false);
     const [summaryC, setSummaryC] = useState('');
     const [dailyMessages, setDailyMessages] = useState({});
@@ -640,6 +641,22 @@ export default function App() {
         };
     }, [selectedDate, selectedOffice, user]);
 
+    // 挨拶テンプレのリアルタイム同期
+    useEffect(() => {
+        if (!user) return;
+        const ref = doc(firestore, 'meta', 'greeting_templates');
+        const unsubscribeTemplates = onSnapshot(ref, (snap) => {
+            if (snap.exists()) {
+                setGreetingTemplates(snap.data() || {});
+            } else {
+                setGreetingTemplates({});
+            }
+        }, (error) => {
+            console.error("Error listening to greeting templates:", error);
+        });
+        return () => unsubscribeTemplates();
+    }, [user]);
+
     // Heartbeat for keeping lock active (every 2 minutes)
     useEffect(() => {
         let intervalId = null;
@@ -1106,6 +1123,17 @@ export default function App() {
             showToast('復元に失敗しました。');
         } finally {
             setIsSyncing(false);
+        }
+    };
+
+    const handleSaveGreetingTemplate = async (staffName, templateText) => {
+        try {
+            const ref = doc(firestore, 'meta', 'greeting_templates');
+            await setDoc(ref, { [staffName]: templateText }, { merge: true });
+            showToast('挨拶テンプレを保存しました。');
+        } catch (error) {
+            console.error("Failed to save template:", error);
+            showToast('テンプレの保存に失敗しました。');
         }
     };
 
@@ -2253,6 +2281,8 @@ export default function App() {
                                 currentStaffName={getCurrentStaffName()}
                                 programTitle={globalLog.programTitle}
                                 programSummary={globalLog.programSummary}
+                                greetingTemplates={greetingTemplates}
+                                onSaveTemplate={handleSaveGreetingTemplate}
                             />
                         )}
                         {(selectedDocChildId || (isPanelClosing && lastPanelData?.doc)) && (
