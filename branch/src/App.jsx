@@ -5,7 +5,7 @@ import {
     Trash2, Clock, CheckCircle2, AlertCircle, Loader2,
     ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileText, LayoutPanelLeft, UserCheck,
     FileEdit, X, Calendar as CalendarIcon, Settings, LogOut, HelpCircle, Menu,
-    Copy, Check, ClipboardList, History
+    Copy, Check, ClipboardList, History, Plus
 } from 'lucide-react';
 import MemoPanel from './components/MemoPanel';
 import DocViewer from './components/DocViewer';
