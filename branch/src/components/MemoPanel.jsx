@@ -9,7 +9,7 @@ import { getRoleFromPost } from '../app_constants';
 import { useState, useEffect, useRef } from 'react';
 
 // Smart name detection helper (excluding common stop words)
-const scanForNames = (text) => {
+const scanForNames = (text, okWords = []) => {
     if (!text) return [];
     const regex = /([^ 　\n\r\t、。！？()（）「」『』【】“”"'’‘:;,.\-\+=\/\\*&^%$#@!\[\]]+(?:さん|くん|ちゃん|君))/g;
     const matches = text.match(regex) || [];
@@ -22,7 +22,9 @@ const scanForNames = (text) => {
     
     const uniqueMatches = Array.from(new Set(matches));
     return uniqueMatches.filter(match => {
-        return !exclusions.some(exc => match.includes(exc));
+        const isExcluded = exclusions.some(exc => match.includes(exc));
+        const isOkWord = okWords.includes(match);
+        return !isExcluded && !isOkWord;
     });
 };
 
@@ -72,7 +74,9 @@ export default function MemoPanel({
     programTitle = '',
     programSummary = '',
     greetingTemplates = {},
-    onSaveTemplate
+    onSaveTemplate,
+    okWords = [],
+    onAddOkWord
 }) {
     const treeTextareaRef = useRef(null);
     const highlightDivRef = useRef(null);
@@ -123,7 +127,7 @@ export default function MemoPanel({
     const [isEditingTemplate, setIsEditingTemplate] = useState(false);
     const [templateDraft, setTemplateDraft] = useState('');
 
-    const detectedNames = scanForNames(treeContent);
+    const detectedNames = scanForNames(treeContent, okWords);
 
     const handleTextareaScroll = (e) => {
         if (highlightDivRef.current) {
@@ -566,9 +570,17 @@ export default function MemoPanel({
                                         </p>
                                         <div className="flex flex-wrap gap-1 mt-1">
                                             {detectedNames.map((name, idx) => (
-                                                <span key={idx} className="px-2 py-0.5 bg-red-100/80 text-red-800 border border-red-200/50 rounded-lg text-[9px] font-black shadow-sm">
-                                                    {name}
-                                                </span>
+                                                <div key={idx} className="flex items-center gap-1 pl-2 pr-1 py-0.5 bg-red-100/80 text-red-800 border border-red-200/50 rounded-lg text-[9px] font-black shadow-sm group">
+                                                    <span>{name}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onAddOkWord && onAddOkWord(name)}
+                                                        className="p-0.5 hover:bg-red-200 rounded text-red-600 hover:text-red-950 transition-all flex items-center justify-center"
+                                                        title="このワードを一時的にOKに登録"
+                                                    >
+                                                        <Check className="w-2.5 h-2.5" />
+                                                    </button>
+                                                </div>
                                             ))}
                                         </div>
                                     </div>

@@ -84,6 +84,7 @@ export default function App() {
     const [results, setResults] = useState({});
     const [changeLogs, setChangeLogs] = useState([]);
     const [greetingTemplates, setGreetingTemplates] = useState({});
+    const [okWords, setOkWords] = useState([]);
     const [showLogModal, setShowLogModal] = useState(false);
     const [summaryC, setSummaryC] = useState('');
     const [dailyMessages, setDailyMessages] = useState({});
@@ -657,6 +658,22 @@ export default function App() {
         return () => unsubscribeTemplates();
     }, [user]);
 
+    // OKワードのリアルタイム同期
+    useEffect(() => {
+        if (!user) return;
+        const ref = doc(firestore, 'meta', 'ok_words');
+        const unsubscribeOkWords = onSnapshot(ref, (snap) => {
+            if (snap.exists()) {
+                setOkWords(snap.data().words || []);
+            } else {
+                setOkWords([]);
+            }
+        }, (error) => {
+            console.error("Error listening to ok_words:", error);
+        });
+        return () => unsubscribeOkWords();
+    }, [user]);
+
     // Heartbeat for keeping lock active (every 2 minutes)
     useEffect(() => {
         let intervalId = null;
@@ -1134,6 +1151,31 @@ export default function App() {
         } catch (error) {
             console.error("Failed to save template:", error);
             showToast('テンプレの保存に失敗しました。');
+        }
+    };
+
+    const handleSaveOkWords = async (newOkWords) => {
+        try {
+            const ref = doc(firestore, 'meta', 'ok_words');
+            await setDoc(ref, { words: newOkWords });
+            showToast('OKワードを保存しました。');
+        } catch (error) {
+            console.error("Failed to save ok words:", error);
+            showToast('OKワードの保存に失敗しました。');
+        }
+    };
+
+    const handleAddOkWord = async (word) => {
+        if (!word || okWords.includes(word)) return;
+        const updated = [...okWords, word];
+        setOkWords(updated);
+        try {
+            const ref = doc(firestore, 'meta', 'ok_words');
+            await setDoc(ref, { words: updated });
+            showToast(`「${word}」をOKワードに追加しました。`);
+        } catch (error) {
+            console.error("Failed to add ok word:", error);
+            showToast('OKワードの追加に失敗しました。');
         }
     };
 
@@ -2283,6 +2325,8 @@ export default function App() {
                                 programSummary={globalLog.programSummary}
                                 greetingTemplates={greetingTemplates}
                                 onSaveTemplate={handleSaveGreetingTemplate}
+                                okWords={okWords}
+                                onAddOkWord={handleAddOkWord}
                             />
                         )}
                         {(selectedDocChildId || (isPanelClosing && lastPanelData?.doc)) && (
@@ -2487,6 +2531,8 @@ export default function App() {
                     onClose={() => setShowSettingsModal(false)}
                     tags={tags}
                     onSaveTags={handleUpdateTags}
+                    okWords={okWords}
+                    onSaveOkWords={handleSaveOkWords}
                 />
             )}
             <ExportModal show={showExportModal} onClose={() => setShowExportModal(false)} selectedDate={selectedDate} children={children} results={results} summaryC={summaryC} selectedOffice={selectedOffice} staffList={filteredStaffList} />
