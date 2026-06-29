@@ -1185,6 +1185,18 @@ export default function App() {
         await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, dailyTable, newLog);
     };
 
+    const updateGlobalPrograms = async (updatedPrograms) => {
+        const firstProg = updatedPrograms[0] || { title: '', summary: '' };
+        const newLog = { 
+            ...globalLog, 
+            programs: updatedPrograms,
+            programTitle: firstProg.title || '',
+            programSummary: firstProg.summary || ''
+        };
+        setGlobalLog(newLog);
+        await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, dailyTable, newLog);
+    };
+
     const handleAddMultipleFromMaster = async (selectedChildren, isWaitlist = false) => {
         if (selectedChildren.length === 0) return;
         const newChildrenToAdd = selectedChildren.filter(sc => !children.some(c => c.id === sc.id));
@@ -1669,7 +1681,7 @@ export default function App() {
                     <ClipboardList className="w-3.5 h-3.5 text-wood-600" />
                     <span>本日のプログラム登録</span>
                     {globalLog.programTitle && (
-                        <span className="w-1.5 h-1.5 bg-wood-500 rounded-full ml-1" title={`登録済: ${globalLog.programTitle}`} />
+                        <span className="w-1.5 h-1.5 bg-wood-500 rounded-full ml-1" title={`登録済: ${globalLog.programTitle}${globalLog.programs && globalLog.programs.length > 1 ? ` 他${globalLog.programs.length - 1}件` : ''}`} />
                     )}
                 </button>
             </div>
@@ -2323,6 +2335,7 @@ export default function App() {
                                 currentStaffName={getCurrentStaffName()}
                                 programTitle={globalLog.programTitle}
                                 programSummary={globalLog.programSummary}
+                                programs={globalLog.programs || []}
                                 greetingTemplates={greetingTemplates}
                                 onSaveTemplate={handleSaveGreetingTemplate}
                                 okWords={okWords}
@@ -2474,32 +2487,91 @@ export default function App() {
                         </div>
                         
                         {/* Body */}
-                        <div className="p-6 bg-slate-50/50 flex flex-col gap-4 overflow-y-auto max-h-[70vh]">
-                            <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
-                                    プログラムのタイトル
-                                </label>
-                                <input
-                                    type="text"
-                                    placeholder="例：ちぎり絵制作、プラ板キーホルダー作りなど..."
-                                    value={globalLog.programTitle || ''}
-                                    onChange={(e) => updateGlobalLog('programTitle', e.target.value)}
-                                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-wood-400 focus:ring-4 focus:ring-wood-50 transition-all shadow-sm"
-                                />
-                            </div>
-                            
-                            <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
-                                    プログラムの概要
-                                </label>
-                                <textarea
-                                    rows="6"
-                                    placeholder="プログラムの具体的な手順や概要を入力してください。ここで登録した内容は、ツリー通信の入力画面でワンクリックで引用（コピー・反映）できます。"
-                                    value={globalLog.programSummary || ''}
-                                    onChange={(e) => updateGlobalLog('programSummary', e.target.value)}
-                                    className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:border-wood-400 focus:ring-4 focus:ring-wood-50 transition-all leading-relaxed shadow-sm resize-none"
-                                />
-                            </div>
+                        <div className="p-6 bg-slate-50/50 flex flex-col gap-5 overflow-y-auto max-h-[60vh] custom-scrollbar">
+                            {(() => {
+                                const currentPrograms = globalLog.programs || (globalLog.programTitle || globalLog.programSummary 
+                                    ? [{ title: globalLog.programTitle || '', summary: globalLog.programSummary || '' }]
+                                    : [{ title: '', summary: '' }]);
+                                    
+                                return (
+                                    <>
+                                        <div className="flex flex-col gap-6">
+                                            {currentPrograms.map((prog, idx) => (
+                                                <div key={idx} className="bg-white border border-slate-100 p-5 rounded-2xl flex flex-col gap-3.5 shadow-sm relative group animate-in slide-in-from-bottom-2">
+                                                    {/* Index & Delete Action */}
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px] font-black text-wood-600 bg-wood-50 px-2 py-0.5 rounded-full border border-wood-100/50">
+                                                            プログラム #{idx + 1}
+                                                        </span>
+                                                        {currentPrograms.length > 1 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const updated = currentPrograms.filter((_, i) => i !== idx);
+                                                                    updateGlobalPrograms(updated);
+                                                                }}
+                                                                className="p-1 text-slate-400 hover:text-apple-600 hover:bg-apple-50 rounded-lg transition-all active:scale-90"
+                                                                title="このプログラムを削除"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    
+                                                    {/* Title Input */}
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                                                            プログラムのタイトル
+                                                        </label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="例：ちぎり絵制作、プラ板キーホルダー作りなど..."
+                                                            value={prog.title || ''}
+                                                            onChange={(e) => {
+                                                                const updated = [...currentPrograms];
+                                                                updated[idx] = { ...updated[idx], title: e.target.value };
+                                                                updateGlobalPrograms(updated);
+                                                            }}
+                                                            className="w-full px-4 py-2.5 bg-slate-50/50 border border-slate-100 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-wood-400 focus:bg-white transition-all shadow-inner"
+                                                        />
+                                                    </div>
+                                                    
+                                                    {/* Summary TextArea */}
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                                                            プログラムの概要
+                                                        </label>
+                                                        <textarea
+                                                            rows="4"
+                                                            placeholder="具体的な手順やねらいを入力してください。ツリー通信の入力画面でワンクリックで引用できます。"
+                                                            value={prog.summary || ''}
+                                                            onChange={(e) => {
+                                                                const updated = [...currentPrograms];
+                                                                updated[idx] = { ...updated[idx], summary: e.target.value };
+                                                                updateGlobalPrograms(updated);
+                                                            }}
+                                                            className="w-full px-4 py-2.5 bg-slate-50/50 border border-slate-100 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:border-wood-400 focus:bg-white transition-all leading-relaxed shadow-inner resize-none"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        
+                                        {/* Add Program Button */}
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const updated = [...currentPrograms, { title: '', summary: '' }];
+                                                updateGlobalPrograms(updated);
+                                            }}
+                                            className="w-full py-3.5 border-2 border-dashed border-slate-200 hover:border-wood-400 hover:bg-wood-50/20 text-slate-400 hover:text-wood-600 rounded-2xl font-black text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                                        >
+                                            <Plus className="w-4 h-4" />
+                                            <span>プログラムを追加</span>
+                                        </button>
+                                    </>
+                                );
+                            })()}
                         </div>
                         
                         {/* Footer */}
@@ -2507,8 +2579,7 @@ export default function App() {
                             <button
                                 onClick={() => {
                                     if (confirm('登録内容をクリアしますか？')) {
-                                        updateGlobalLog('programTitle', '');
-                                        updateGlobalLog('programSummary', '');
+                                        updateGlobalPrograms([{ title: '', summary: '' }]);
                                     }
                                 }}
                                 className="px-5 py-2.5 font-bold text-xs text-apple-500 hover:bg-apple-50 rounded-xl transition-all"

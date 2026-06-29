@@ -76,7 +76,8 @@ export default function MemoPanel({
     greetingTemplates = {},
     onSaveTemplate,
     okWords = [],
-    onAddOkWord
+    onAddOkWord,
+    programs = []
 }) {
     const treeTextareaRef = useRef(null);
     const highlightDivRef = useRef(null);
@@ -506,39 +507,49 @@ export default function MemoPanel({
                                         </div>
                                     )}
                                 </div>
-                                {programSummary && (
-                                    <div className="bg-wood-50/50 border border-wood-100 p-2.5 rounded-xl flex items-center justify-between gap-3 text-[11px] mb-1 animate-in slide-in-from-top-2">
-                                        <div className="min-w-0">
-                                            <span className="font-black text-wood-700 block truncate text-[10px]">本日のプログラム: {programTitle || '登録あり'}</span>
-                                            <span className="font-medium text-slate-500 block truncate text-[9px]">{programSummary}</span>
+                                {(() => {
+                                    const programsList = (programs && programs.length > 0)
+                                        ? programs
+                                        : (programTitle || programSummary ? [{ title: programTitle, summary: programSummary }] : []);
+                                        
+                                    return programsList.filter(p => p.title || p.summary).map((prog, idx) => (
+                                        <div key={idx} className="bg-wood-50/50 border border-wood-100 p-2.5 rounded-xl flex items-center justify-between gap-3 text-[11px] mb-1 animate-in slide-in-from-top-2">
+                                            <div className="min-w-0 flex-1">
+                                                <span className="font-black text-wood-700 block truncate text-[10px]">
+                                                    本日のプログラム: {prog.title || '登録あり'}
+                                                </span>
+                                                <span className="font-medium text-slate-500 block truncate text-[9px]">
+                                                    {prog.summary}
+                                                </span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const textarea = treeTextareaRef.current;
+                                                    if (textarea) {
+                                                        const start = textarea.selectionStart;
+                                                        const end = textarea.selectionEnd;
+                                                        const before = treeContent.substring(0, start);
+                                                        const after = treeContent.substring(end);
+                                                        const newContent = before + prog.summary + after;
+                                                        setTreeContent(newContent);
+                                                        setTimeout(() => {
+                                                            textarea.focus();
+                                                            const newCursorPos = start + prog.summary.length;
+                                                            textarea.setSelectionRange(newCursorPos, newCursorPos);
+                                                        }, 0);
+                                                    } else {
+                                                        setTreeContent(prev => prev ? prev + '\n' + prog.summary : prog.summary);
+                                                    }
+                                                }}
+                                                className="px-2.5 py-1.5 bg-wood-500 hover:bg-wood-600 text-white rounded-lg text-[9px] font-black tracking-wider transition-all active:scale-95 flex items-center gap-1 flex-shrink-0 shadow-sm"
+                                            >
+                                                <Copy className="w-3.5 h-3.5 text-white" />
+                                                <span>概要を反映</span>
+                                            </button>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const textarea = treeTextareaRef.current;
-                                                if (textarea) {
-                                                    const start = textarea.selectionStart;
-                                                    const end = textarea.selectionEnd;
-                                                    const before = treeContent.substring(0, start);
-                                                    const after = treeContent.substring(end);
-                                                    const newContent = before + programSummary + after;
-                                                    setTreeContent(newContent);
-                                                    setTimeout(() => {
-                                                        textarea.focus();
-                                                        const newCursorPos = start + programSummary.length;
-                                                        textarea.setSelectionRange(newCursorPos, newCursorPos);
-                                                    }, 0);
-                                                } else {
-                                                    setTreeContent(prev => prev ? prev + '\n' + programSummary : programSummary);
-                                                }
-                                            }}
-                                            className="px-2.5 py-1.5 bg-wood-500 hover:bg-wood-600 text-white rounded-lg text-[9px] font-black tracking-wider transition-all active:scale-95 flex items-center gap-1 flex-shrink-0 shadow-sm"
-                                        >
-                                            <Copy className="w-3.5 h-3.5 text-white" />
-                                            <span>概要を反映</span>
-                                        </button>
-                                    </div>
-                                )}
+                                    ));
+                                })()}
                                 <div className="relative w-full min-h-[120px] flex-1 flex flex-col bg-white border-2 border-slate-100 rounded-2xl focus-within:border-tree-400 focus-within:ring-4 focus-within:ring-tree-50 transition-all shadow-inner overflow-hidden">
                                     {/* Highlights Overlay Layer */}
                                     <div
