@@ -8,6 +8,51 @@ import { getRoleFromPost } from '../app_constants';
 
 import { useState, useEffect, useRef } from 'react';
 
+// Smart name detection helper (excluding common stop words)
+const scanForNames = (text) => {
+    if (!text) return [];
+    const regex = /([^ 　\n\r\t、。！？()（）「」『』【】“”"'’‘:;,.\-\+=\/\\*&^%$#@!\[\]]+(?:さん|くん|ちゃん|君))/g;
+    const matches = text.match(regex) || [];
+    
+    const exclusions = [
+        'お母さん', 'お父さん', 'お兄さん', 'お姉さん', '皆さん', 'みなさん',
+        '看護師さん', 'お医者さん', '保育士さん', '運転手さん', '警察官さん',
+        '屋さん', 'くんさん', 'おじさん', 'おばさん', 'おじいさん', 'おばあさん'
+    ];
+    
+    const uniqueMatches = Array.from(new Set(matches));
+    return uniqueMatches.filter(match => {
+        return !exclusions.some(exc => match.includes(exc));
+    });
+};
+
+// Generates HTML with red marks overlay behind text
+const getHighlightedTextHTML = (text, names) => {
+    if (!text) return '&nbsp;';
+    
+    let escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+        
+    if (names.length === 0) {
+        return escaped.endsWith('\n') ? escaped + '&nbsp;' : escaped;
+    }
+    
+    const escapedNames = names.map(n => n.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'));
+    const regex = new RegExp(`(${escapedNames.join('|')})`, 'g');
+    
+    const parts = escaped.split(regex);
+    const html = parts.map(part => {
+        if (names.includes(part)) {
+            return `<mark style="background-color: rgba(239, 68, 68, 0.25); color: transparent; border-bottom: 2px solid rgb(239, 68, 68); border-radius: 4px; padding: 1px 0px; font-weight: bold;">${part}</mark>`;
+        }
+        return part;
+    }).join('');
+    
+    return html.endsWith('\n') ? html + '&nbsp;' : html;
+};
+
 export default function MemoPanel({ 
     child, 
     messages = [], 
@@ -30,6 +75,7 @@ export default function MemoPanel({
     onSaveTemplate
 }) {
     const treeTextareaRef = useRef(null);
+    const highlightDivRef = useRef(null);
 
     const handleClose = () => {
         const currentD = result?.D || '';
@@ -76,6 +122,15 @@ export default function MemoPanel({
     const [treeContent, setTreeContent] = useState('');
     const [isEditingTemplate, setIsEditingTemplate] = useState(false);
     const [templateDraft, setTemplateDraft] = useState('');
+
+    const detectedNames = scanForNames(treeContent);
+
+    const handleTextareaScroll = (e) => {
+        if (highlightDivRef.current) {
+            highlightDivRef.current.scrollTop = e.target.scrollTop;
+            highlightDivRef.current.scrollLeft = e.target.scrollLeft;
+        }
+    };
 
     const handleInsertTemplate = () => {
         const template = greetingTemplates[currentStaffName] || '';
@@ -480,14 +535,44 @@ export default function MemoPanel({
                                         </button>
                                     </div>
                                 )}
-                                <textarea
-                                    id="guide-tree-textarea"
-                                    ref={treeTextareaRef}
-                                    value={treeContent}
-                                    onChange={(e) => setTreeContent(e.target.value)}
-                                    placeholder="ご家庭向けのツリー通信をリアルタイム自動保存します..."
-                                    className="w-full min-h-[100px] flex-1 p-3 text-xs md:text-sm bg-white border-2 border-slate-100 rounded-2xl focus:border-tree-400 focus:ring-4 focus:ring-tree-50 outline-none transition-all leading-relaxed resize-none font-medium text-slate-700 shadow-inner"
-                                />
+                                <div className="relative w-full min-h-[120px] flex-1 flex flex-col bg-white border-2 border-slate-100 rounded-2xl focus-within:border-tree-400 focus-within:ring-4 focus-within:ring-tree-50 transition-all shadow-inner overflow-hidden">
+                                    {/* Highlights Overlay Layer */}
+                                    <div
+                                        ref={highlightDivRef}
+                                        className="absolute inset-0 p-3 text-xs md:text-sm leading-relaxed whitespace-pre-wrap break-all select-none pointer-events-none font-medium text-transparent overflow-y-auto"
+                                        dangerouslySetInnerHTML={{ __html: getHighlightedTextHTML(treeContent, detectedNames) }}
+                                    />
+                                    {/* Actual Textarea */}
+                                    <textarea
+                                        id="guide-tree-textarea"
+                                        ref={treeTextareaRef}
+                                        value={treeContent}
+                                        onChange={(e) => setTreeContent(e.target.value)}
+                                        onScroll={handleTextareaScroll}
+                                        placeholder="ご家庭向けのツリー通信をリアルタイム自動保存します..."
+                                        className="w-full h-full p-3 text-xs md:text-sm bg-transparent border-0 outline-none transition-all leading-relaxed resize-none font-medium text-slate-700 overflow-y-auto block flex-1 relative z-10"
+                                    />
+                                </div>
+                                
+                                {/* Detected Names Warning Alert Box */}
+                                {detectedNames.length > 0 && (
+                                    <div className="p-3 bg-red-50/70 border border-red-200/60 rounded-2xl flex flex-col gap-1.5 text-red-700 animate-in fade-in duration-300">
+                                        <div className="flex items-center gap-1.5 text-[9px] font-black tracking-wider uppercase">
+                                            <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-ping" />
+                                            <span>⚠️ 個人情報（名前）入力の可能性</span>
+                                        </div>
+                                        <p className="text-[10px] font-bold leading-normal text-red-600/90">
+                                            児童の実名（さん・くん・ちゃん・君）が入力されている可能性があります。誤送信を防ぐため、確認・修正してください：
+                                        </p>
+                                        <div className="flex flex-wrap gap-1 mt-1">
+                                            {detectedNames.map((name, idx) => (
+                                                <span key={idx} className="px-2 py-0.5 bg-red-100/80 text-red-800 border border-red-200/50 rounded-lg text-[9px] font-black shadow-sm">
+                                                    {name}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
