@@ -178,11 +178,10 @@ export function extractStudyText(dailyMessages, childId) {
         return hasStudyTag || hasTextPrefix;
     })
     .map(m => {
-        let t = m.text.trim();
-        if (m.tag && !t.includes(m.tag)) {
-            t = `${m.tag}${t}`;
-        }
-        return t;
+        // 文章は非表示にし、タグのみを表示する
+        if (m.tag) return m.tag;
+        const match = m.text.match(/^【[^】]+】/);
+        return match ? match[0] : '';
     }).filter(t => t).join('\n');
 }
 
@@ -194,12 +193,41 @@ export function extractProgramText(dailyMessages, childId) {
         return hasProgTag || hasTextPrefix;
     })
     .map(m => {
+        // 文章は非表示にし、タグのみを表示する
+        if (m.tag) return m.tag;
+        const match = m.text.match(/^【[^】]+】/);
+        return match ? match[0] : '';
+    }).filter(t => t).join('\n');
+}
+
+export function extractNotesText(dailyMessages, dailyTable, childId) {
+    const tableNotes = dailyTable[childId]?.notes || '';
+    const msgs = dailyMessages[childId] || [];
+    
+    // 【備考】タグのメッセージを抽出
+    const chatNotes = msgs.filter(m => {
+        const hasNotesTag = m.tag && m.tag === '【備考】';
+        const hasTextPrefix = m.text.includes('【備考】');
+        return hasNotesTag || hasTextPrefix;
+    })
+    .map(m => {
         let t = m.text.trim();
-        if (m.tag && !t.includes(m.tag)) {
-            t = `${m.tag}${t}`;
+        // m.text から 【備考】 プレフィックスを削除する
+        // （タグの表示は不要のため）
+        if (m.tag && t.startsWith(m.tag)) {
+            t = t.substring(m.tag.length).trim();
+        } else {
+            t = t.replace(/^【備考】\s*/, '').trim();
         }
         return t;
     }).filter(t => t).join('\n');
+
+    // 両方を結合
+    const combined = [];
+    if (tableNotes.trim()) combined.push(tableNotes.trim());
+    if (chatNotes.trim()) combined.push(chatNotes.trim());
+    
+    return combined.join('\n');
 }
 
 // ── 共通スタイル ──────────────────────────────────────────────
@@ -213,39 +241,40 @@ const COMMON_STYLES = `
     color-scheme: light !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+    width: 100%;
+    margin: 0;
+    padding: 0;
   }
-  body { font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', sans-serif; font-size: 9pt; margin: 0; padding: 0; }
+  body { font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', sans-serif; font-size: 10pt; }
 
   .page-break { page-break-after: always; }
   .page-break:last-child { page-break-after: avoid; }
 
-  .header-table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+  .header-table { width: 277mm; border-collapse: collapse; margin-bottom: 0; table-layout: fixed; }
   .header-table td { border: 1px solid black; padding: 4px; vertical-align: top; }
-  .title { font-size: 16pt; font-weight: bold; padding: 10px 0; border: none !important; }
+  .title { font-size: 18pt; font-weight: bold; padding: 12px 0; border: none !important; }
   .date-cell { border: none !important; text-align: right; font-size: 12pt; font-weight: bold; }
 
-  .staff-table { width: 100%; border-collapse: collapse; }
-  .staff-table td { border: 1px solid black; padding: 2px 5px; height: 1.5em; text-align: center; }
-  .role-cell { width: 80px; background: #eee; font-weight: bold; font-size: 8pt; }
-  .time-cell { width: 40px; font-size: 7pt; }
-  .name-cell { width: 120px; }
+  .staff-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .staff-table td { border: 1px solid black; padding: 2px 4px; height: 1.6em; text-align: center; font-size: 9pt; }
+  .role-cell { width: 30%; background: #eee; font-weight: bold; font-size: 9pt; }
+  .time-cell { width: 20%; font-size: 8.5pt; }
+  .name-cell { width: 50%; }
 
-  .notes-section { height: 100px; padding: 5px; font-size: 8pt; white-space: pre-wrap; }
-  .highlight-section { height: 100px; padding: 5px; font-size: 7pt; }
-  .section-label { background: #eee; font-weight: bold; text-align: center !important; }
+  .notes-section { height: 70px; padding: 4px; font-size: 9.5pt; white-space: pre-wrap; word-break: break-all; }
+  .highlight-section { height: 70px; padding: 4px; font-size: 9.5pt; word-break: break-all; }
+  .section-label { background: #eee; font-weight: bold; text-align: center !important; font-size: 9.5pt; }
 
-  .children-table { width: 100%; border-collapse: collapse; margin-top: -1px; }
+  .children-table { width: 277mm; border-collapse: collapse; margin-top: -1px; table-layout: fixed; }
   .children-table th, .children-table td { border: 1px solid black; padding: 3px 5px; vertical-align: middle; }
-  .children-table th { background: #eee; font-size: 8pt; font-weight: bold; }
-  .col-no { width: 30px; text-align: center; }
-  .col-name { width: 120px; }
-  .col-time { width: 45px; text-align: center; font-size: 7.5pt; }
-  .col-loc { width: 60px; text-align: center; font-size: 7.5pt; }
-  .col-study { width: 180px; font-size: 7.5pt; white-space: pre-wrap; }
-  .col-prog { width: 130px; font-size: 7.5pt; white-space: pre-wrap; }
-  .col-notes { font-size: 7.5pt; }
-
-  .sub-head { background: #f9f9f9; text-align: center; font-weight: bold; font-size: 10pt; }
+  .children-table th { background: #eee; font-size: 9.5pt; font-weight: bold; }
+  .col-no { width: 3%; text-align: center; font-size: 9pt; }
+  .col-name { width: 11%; font-size: 9pt; }
+  .col-time { width: 5%; text-align: center; font-size: 8.5pt; }
+  .col-loc { width: 6%; text-align: center; font-size: 8.5pt; }
+  .col-study { width: 18%; font-size: 9pt; white-space: pre-wrap; word-break: break-all; }
+  .col-prog { width: 17%; font-size: 9pt; white-space: pre-wrap; word-break: break-all; }
+  .col-notes { width: 30%; font-size: 9pt; word-break: break-all; }
 `;
 
 export const GROUP1_ITEMS = [
@@ -277,36 +306,34 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
     const staffTable = buildStaffTableHTML(attendance, globalLog, staffList);
 
     const activities = globalLog.activities || '';
-    let parsed = { group1: [], group2: [] };
+    let activityItemsHTML = '';
     if (activities) {
         if (typeof activities === 'object') {
-            parsed = activities;
-        } else {
+            const group1 = activities.group1 || [];
+            const group2 = activities.group2 || [];
+            const selectedLabels = [];
+            GROUP1_ITEMS.forEach(item => { if (group1.includes(item.id)) selectedLabels.push(item.label); });
+            GROUP2_ITEMS.forEach(item => { if (group2.includes(item.id)) selectedLabels.push(item.label); });
+            activityItemsHTML = selectedLabels.join('<br>');
+        } else if (activities.trim().startsWith('{')) {
             try {
-                parsed = JSON.parse(activities);
-            } catch (e) {
-                // ignore
+                const parsed = JSON.parse(activities);
+                const group1 = parsed.group1 || [];
+                const group2 = parsed.group2 || [];
+                const selectedLabels = [];
+                GROUP1_ITEMS.forEach(item => { if (group1.includes(item.id)) selectedLabels.push(item.label); });
+                GROUP2_ITEMS.forEach(item => { if (group2.includes(item.id)) selectedLabels.push(item.label); });
+                activityItemsHTML = selectedLabels.join('<br>');
+            } catch {
+                activityItemsHTML = activities.replace(/\n/g, '<br>');
             }
+        } else {
+            activityItemsHTML = activities.replace(/\n/g, '<br>');
         }
     }
-    const group1 = parsed.group1 || [];
-    const group2 = parsed.group2 || [];
-
-    const selectedLabels = [];
-    GROUP1_ITEMS.forEach(item => {
-        if (group1.includes(item.id)) {
-            selectedLabels.push(item.label);
-        }
-    });
-    GROUP2_ITEMS.forEach(item => {
-        if (group2.includes(item.id)) {
-            selectedLabels.push(item.label);
-        }
-    });
-
-    const activityItemsHTML = selectedLabels.length > 0 
-        ? selectedLabels.join('<br>') 
-        : '<span style="color:#aaa;font-style:italic;">（未登録）</span>';
+    if (!activityItemsHTML) {
+        activityItemsHTML = '<span style="color:#aaa;font-style:italic;">（未登録）</span>';
+    }
 
     let html = `
       <table class="header-table">
@@ -315,15 +342,15 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
           <td class="date-cell" colspan="1">${dateStr}</td>
         </tr>
         <tr>
-          <td style="width: 250px; padding: 0;">
+          <td style="width: 30%; padding: 0;">
             ${staffTable}
           </td>
-          <td>
-            <div class="section-label">【全体的な様子、特記事項】</div>
+          <td style="width: 50%;">
+            <div class="section-label">【本日の特記事項】</div>
             <div class="notes-section">${globalLog.notice || summaryC || ''}</div>
           </td>
-          <td style="width: 200px;">
-            <div class="section-label">業務・活動内容</div>
+          <td style="width: 20%;">
+            <div class="section-label">共有事項</div>
             <div class="highlight-section" style="line-height: 1.2;">
               ${activityItemsHTML}
             </div>
@@ -332,7 +359,6 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
       </table>
 
       <table class="children-table">
-        <tr><th colspan="9" class="sub-head">児発・放デイ</th></tr>
         <tr>
           <th class="col-no">No.</th>
           <th class="col-name">氏名</th>
@@ -362,7 +388,7 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
               <td class="col-time">${rowData.transportTime || ''}</td>
               <td class="col-study">${extractStudyText(dailyMessages, child.id)}</td>
               <td class="col-prog">${extractProgramText(dailyMessages, child.id)}</td>
-              <td class="col-notes">${rowData.notes || ''}</td>
+              <td class="col-notes">${extractNotesText(dailyMessages, dailyTable, child.id)}</td>
             </tr>`;
         } else {
             html += `
@@ -434,14 +460,14 @@ export function printChildDocument(child, result, selectedDate) {
 }
 
 export function printAllDocuments(children, results, summaryC, selectedDate, dailyTable = {}, dailyMessages = {}, globalLog = {}, attendance = {}, staffList = []) {
-    const printWindow = window.open('', '_blank');
+    const printWindow = window.open('', '_blank', 'width=1200,height=800,resizable=yes,scrollbars=yes');
     const dateObj = new Date(selectedDate);
     const dateStr = `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月 ${dateObj.getDate()}日`;
 
     const pageHTML = buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, globalLog, summaryC, attendance, staffList);
 
     const allContent = `
-    <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>業務管理日誌 - ${selectedDate}</title>
+    <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=1040"><title>業務管理日誌 - ${selectedDate}</title>
     <style>${COMMON_STYLES}</style></head><body>
       ${pageHTML}
     </body></html>`;
@@ -452,7 +478,7 @@ export function printAllDocuments(children, results, summaryC, selectedDate, dai
 }
 
 export function printMonthlyDocuments(monthStr, monthlyData, staffList = []) {
-    const printWindow = window.open('', '_blank');
+    const printWindow = window.open('', '_blank', 'width=1200,height=800,resizable=yes,scrollbars=yes');
 
     let pagesHTML = '';
 
@@ -472,7 +498,7 @@ export function printMonthlyDocuments(monthStr, monthlyData, staffList = []) {
     });
 
     const allContent = `
-    <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><title>月間業務管理日誌 - ${monthStr}</title>
+    <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=1040"><title>月間業務管理日誌 - ${monthStr}</title>
     <style>${COMMON_STYLES}</style></head><body>
       ${pagesHTML}
     </body></html>`;

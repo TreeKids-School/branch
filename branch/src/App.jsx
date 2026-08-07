@@ -5,7 +5,7 @@ import {
     Trash2, Clock, CheckCircle2, AlertCircle, Loader2,
     ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileText, LayoutPanelLeft, UserCheck,
     FileEdit, X, Calendar as CalendarIcon, Settings, LogOut, HelpCircle, Menu,
-    Copy, Check, ClipboardList, History, Plus
+    Copy, Check, ClipboardList, ClipboardCheck, History, Plus
 } from 'lucide-react';
 import MemoPanel from './components/MemoPanel';
 import DocViewer from './components/DocViewer';
@@ -23,9 +23,8 @@ import SettingsModal from './components/SettingsModal';
 import ExportModal from './components/ExportModal';
 import AddChildModal from './components/AddChildModal';
 import AttendanceModal from './components/AttendanceModal';
-import ActivitiesModal from './components/ActivitiesModal';
-import NoticeModal from './components/NoticeModal';
 import LogModal from './components/LogModal';
+import CSVImportModal from './components/CSVImportModal';
 
 import { printAllDocuments, GROUP1_ITEMS, GROUP2_ITEMS } from './utils/print';
 
@@ -90,7 +89,6 @@ export default function App() {
     const [dailyMessages, setDailyMessages] = useState({});
     const [dailyTable, setDailyTable] = useState({});
     const [globalLog, setGlobalLog] = useState({ admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
-    const [showProgramModal, setShowProgramModal] = useState(false);
     const [selectedChildId, setSelectedChildId] = useState(null);
     const [selectedTreeChildId, setSelectedTreeChildId] = useState(null);
     const [selectedDocChildId, setSelectedDocChildId] = useState(null);
@@ -106,20 +104,28 @@ export default function App() {
     const hasTriggeredLongPress = useRef({});
     const touchStartPos = useRef({});
     const [isKintaiExpanded, setIsKintaiExpanded] = useState(() => window.innerWidth >= 1024);
-    const [showNoticeModal, setShowNoticeModal] = useState(false);
-    const [showActivitiesModal, setShowActivitiesModal] = useState(false);
+    const [localNotice, setLocalNotice] = useState('');
+    const [localProgramSummary, setLocalProgramSummary] = useState('');
+    const [localActivities, setLocalActivities] = useState('');
     const [isSyncing, setIsSyncing] = useState(false);
     const [showCalendarModal, setShowCalendarModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
     const [showAddChildModal, setShowAddChildModal] = useState(false);
     const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+    const [showCSVImportModal, setShowCSVImportModal] = useState(false);
+    const [isStaffCollapsed, setIsStaffCollapsed] = useState(false);
+    const [isNoticeCollapsed, setIsNoticeCollapsed] = useState(false);
+    const [isProgramCollapsed, setIsProgramCollapsed] = useState(false);
+    const [isActivitiesCollapsed, setIsActivitiesCollapsed] = useState(false);
+    const [activeProgramTab, setActiveProgramTab] = useState(0);
     const [isDashboardMode, setIsDashboardMode] = useState(true);
     const [attendance, setAttendance] = useState({});
     const [sortConfig, setSortConfig] = useState({ key: 'default', direction: 'asc' });
     const [copiedChildId, setCopiedChildId] = useState(null);
     const [masterChildren, setMasterChildren] = useState([]);
     const [existingReportDates, setExistingReportDates] = useState([]);
+    const [isSandboxMode, setIsSandboxMode] = useState(false);
     const [showHelpGuide, setShowHelpGuide] = useState(false);
     const [helpGuideStartStepId, setHelpGuideStartStepId] = useState(null);
     const [staffList, setStaffList] = useState([]);
@@ -149,6 +155,8 @@ export default function App() {
     const [animationKey, setAnimationKey] = useState(0);
     const [dateAnimKey, setDateAnimKey] = useState(0);
     const [activeTableTab, setActiveTableTab] = useState('learning'); // 'learning' or 'transport'
+    const [selectedChildIdsForCopy, setSelectedChildIdsForCopy] = useState([]);
+    const [isCopySelectionMode, setIsCopySelectionMode] = useState(false);
     const [activeLocks, setActiveLocks] = useState({});
     const [lockingChildId, setLockingChildId] = useState(null);
     const prevSelectedChildIdRef = useRef(null);
@@ -312,7 +320,7 @@ export default function App() {
 
         // 横方向のスワイプ判定（縦方向の移動より横方向が大きく、かつしきい値が60px以上）
         if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 60) {
-            const tabs = ['learning', 'transport', 'copy'];
+            const tabs = ['learning', 'transport', 'copy', 'futurePlan', 'remarks'];
             const currentIndex = tabs.indexOf(activeTableTab);
 
             if (diffX < 0) {
@@ -404,15 +412,34 @@ export default function App() {
         };
     }, [selectedChildId, selectedTreeChildId, selectedDocChildId, isPanelClosing]);
 
+    // Auto-scroll active tab button into view on mobile
+    useEffect(() => {
+        if (window.innerWidth < 1024) {
+            const activeBtn = document.querySelector(`[data-tab-btn="${activeTableTab}"]`);
+            if (activeBtn) {
+                activeBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            }
+        }
+    }, [activeTableTab]);
+
 
     const [tags, setTags] = useState(() => {
-        const defaultTags = ['【ツリー式学習】', '【宿題】', '【プリント】', '【プログラム】', '【おやつ】', '【自由時間】'];
+        const defaultTags = ['【ツリー式学習】', '【宿題】', '【プリント】', '【プログラム】', '【おやつ】', '【自由時間】', '【備考】'];
         try {
             const saved = localStorage.getItem('care_pro_tags');
             if (saved) {
                 const parsed = JSON.parse(saved);
-                if (!parsed.includes('【自由時間】')) {
-                    const newTags = [...parsed, '【自由時間】'];
+                let updated = false;
+                let newTags = [...parsed];
+                if (!newTags.includes('【自由時間】')) {
+                    newTags.push('【自由時間】');
+                    updated = true;
+                }
+                if (!newTags.includes('【備考】')) {
+                    newTags.push('【備考】');
+                    updated = true;
+                }
+                if (updated) {
                     localStorage.setItem('care_pro_tags', JSON.stringify(newTags));
                     return newTags;
                 }
@@ -571,6 +598,10 @@ export default function App() {
     }, []);
 
     useEffect(() => {
+        setIsSandboxMode(false);
+    }, [selectedDate, selectedOffice?.id]);
+
+    useEffect(() => {
         if (!user || !selectedOffice) return;
 
         setIsSyncing(true);
@@ -579,6 +610,10 @@ export default function App() {
         // 1. Reports コレクションのリアルタイム同期リスナー登録
         const reportDocRef = doc(firestore, 'reports', reportId);
         const unsubscribeReport = onSnapshot(reportDocRef, (snap) => {
+            if (isSandboxMode) {
+                console.log('[Sandbox] onSnapshot update ignored');
+                return;
+            }
             if (snap.exists()) {
                 const data = snap.data();
                 setActiveLocks(data.activeLocks || {});
@@ -614,6 +649,10 @@ export default function App() {
         const attendanceId = selectedOffice.id ? `${selectedOffice.id}_${selectedDate}` : selectedDate;
         const attendanceDocRef = doc(firestore, 'attendance', attendanceId);
         const unsubscribeAttendance = onSnapshot(attendanceDocRef, (snap) => {
+            if (isSandboxMode) {
+                console.log('[Sandbox] onSnapshot attendance ignored');
+                return;
+            }
             if (snap.exists()) {
                 const att = snap.data();
                 if (!snap.metadata.hasPendingWrites) {
@@ -640,7 +679,7 @@ export default function App() {
             unsubscribeReport();
             unsubscribeAttendance();
         };
-    }, [selectedDate, selectedOffice, user]);
+    }, [selectedDate, selectedOffice, user, isSandboxMode]);
 
     // 挨拶テンプレのリアルタイム同期
     useEffect(() => {
@@ -745,6 +784,40 @@ export default function App() {
         };
     }, [releaseLock]);
 
+    // Sync globalLog with local state
+    useEffect(() => {
+        setLocalNotice(globalLog.notice || '');
+        setLocalProgramSummary(globalLog.programSummary || '');
+        
+        let activitiesText = '';
+        const acts = globalLog.activities || '';
+        if (acts) {
+            if (typeof acts === 'object') {
+                const group1 = acts.group1 || [];
+                const group2 = acts.group2 || [];
+                const labels = [];
+                GROUP1_ITEMS.forEach(item => { if (group1.includes(item.id)) labels.push(item.label); });
+                GROUP2_ITEMS.forEach(item => { if (group2.includes(item.id)) labels.push(item.label); });
+                activitiesText = labels.join('\n');
+            } else if (acts.trim().startsWith('{')) {
+                try {
+                    const parsed = JSON.parse(acts);
+                    const group1 = parsed.group1 || [];
+                    const group2 = parsed.group2 || [];
+                    const labels = [];
+                    GROUP1_ITEMS.forEach(item => { if (group1.includes(item.id)) labels.push(item.label); });
+                    GROUP2_ITEMS.forEach(item => { if (group2.includes(item.id)) labels.push(item.label); });
+                    activitiesText = labels.join('\n');
+                } catch {
+                    activitiesText = acts;
+                }
+            } else {
+                activitiesText = acts;
+            }
+        }
+        setLocalActivities(activitiesText);
+    }, [globalLog]);
+
     // 5. Normal Functions & Handlers
     const handleUpdateTags = (newTags) => {
         setTags(newTags);
@@ -807,6 +880,10 @@ export default function App() {
     }
 
     const saveDailyData = async (date, ch, msgs, res, sum, table, global) => {
+        if (isSandboxMode) {
+            console.log('[Sandbox] saveDailyData bypassed');
+            return;
+        }
         setIsSyncing(true);
         const dailyData = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, changeLogs: changeLogs, updatedAt: new Date().toISOString() };
 
@@ -824,10 +901,11 @@ export default function App() {
                 const individualData = {
                     name: child.name,
                     tree_comm_text: childResult.D || '',
+                    future_plan: childResult.futurePlan || '',
                     pickupLocation: childTable.pickupLocation || '',
                     endTime: childTable.endTime || '',
                     transportTime: childTable.transportTime || '',
-                    notes: childTable.notes || ''
+                    notes: getRemarksText(child.id)
                 };
 
                 await cs({
@@ -994,6 +1072,10 @@ export default function App() {
         }
 
         const savePromise = (async () => {
+            if (isSandboxMode) {
+                console.log('[Sandbox] saveDailyDataGranular bypassed');
+                return;
+            }
             await cs({
                 action: 'updateDailyReportChildData',
                 date: selectedDate,
@@ -1014,10 +1096,11 @@ export default function App() {
                 const individualData = {
                     name: childObj.name,
                     tree_comm_text: childResult.D || '',
+                    future_plan: childResult.futurePlan || '',
                     pickupLocation: childTable.pickupLocation || '',
                     endTime: childTable.endTime || '',
                     transportTime: childTable.transportTime || '',
-                    notes: childTable.notes || ''
+                    notes: getRemarksText(childId)
                 };
 
                 await cs({
@@ -1120,10 +1203,11 @@ export default function App() {
                 const individualData = {
                     name: childObj.name,
                     tree_comm_text: childResult.D || '',
+                    future_plan: childResult.futurePlan || '',
                     pickupLocation: childTable.pickupLocation || '',
                     endTime: childTable.endTime || '',
                     transportTime: childTable.transportTime || '',
-                    notes: childTable.notes || ''
+                    notes: getRemarksText(childId)
                 };
                 
                 await cs({
@@ -1192,6 +1276,19 @@ export default function App() {
             programs: updatedPrograms,
             programTitle: firstProg.title || '',
             programSummary: firstProg.summary || ''
+        };
+        setGlobalLog(newLog);
+        await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, dailyTable, newLog);
+    };
+
+    const updateGlobalProgramSummary = async (newSummary) => {
+        const firstProg = { title: globalLog.programTitle || 'プログラム', summary: newSummary };
+        const updatedPrograms = [firstProg];
+        const newLog = {
+            ...globalLog,
+            programs: updatedPrograms,
+            programTitle: firstProg.title,
+            programSummary: newSummary
         };
         setGlobalLog(newLog);
         await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, dailyTable, newLog);
@@ -1380,6 +1477,105 @@ export default function App() {
         }
     };
 
+    const toggleCopySelectionMode = () => {
+        setIsCopySelectionMode(prev => {
+            const newVal = !prev;
+            if (!newVal) {
+                setSelectedChildIdsForCopy([]);
+            }
+            return newVal;
+        });
+    };
+
+    const toggleCopySelection = (childId) => {
+        setSelectedChildIdsForCopy(prev => {
+            if (prev.includes(childId)) {
+                return prev.filter(id => id !== childId);
+            } else {
+                return [...prev, childId];
+            }
+        });
+    };
+
+    const getCombinedChildrenNames = (selectedChildren) => {
+        if (selectedChildren.length === 0) return '';
+        
+        const lastNameGroups = {};
+        const orderOfLastNames = [];
+        
+        selectedChildren.forEach(child => {
+            const ln = child.lastName || '';
+            if (ln) {
+                if (!lastNameGroups[ln]) {
+                    lastNameGroups[ln] = [];
+                    orderOfLastNames.push(ln);
+                }
+                lastNameGroups[ln].push(child);
+            } else {
+                const key = `_empty_${child.id}`;
+                lastNameGroups[key] = [child];
+                orderOfLastNames.push(key);
+            }
+        });
+        
+        const formattedGroups = orderOfLastNames.map(key => {
+            const group = lastNameGroups[key];
+            if (key.startsWith('_empty_')) {
+                return `${group[0].name || '名称未設定'}さん`;
+            }
+            
+            if (group.length > 1) {
+                return key + group.map(c => `${c.firstName}さん`).join('、');
+            } else {
+                return `${key}${group[0].firstName}さん`;
+            }
+        });
+        
+        return formattedGroups.join('、');
+    };
+
+    const handleCopySelectedCommunications = () => {
+        if (selectedChildIdsForCopy.length === 0) {
+            alert('選択されている児童がいません。');
+            return;
+        }
+
+        const activeSelectedChildren = selectedChildIdsForCopy
+            .map(id => children.find(c => c.id === id))
+            .filter(Boolean);
+
+        const combinedNames = getCombinedChildrenNames(activeSelectedChildren);
+        let text = `${combinedNames}\n\n`;
+        let count = 0;
+
+        activeSelectedChildren.forEach(child => {
+            const result = results[child.id] || {};
+            const content = result.D || '';
+            if (content.trim()) {
+                text += `${content.trim()}\n\n`;
+                count++;
+            }
+        });
+
+        if (count === 0) {
+            alert('選択された児童のツリー通信が入力されていません。');
+            return;
+        }
+
+        text = text.trim();
+
+        navigator.clipboard.writeText(text)
+            .then(() => {
+                alert(`選択した${count}名分のツリー通信を選択順で一括コピーしました！`);
+                setSelectedChildIdsForCopy([]);
+                setIsCopySelectionMode(false);
+            })
+            .catch(err => {
+                console.error('Failed to copy text: ', err);
+                alert('コピーに失敗しました。');
+            });
+    };
+
     const copyAllTreeCommunications = () => {
         const activeChildren = children.filter(c => !c.isPlaceholder);
         if (activeChildren.length === 0) {
@@ -1473,6 +1669,20 @@ export default function App() {
         }).filter(t => t).join(' / ');
     };
 
+    const getRemarksText = (childId) => {
+        const msgs = dailyMessages[childId] || [];
+        return msgs.filter(m => {
+            const hasRemarksTag = m.tag && m.tag === '【備考】';
+            const hasTextPrefix = m.text.startsWith('【備考】');
+            return hasRemarksTag || hasTextPrefix;
+        })
+        .map(m => {
+            let t = m.text.trim();
+            t = t.replace(/^【備考】\s*/, '').trim();
+            return t;
+        }).filter(t => t).join('\n');
+    };
+
     // 業務・活動内容ラベル（ダッシュボードモード用インライン表示）
     const dashboardActivityLabels = (() => {
         const activities = globalLog.activities || '';
@@ -1505,6 +1715,23 @@ export default function App() {
 
     return (
         <div className="min-h-screen p-3 md:p-6 pb-24 space-y-4 md:space-y-6 max-w-[1800px] mx-auto overflow-x-hidden">
+            {isSandboxMode && (
+                <div className="bg-amber-500 text-white px-5 py-3 rounded-2xl flex items-center justify-between shadow-lg font-black text-xs md:text-sm animate-in slide-in-from-top-4 duration-300 no-print">
+                    <div className="flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 flex-shrink-0 animate-bounce" />
+                        <span>【デモ（検証用）モード作動中】データベースには保存されません。画面上で表示や印刷などを自由に検証できます。</span>
+                    </div>
+                    <button 
+                        onClick={() => {
+                            setIsSandboxMode(false);
+                            fetchDailyData(selectedDate, selectedOffice?.id);
+                        }}
+                        className="px-3 py-1.5 bg-white text-amber-600 rounded-xl hover:bg-slate-100 transition-all active:scale-95 text-xs font-bold"
+                    >
+                        デモモード解除（再読込）
+                    </button>
+                </div>
+            )}
             {/* Ultra Compact Responsive Header */}
             <header className="sticky top-0 z-[50] bg-white/70 backdrop-blur-xl rounded-2xl md:rounded-[2.5rem] flex flex-col gap-3 px-4 py-3 md:px-6 md:py-4 mb-6 border border-white/40 shadow-premium no-print">
                 {/* 1段目: タイトルと右側アクションボタン */}
@@ -1516,6 +1743,9 @@ export default function App() {
                         </div>
                         <h1 className="text-base md:text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
                             <span>業務管理日誌</span>
+                            <span className="text-[10px] font-bold text-apple-600 bg-apple-50 border border-apple-200 px-2 py-0.5 rounded-full select-none">
+                                テストbranch
+                            </span>
                             <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full select-none">
                                 v{APP_VERSION}
                             </span>
@@ -1565,24 +1795,6 @@ export default function App() {
                                 <Printer className="w-4 h-4" />
                                 <span className="hidden sm:inline">印刷</span>
                             </button>
-
-                            <button
-                                onClick={() => setShowActivitiesModal(true)}
-                                className="px-2.5 py-1.5 text-slate-500 hover:text-wood-700 hover:bg-wood-50/50 rounded-full border border-slate-200/60 hover:border-wood-200 shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
-                                title="業務活動内容登録"
-                            >
-                                <ClipboardList className="w-3.5 h-3.5 text-wood-500" />
-                                <span className="text-[10px] font-black">業務活動内容</span>
-                            </button>
-
-                            <button
-                                onClick={() => setShowNoticeModal(true)}
-                                className="px-2.5 py-1.5 text-slate-500 hover:text-apple-700 hover:bg-apple-50/50 rounded-full border border-slate-200/60 hover:border-apple-200 shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
-                                title="全体的な様子登録"
-                            >
-                                <FileText className="w-3.5 h-3.5 text-apple-500" />
-                                <span className="text-[10px] font-black">全体的な様子</span>
-                            </button>
                             
                             <button
                                 id="guide-export"
@@ -1592,6 +1804,15 @@ export default function App() {
                             >
                                 <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400" />
                                 <span className="text-[10px] font-black">データ出力</span>
+                            </button>
+
+                            <button
+                                onClick={() => setShowCSVImportModal(true)}
+                                className="px-2.5 py-1.5 text-slate-500 hover:text-indigo-700 hover:bg-indigo-50/50 rounded-full border border-slate-200/60 hover:border-indigo-200 shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+                                title="CSVインポート"
+                            >
+                                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" />
+                                <span className="text-[10px] font-black">CSVインポート</span>
                             </button>
 
                             <button
@@ -1672,19 +1893,7 @@ export default function App() {
                 </div>
             </header>
 
-            {/* 本日のプログラム登録ボタン (コンパクト設計) */}
-            <div className="flex justify-center w-full mt-2 mb-1 no-print">
-                <button
-                    onClick={() => setShowProgramModal(true)}
-                    className="px-3.5 py-1.5 bg-wood-50 hover:bg-wood-100 text-wood-700 rounded-full font-bold text-[10px] md:text-xs border border-wood-200/40 transition-all text-center flex items-center justify-center gap-1 active:scale-95 shadow-sm"
-                >
-                    <ClipboardList className="w-3.5 h-3.5 text-wood-600" />
-                    <span>本日のプログラム登録</span>
-                    {globalLog.programTitle && (
-                        <span className="w-1.5 h-1.5 bg-wood-500 rounded-full ml-1" title={`登録済: ${globalLog.programTitle}${globalLog.programs && globalLog.programs.length > 1 ? ` 他${globalLog.programs.length - 1}件` : ''}`} />
-                    )}
-                </button>
-            </div>
+
 
             <div 
                 key={animationKey}
@@ -1694,21 +1903,33 @@ export default function App() {
                     slideDirection === 'right' ? "animate-in slide-in-from-left-8" : "animate-in fade-in duration-300"
                 )}
             >
-            {/* ダッシュボードモード: 上段情報バー（職員・全体・業務） */}
-            {isDashboardMode && (
-                <div className="hidden lg:grid grid-cols-[minmax(280px,310px)_1fr_minmax(160px,190px)] gap-3 mb-3">
-
-                    {/* 左: 職員配置（役職・名前直接編集可、スクロールなし） */}
-                    <div id="guide-staff-section" className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-                        <div className="flex items-center gap-2 px-3 py-2 bg-tree-50/80 border-b border-tree-100 flex-shrink-0">
+            {/* 新設: 勤怠管理 ＆ 本日の特記事項 ＆ 本日のプログラム ＆ 共有事項 の入力欄 (PC・スマホ両対応、直接入力可能) */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4 no-print animate-in fade-in duration-500 items-stretch">
+                
+                {/* 1. 勤怠管理 */}
+                <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
+                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-tree-50/80 border-b border-tree-100 flex-shrink-0">
+                        <div className="flex items-center gap-2">
                             <UserCheck className="w-3.5 h-3.5 text-tree-600" />
-                            <span className="text-[10px] font-black text-tree-700 uppercase tracking-widest">職員配置</span>
+                            <span className="text-xs font-black text-tree-700 uppercase tracking-widest whitespace-nowrap">勤怠管理</span>
                         </div>
+                        <button
+                            onClick={() => setIsStaffCollapsed(!isStaffCollapsed)}
+                            className="p-1 hover:bg-tree-100/50 rounded-full transition-all cursor-pointer flex-shrink-0"
+                            title={isStaffCollapsed ? "展開する" : "最小化する"}
+                        >
+                            {isStaffCollapsed ? (
+                                <ChevronDown className="w-4 h-4 text-tree-500" />
+                            ) : (
+                                <ChevronUp className="w-4 h-4 text-tree-500" />
+                            )}
+                        </button>
+                    </div>
+                    {!isStaffCollapsed && (
                         <div className="flex flex-col">
                             {filteredStaffList.length === 0 ? (
                                 <div className="py-6 text-center text-slate-300 text-[10px] font-bold">スタッフ未登録</div>
                             ) : (() => {
-                                // 役職順にグループ分け（印刷レイアウトと同じ順番）
                                 const roleOrder = ['管理者', '児発管', '児童指導員・保育士', '指導員'];
                                 const flatStaffWithRoles = [];
 
@@ -1724,10 +1945,7 @@ export default function App() {
                                     });
                                 });
 
-                                // 役職順にソート
-                                flatStaffWithRoles.sort((a, b) => {
-                                    return roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role);
-                                });
+                                flatStaffWithRoles.sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
 
                                 return flatStaffWithRoles.map(({ staff, role }) => {
                                     const record = attendance[staff.id] || { type: 'work', startTime: '09:30', endTime: '18:30' };
@@ -1743,23 +1961,16 @@ export default function App() {
                                     };
 
                                     return (
-                                        <div key={`${staff.id}-${role}`} className="grid grid-cols-[85px_1fr] border-b border-slate-100 last:border-0 hover:bg-slate-50/40 transition-all duration-200">
-                                            {/* 左: 役職 */}
-                                            <div className="bg-slate-50/70 border-r border-slate-100 flex items-center justify-center p-1.5 min-h-[34px]">
-                                                <span className="text-[9px] font-black text-slate-500 text-center leading-normal select-none tracking-wider">
-                                                    {role === '児童指導員・保育士' ? (
-                                                        <>
-                                                            児童指導員<br />保育士
-                                                        </>
-                                                    ) : role}
+                                        <div key={`${staff.id}-${role}`} className="grid grid-cols-[75px_1fr] border-b border-slate-100 last:border-0 hover:bg-slate-50/40 transition-all duration-200">
+                                            <div className="bg-slate-50/70 border-r border-slate-100 flex items-center justify-center p-1 min-h-[30px]">
+                                                <span className="text-[8px] font-black text-slate-500 text-center leading-tight tracking-tighter">
+                                                    {role === '児童指導員・保育士' ? "指導員/保育士" : role}
                                                 </span>
                                             </div>
-                                            {/* 右: 名前・状態 */}
-                                            <div className="flex items-center justify-between gap-1.5 py-1 px-2.5">
-                                                {/* 名前ボタン */}
+                                            <div className="flex items-center justify-between gap-1 py-0.5 px-2">
                                                 <button
                                                     onClick={() => handleStaffAttendanceChange(staff.id, 'type', record.type === 'work' ? 'public_holiday' : record.type === 'public_holiday' ? 'paid_leave' : 'work')}
-                                                    className={`px-2 py-0.5 rounded text-[11.5px] font-black border transition-all text-left truncate flex-grow cursor-pointer ${
+                                                    className={`px-1.5 py-0.5 rounded text-[10px] font-black border transition-all text-left truncate flex-grow cursor-pointer ${
                                                         record.type === 'work'
                                                             ? 'bg-tree-50 text-tree-800 border-tree-200/60 hover:bg-tree-100/70'
                                                             : record.type === 'public_holiday'
@@ -1770,32 +1981,30 @@ export default function App() {
                                                 >
                                                     {staff.name}
                                                 </button>
-
-                                                {/* 時間編集・または公休/有給テキスト */}
                                                 {isWork ? (
-                                                    <div className="flex items-center gap-[1px] text-[9px] flex-shrink-0 select-none">
+                                                    <div className="flex items-center gap-[1px] text-[8px] flex-shrink-0 select-none scale-[0.9] origin-right">
                                                         <select value={startHour || '09'} onChange={e => handleTimeUpdate('startTime', 'hour', e.target.value)}
-                                                            className="bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-700 outline-none px-0.5 py-0 cursor-pointer appearance-none text-center w-[25px]">
+                                                            className="bg-white border border-slate-200 rounded text-[9px] font-bold text-slate-700 outline-none px-0.5 py-0 cursor-pointer appearance-none text-center w-[22px]">
                                                             {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
                                                         </select>
-                                                        <span className="text-slate-300 text-[8px] font-bold">:</span>
+                                                        <span className="text-slate-355">:</span>
                                                         <select value={startMin || '30'} onChange={e => handleTimeUpdate('startTime', 'minute', e.target.value)}
-                                                            className="bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-700 outline-none px-0.5 py-0 cursor-pointer appearance-none text-center w-[25px]">
+                                                            className="bg-white border border-slate-200 rounded text-[9px] font-bold text-slate-700 outline-none px-0.5 py-0 cursor-pointer appearance-none text-center w-[22px]">
                                                             {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
                                                         </select>
-                                                        <span className="text-slate-300 text-[8px] font-bold px-0.5">〜</span>
+                                                        <span className="text-slate-355 px-0.5">〜</span>
                                                         <select value={endHour || '18'} onChange={e => handleTimeUpdate('endTime', 'hour', e.target.value)}
-                                                            className="bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-700 outline-none px-0.5 py-0 cursor-pointer appearance-none text-center w-[25px]">
+                                                            className="bg-white border border-slate-200 rounded text-[9px] font-bold text-slate-700 outline-none px-0.5 py-0 cursor-pointer appearance-none text-center w-[22px]">
                                                             {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
                                                         </select>
-                                                        <span className="text-slate-300 text-[8px] font-bold">:</span>
+                                                        <span className="text-slate-355">:</span>
                                                         <select value={endMin || '30'} onChange={e => handleTimeUpdate('endTime', 'minute', e.target.value)}
-                                                            className="bg-white border border-slate-200 rounded text-[10px] font-bold text-slate-700 outline-none px-0.5 py-0 cursor-pointer appearance-none text-center w-[25px]">
+                                                            className="bg-white border border-slate-200 rounded text-[9px] font-bold text-slate-700 outline-none px-0.5 py-0 cursor-pointer appearance-none text-center w-[22px]">
                                                             {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
                                                         </select>
                                                     </div>
                                                 ) : (
-                                                    <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full select-none ${
+                                                    <span className={`text-[9px] font-black px-1.5 py-0.2 rounded-full select-none ${
                                                         record.type === 'public_holiday' 
                                                             ? 'bg-wood-100/50 text-wood-700' 
                                                             : 'bg-apple-100/50 text-apple-700'
@@ -1809,45 +2018,210 @@ export default function App() {
                                 });
                             })()}
                         </div>
-                    </div>
-
-                    {/* 中: 全体的な様子（クリックでモーダル編集） */}
-                    <div
-                        id="guide-notice-section"
-                        className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden cursor-pointer hover:shadow-md hover:border-apple-200 transition-all group"
-                        onClick={() => setShowNoticeModal(true)}
-                    >
-                        <div className="flex items-center justify-between px-3 py-2 bg-apple-50/80 border-b border-apple-100">
-                            <span className="text-[10px] font-black text-apple-600 uppercase tracking-widest">全体的な様子・特記事項</span>
-                            <span className="text-[9px] font-bold text-slate-300 group-hover:text-apple-500 transition-colors">タップして編集 →</span>
-                        </div>
-                        <div className="p-3 text-[11px] text-slate-700 leading-relaxed font-medium whitespace-pre-wrap break-words min-h-[80px] max-h-[200px] overflow-y-auto">
-                            {globalLog.notice || summaryC || (
-                                <span className="text-slate-300 italic text-[10px]">（タップして入力）</span>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* 右: 業務・活動内容（クリックでモーダル編集） */}
-                    <div
-                        id="guide-activities-section"
-                        className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden cursor-pointer hover:shadow-md hover:border-wood-200 transition-all group"
-                        onClick={() => setShowActivitiesModal(true)}
-                    >
-                        <div className="flex items-center justify-between px-3 py-2 bg-wood-50/80 border-b border-wood-100">
-                            <span className="text-[10px] font-black text-wood-600 uppercase tracking-widest">業務・活動内容</span>
-                            <span className="text-[9px] font-bold text-slate-300 group-hover:text-wood-500 transition-colors">タップして編集 →</span>
-                        </div>
-                        <div className="p-3 text-[11px] text-slate-700 leading-relaxed space-y-1 min-h-[80px] max-h-[200px] overflow-y-auto">
-                            {dashboardActivityLabels.length > 0 ? dashboardActivityLabels.map((label, i) => (
-                                <div key={i} className="font-bold">{label}</div>
-                            )) : (
-                                <span className="text-slate-300 italic text-[10px]">（タップして登録）</span>
-                            )}
-                        </div>
-                    </div>
+                    )}
                 </div>
-            )}
+
+                {/* 2. 本日の特記事項 (旧 全体的な様子) */}
+                <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
+                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-apple-50/80 border-b border-apple-100 flex-shrink-0">
+                        <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-apple-600" />
+                            <span className="text-xs font-black text-apple-700 uppercase tracking-widest whitespace-nowrap">本日の特記事項</span>
+                        </div>
+                        <button
+                            onClick={() => setIsNoticeCollapsed(!isNoticeCollapsed)}
+                            className="p-1 hover:bg-apple-100/50 rounded-full transition-all cursor-pointer flex-shrink-0"
+                            title={isNoticeCollapsed ? "展開する" : "最小化する"}
+                        >
+                            {isNoticeCollapsed ? (
+                                <ChevronDown className="w-4 h-4 text-apple-500" />
+                            ) : (
+                                <ChevronUp className="w-4 h-4 text-apple-500" />
+                            )}
+                        </button>
+                    </div>
+                    {!isNoticeCollapsed && (
+                        <div className="p-3 flex-1 flex flex-col">
+                            <textarea
+                                value={localNotice}
+                                onChange={(e) => setLocalNotice(e.target.value)}
+                                onBlur={(e) => updateGlobalLog('notice', e.target.value)}
+                                placeholder="本日の様子や業務上の特記事項を入力してください（自動保存）..."
+                                style={{ fontSize: '14px' }}
+                                className="w-full flex-1 text-xs md:text-sm font-medium leading-relaxed bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-apple-400 focus:ring-4 focus:ring-apple-50 transition-all resize-none text-slate-700 shadow-inner"
+                            />
+                        </div>
+                    )}
+                </div>
+
+                {/* 3. 本日のプログラム */}
+                <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
+                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-purple-50/80 border-b border-purple-100 flex-shrink-0">
+                        <div className="flex items-center gap-2">
+                            <ClipboardCheck className="w-4 h-4 text-purple-600" />
+                            <span className="text-xs font-black text-purple-750 uppercase tracking-widest whitespace-nowrap">本日のプログラム</span>
+                        </div>
+                        <button
+                            onClick={() => setIsProgramCollapsed(!isProgramCollapsed)}
+                            className="p-1 hover:bg-purple-100/50 rounded-full transition-all cursor-pointer flex-shrink-0"
+                            title={isProgramCollapsed ? "展開する" : "最小化する"}
+                        >
+                            {isProgramCollapsed ? (
+                                <ChevronDown className="w-4 h-4 text-purple-500" />
+                            ) : (
+                                <ChevronUp className="w-4 h-4 text-purple-500" />
+                            )}
+                        </button>
+                    </div>
+                    {!isProgramCollapsed && (
+                        <div className="p-3 flex-1 flex flex-col gap-3 min-h-0">
+                            {(() => {
+                                const currentPrograms = globalLog.programs || (globalLog.programTitle || globalLog.programSummary 
+                                    ? [{ title: globalLog.programTitle || '', summary: globalLog.programSummary || '' }]
+                                    : [{ title: '', summary: '' }]);
+                                
+                                // Ensure active tab index is in bounds
+                                const activeIdx = Math.max(0, Math.min(activeProgramTab, currentPrograms.length - 1));
+                                const activeProg = currentPrograms[activeIdx] || { title: '', summary: '' };
+
+                                return (
+                                    <>
+                                        {/* Tabs Bar */}
+                                        <div className="flex items-center gap-1 overflow-x-auto pb-1.5 border-b border-slate-100 flex-shrink-0 custom-scrollbar">
+                                            {currentPrograms.map((prog, idx) => {
+                                                const isActive = idx === activeIdx;
+                                                return (
+                                                    <div key={idx} className="flex items-center flex-shrink-0 relative group mr-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setActiveProgramTab(idx)}
+                                                            className={`px-2.5 py-1 text-[11px] font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer border ${
+                                                                isActive 
+                                                                    ? 'bg-purple-600 text-white border-purple-600 shadow-sm font-bold' 
+                                                                    : 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50/50'
+                                                            }`}
+                                                        >
+                                                            <span>{prog.title ? (prog.title.length > 5 ? prog.title.substring(0, 5) + '..' : prog.title) : `${idx + 1}`}</span>
+                                                        </button>
+                                                        {currentPrograms.length > 1 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    const updated = currentPrograms.filter((_, i) => i !== idx);
+                                                                    updateGlobalPrograms(updated);
+                                                                    // Shift tab index if needed
+                                                                    if (activeIdx >= updated.length) {
+                                                                        setActiveProgramTab(Math.max(0, updated.length - 1));
+                                                                    }
+                                                                }}
+                                                                className={`absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border text-[8px] font-black shadow-sm transition-all scale-0 group-hover:scale-100 hover:scale-115 active:scale-90 cursor-pointer ${
+                                                                    isActive
+                                                                        ? 'bg-rose-500 text-white border-rose-600'
+                                                                        : 'bg-white text-rose-500 border-rose-200'
+                                                                }`}
+                                                                title="このプログラムを削除"
+                                                            >
+                                                                ✕
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                            
+                                            {/* Add Tab Button */}
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    const updated = [...currentPrograms, { title: '', summary: '' }];
+                                                    updateGlobalPrograms(updated);
+                                                    setActiveProgramTab(updated.length - 1);
+                                                }}
+                                                className="px-2 py-1 border border-dashed border-purple-300 hover:border-purple-500 text-purple-500 hover:bg-purple-50/10 rounded-lg text-[10px] font-bold transition-all flex items-center gap-0.5 cursor-pointer flex-shrink-0"
+                                                title="プログラムを追加"
+                                            >
+                                                <Plus className="w-3 h-3" />
+                                                <span>追加</span>
+                                            </button>
+                                        </div>
+
+                                        {/* Active Tab Panel */}
+                                        <div className="flex-1 flex flex-col gap-2 bg-slate-50/30 p-2 rounded-xl border border-slate-100/50 mt-1 animate-in fade-in duration-200">
+                                            {/* Title */}
+                                            <div className="space-y-1">
+                                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                                                    プログラム名
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    placeholder="例: ダンス、工作、レクリエーション"
+                                                    value={activeProg.title || ''}
+                                                    onChange={(e) => {
+                                                        const updated = [...currentPrograms];
+                                                        updated[activeIdx] = { ...updated[activeIdx], title: e.target.value };
+                                                        updateGlobalPrograms(updated);
+                                                    }}
+                                                    className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-750 focus:outline-none focus:border-purple-400 transition-all shadow-sm"
+                                                />
+                                            </div>
+                                            
+                                            {/* Description / Summary */}
+                                            <div className="flex-grow flex flex-col space-y-1">
+                                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                                                    詳細・手順
+                                                </label>
+                                                <textarea
+                                                    placeholder="具体的な手順やねらいを入力してください（自動保存）..."
+                                                    value={activeProg.summary || ''}
+                                                    onChange={(e) => {
+                                                        const updated = [...currentPrograms];
+                                                        updated[activeIdx] = { ...updated[activeIdx], summary: e.target.value };
+                                                        updateGlobalPrograms(updated);
+                                                    }}
+                                                    className="w-full flex-grow min-h-[50px] px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:border-purple-400 transition-all leading-relaxed shadow-sm resize-none"
+                                                />
+                                            </div>
+                                        </div>
+                                    </>
+                                );
+                            })()}
+                        </div>
+                    )}
+                </div>
+
+                {/* 4. 共有事項 (旧 業務・活動内容) */}
+                <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
+                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-wood-50/80 border-b border-wood-100 flex-shrink-0">
+                        <div className="flex items-center gap-2">
+                            <ClipboardList className="w-4 h-4 text-wood-600" />
+                            <span className="text-xs font-black text-wood-700 uppercase tracking-widest whitespace-nowrap">共有事項</span>
+                        </div>
+                        <button
+                            onClick={() => setIsActivitiesCollapsed(!isActivitiesCollapsed)}
+                            className="p-1 hover:bg-wood-100/50 rounded-full transition-all cursor-pointer flex-shrink-0"
+                            title={isActivitiesCollapsed ? "展開する" : "最小化する"}
+                        >
+                            {isActivitiesCollapsed ? (
+                                <ChevronDown className="w-4 h-4 text-wood-500" />
+                            ) : (
+                                <ChevronUp className="w-4 h-4 text-wood-500" />
+                            )}
+                        </button>
+                    </div>
+                    {!isActivitiesCollapsed && (
+                        <div className="p-3 flex-1 flex flex-col">
+                            <textarea
+                                value={localActivities}
+                                onChange={(e) => setLocalActivities(e.target.value)}
+                                onBlur={(e) => updateGlobalLog('activities', e.target.value)}
+                                placeholder="共有事項・連絡事項を入力してください（自動保存）..."
+                                style={{ fontSize: '14px' }}
+                                className="w-full flex-1 text-xs md:text-sm font-medium leading-relaxed bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-wood-400 focus:ring-4 focus:ring-wood-50 transition-all resize-none text-slate-700 shadow-inner"
+                            />
+                        </div>
+                    )}
+                </div>
+            </div>
 
             {/* 推移: 通常時の勤怠セクション（ダッシュボード時は非表示） */}
             {!isDashboardMode && (
@@ -1993,24 +2367,41 @@ export default function App() {
                         {/* Table Header Controls */}
                         <div className="flex items-center justify-between px-4 py-2 bg-tree-100 border-b border-tree-200">
                             <h3 className="font-black text-tree-800 text-xs tracking-widest hidden sm:block">本日の業務</h3>
-                            <div className="flex bg-white rounded-full p-0.5 border border-slate-200/60 shadow-sm mx-auto sm:mx-0 lg:hidden">
+                            <div className="flex bg-white rounded-full p-0.5 border border-slate-200/60 shadow-sm mx-auto sm:mx-0 lg:hidden overflow-x-auto custom-scrollbar-hidden whitespace-nowrap max-w-full gap-1">
                                 <button
+                                    data-tab-btn="learning"
                                     onClick={() => setActiveTableTab('learning')}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all ${activeTableTab === 'learning' ? 'bg-tree-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'learning' ? 'bg-tree-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                                 >
                                     学習・プログラム
                                 </button>
                                 <button
+                                    data-tab-btn="transport"
                                     onClick={() => setActiveTableTab('transport')}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all ${activeTableTab === 'transport' ? 'bg-wood-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'transport' ? 'bg-wood-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                                 >
                                     送迎・終了
                                 </button>
                                 <button
+                                    data-tab-btn="copy"
                                     onClick={() => setActiveTableTab('copy')}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all ${activeTableTab === 'copy' ? 'bg-apple-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'copy' ? 'bg-apple-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                                 >
                                     通信コピー
+                                </button>
+                                <button
+                                    data-tab-btn="futurePlan"
+                                    onClick={() => setActiveTableTab('futurePlan')}
+                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'futurePlan' ? 'bg-tree-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                >
+                                    今後の予定
+                                </button>
+                                <button
+                                    data-tab-btn="remarks"
+                                    onClick={() => setActiveTableTab('remarks')}
+                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'remarks' ? 'bg-wood-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                >
+                                    備考
                                 </button>
                             </div>
                         </div>
@@ -2024,16 +2415,39 @@ export default function App() {
                             <table className="w-full border-collapse table-fixed">
                                 <thead>
                                     <tr className="bg-slate-50/50 border-b border-slate-100">
-                                        <th className="sticky left-0 z-30 bg-slate-50 border-r border-slate-100 w-[30%] lg:w-[15%] min-w-[110px] p-2 md:p-4 text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] text-left relative animate-all">
+                                        <th className="sticky left-0 z-30 bg-slate-50 border-r border-slate-100 w-[30%] lg:w-[10%] min-w-[110px] p-2 md:p-4 text-[10px] md:text-[12px] font-black text-slate-400 uppercase tracking-[0.2em] text-left relative animate-all">
                                             <span>児童氏名</span>
                                         </th>
 
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[35%] lg:w-[20%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`}>学習</th>
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[35%] lg:w-[20%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`}>プログラム</th>
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[23%] lg:w-[10%] min-w-[60px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>送迎</th>
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[23%] lg:w-[10%] min-w-[60px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>終了</th>
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[24%] lg:w-[12%] min-w-[75px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>迎え場所</th>
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[22%] min-w-[200px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'copy' ? 'table-cell' : 'hidden'} lg:table-cell`}>ツリー通信コピー</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[35%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`}>学習</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[35%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`}>プログラム</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[23%] lg:w-[6%] min-w-[60px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>送迎</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[23%] lg:w-[6%] min-w-[60px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>終了</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[24%] lg:w-[8%] min-w-[75px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>迎え場所</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[14%] min-w-[200px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'copy' ? 'table-cell' : 'hidden'} lg:table-cell`}>
+                                            <div className="flex flex-col items-center gap-1.5 py-1">
+                                                <span>ツリー通信コピー</span>
+                                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                                    <button
+                                                        onClick={toggleCopySelectionMode}
+                                                        className={`px-2 py-0.5 rounded-full text-[9px] font-black border transition-all active:scale-95 ${isCopySelectionMode ? 'bg-green-600 border-green-700 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                                                    >
+                                                        {isCopySelectionMode ? '選択解除' : '兄弟コピー'}
+                                                    </button>
+                                                    {isCopySelectionMode && (
+                                                        <button
+                                                            onClick={handleCopySelectedCommunications}
+                                                            disabled={selectedChildIdsForCopy.length === 0}
+                                                            className={`px-2 py-0.5 rounded-full text-[9px] font-black border transition-all ${selectedChildIdsForCopy.length > 0 ? 'bg-apple-600 border-apple-700 text-white shadow-sm active:scale-95' : 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed'}`}
+                                                        >
+                                                            コピー ({selectedChildIdsForCopy.length})
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[14%] min-w-[200px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'futurePlan' ? 'table-cell' : 'hidden'} lg:table-cell`}>今後の予定</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[14%] min-w-[200px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'remarks' ? 'table-cell' : 'hidden'} lg:table-cell`}>備考</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -2064,7 +2478,11 @@ export default function App() {
                                                                         return;
                                                                     }
                                                                     if (lockingChildId) return;
-                                                                    if (!isPlaceholder) { handleOpenChildPanel(child.id, 'tree'); }
+                                                                    if (!isPlaceholder) {
+                                                                        handleOpenChildPanel(child.id, 'tree');
+                                                                    } else {
+                                                                        setShowAddChildModal(true);
+                                                                    }
                                                                 }}
                                                                 onMouseDown={(e) => {
                                                                     if (!isPlaceholder && !isLocked && !lockingChildId) startLongPress(e, child.id, 'regular');
@@ -2087,8 +2505,8 @@ export default function App() {
                                                                 onContextMenu={(e) => {
                                                                     if (!isPlaceholder) e.preventDefault();
                                                                 }}
-                                                                disabled={isLocked || !!lockingChildId}
-                                                                className={`flex-1 text-left transition-colors flex flex-col min-w-0 longpress-safe select-none ${isLocked ? 'text-slate-400 cursor-not-allowed' : isPlaceholder ? 'text-slate-300 cursor-default' : 'hover:text-tree-600'}`}>
+                                                                disabled={!isPlaceholder && (isLocked || !!lockingChildId)}
+                                                                className={`flex-1 text-left transition-colors flex flex-col min-w-0 longpress-safe select-none ${isLocked ? 'text-slate-400 cursor-not-allowed' : isPlaceholder ? 'text-slate-300 cursor-pointer hover:text-tree-600 hover:bg-slate-50/50' : 'hover:text-tree-600'}`}>
                                                                 <span className="whitespace-nowrap font-black block text-sm md:text-base flex items-center gap-1.5">
                                                                     {lockingChildId === child.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-tree-600" />}
                                                                     {child.lastName ? `${child.lastName} ${child.firstName}` : (child.name || '名称未設定')}
@@ -2164,20 +2582,52 @@ export default function App() {
                                                 <td className={`p-3 border-r border-slate-100/50 text-center ${isLocked ? 'bg-slate-100/40' : ''} ${activeTableTab === 'copy' ? 'table-cell' : 'hidden'} lg:table-cell`}>
                                                     {!isPlaceholder && (
                                                         <div className="flex flex-row items-center justify-center gap-4">
-                                                            <button
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    const text = results[child.id]?.D || '';
-                                                                    const name = child.lastName ? `${child.lastName} ${child.firstName}` : child.name;
-                                                                    handleCopySingle(child.id, name, text);
-                                                                }}
-                                                                disabled={isLocked}
-                                                                className={`px-2 py-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${isLocked ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed' : copiedChildId === child.id ? 'bg-green-100 border-green-300 text-green-700' : results[child.id]?.D?.trim() ? 'bg-white border-tree-200 text-tree-600 hover:bg-tree-50 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100'}`}
-                                                                title={isLocked ? '他ユーザーが編集中のためコピーできません' : copiedChildId === child.id ? 'コピー完了' : results[child.id]?.D?.trim() ? '今日のツリー通信をコピー' : 'ツリー通信未入力'}
-                                                            >
-                                                                {copiedChildId === child.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                                                                <span className="text-[10px] font-black tracking-wider">{copiedChildId === child.id ? 'コピー完了' : 'コピー'}</span>
-                                                            </button>
+                                                            {isCopySelectionMode ? (
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        toggleCopySelection(child.id);
+                                                                    }}
+                                                                    disabled={isLocked || !results[child.id]?.D?.trim()}
+                                                                    className={`px-3 py-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1.5 min-w-[75px] ${
+                                                                        !results[child.id]?.D?.trim()
+                                                                            ? 'bg-slate-50 border-slate-200 text-slate-300 cursor-not-allowed'
+                                                                            : selectedChildIdsForCopy.includes(child.id)
+                                                                                ? 'bg-green-600 border-green-700 text-white shadow-sm font-black'
+                                                                                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300 shadow-sm'
+                                                                    }`}
+                                                                    title={isLocked ? '編集中のため選択できません' : !results[child.id]?.D?.trim() ? 'ツリー通信未入力' : '一括コピーの対象に選択'}
+                                                                >
+                                                                    {selectedChildIdsForCopy.includes(child.id) ? (
+                                                                        <>
+                                                                            <span className="w-4 h-4 bg-white text-green-700 rounded-full flex items-center justify-center text-[10px] font-black leading-none shadow-sm">
+                                                                                {selectedChildIdsForCopy.indexOf(child.id) + 1}
+                                                                            </span>
+                                                                            <span className="text-[10px] font-black tracking-wider">選択中</span>
+                                                                        </>
+                                                                    ) : (
+                                                                        <>
+                                                                            <Copy className="w-3.5 h-3.5 opacity-60" />
+                                                                            <span className="text-[10px] font-bold tracking-wider">選択する</span>
+                                                                        </>
+                                                                    )}
+                                                                </button>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        const text = results[child.id]?.D || '';
+                                                                        const name = child.lastName ? `${child.lastName} ${child.firstName}` : child.name;
+                                                                        handleCopySingle(child.id, name, text);
+                                                                    }}
+                                                                    disabled={isLocked}
+                                                                    className={`px-2 py-1.5 rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${isLocked ? 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed' : copiedChildId === child.id ? 'bg-green-100 border-green-300 text-green-700' : results[child.id]?.D?.trim() ? 'bg-white border-tree-200 text-tree-600 hover:bg-tree-50 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100'}`}
+                                                                    title={isLocked ? '他ユーザーが編集中のためコピーできません' : copiedChildId === child.id ? 'コピー完了' : results[child.id]?.D?.trim() ? '今日のツリー通信をコピー' : 'ツリー通信未入力'}
+                                                                >
+                                                                    {copiedChildId === child.id ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                                                                    <span className="text-[10px] font-black tracking-wider">{copiedChildId === child.id ? 'コピー完了' : 'コピー'}</span>
+                                                                </button>
+                                                            )}
                                                             <div onClick={(e) => e.stopPropagation()}>
                                                                 <select
                                                                     value={row.assignedStaff || ''}
@@ -2208,6 +2658,34 @@ export default function App() {
                                                                 />
                                                                 <span className="text-[10px] font-bold">送信</span>
                                                             </label>
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className={`p-3 md:p-5 text-[10px] md:text-[12px] border-r border-slate-100 leading-relaxed font-bold align-top transition-colors ${isLocked ? 'bg-slate-100/60 text-slate-400 cursor-not-allowed' : lockingChildId === child.id ? 'cursor-wait text-slate-600' : 'cursor-pointer hover:bg-slate-50 text-slate-600'} ${selectedChildId === child.id ? 'bg-tree-50/20' : ''} ${activeTableTab === 'futurePlan' ? 'table-cell' : 'hidden'} lg:table-cell`} onClick={() => {
+                                                    if (isLocked) {
+                                                        showToast(`${lockOwner.userName || lockOwner.userEmail || '他ユーザー'}が入力中のため編集できません。`);
+                                                        return;
+                                                    }
+                                                    if (lockingChildId) return;
+                                                    if (!isPlaceholder) { handleOpenChildPanel(child.id, 'futurePlan'); }
+                                                }}>
+                                                    {!isPlaceholder && (
+                                                        <div className="tracking-tight whitespace-pre-wrap break-all text-slate-600">
+                                                            {results[child.id]?.futurePlan || ''}
+                                                        </div>
+                                                    )}
+                                                </td>
+                                                <td className={`p-3 md:p-5 text-[10px] md:text-[12px] border-r border-slate-100 leading-relaxed font-bold align-top transition-colors ${isLocked ? 'bg-slate-100/60 text-slate-400 cursor-not-allowed' : lockingChildId === child.id ? 'cursor-wait text-slate-600' : 'cursor-pointer hover:bg-slate-50 text-slate-600'} ${selectedChildId === child.id ? 'bg-tree-50/20' : ''} ${activeTableTab === 'remarks' ? 'table-cell' : 'hidden'} lg:table-cell`} onClick={() => {
+                                                    if (isLocked) {
+                                                        showToast(`${lockOwner.userName || lockOwner.userEmail || '他ユーザー'}が入力中のため編集できません。`);
+                                                        return;
+                                                    }
+                                                    if (lockingChildId) return;
+                                                    if (!isPlaceholder) { handleOpenChildPanel(child.id, 'chat'); }
+                                                }}>
+                                                    {!isPlaceholder && (
+                                                        <div className="tracking-tight whitespace-pre-wrap break-all text-slate-600">
+                                                            {getRemarksText(child.id)}
                                                         </div>
                                                     )}
                                                 </td>
@@ -2459,144 +2937,8 @@ export default function App() {
 
             <CalendarModal show={showCalendarModal} onClose={() => setShowCalendarModal(false)} setSelectedDate={handleDateChange} selectedDate={selectedDate} existingReportDates={existingReportDates} />
             <AddChildModal show={showAddChildModal} onClose={() => setShowAddChildModal(false)} masterChildren={masterChildren} currentChildren={children} onAddChildren={handleAddMultipleFromMaster} />
-            <NoticeModal
-                show={showNoticeModal}
-                onClose={() => setShowNoticeModal(false)}
-                notice={globalLog.notice}
-                onSave={(val) => updateGlobalLog('notice', val)}
-            />
 
-            {showProgramModal && (
-                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-300">
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setShowProgramModal(false)} />
-                    <div className="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col border border-white animate-in zoom-in-95 duration-300">
-                        {/* Header */}
-                        <div className="p-6 bg-wood-600 flex items-center justify-between shadow-lg flex-shrink-0">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
-                                    <ClipboardList className="w-5 h-5 text-white" />
-                                </div>
-                                <div>
-                                    <h3 className="font-black text-lg text-white tracking-tight">本日のプログラム登録</h3>
-                                    <p className="text-[9px] font-bold text-wood-100 uppercase tracking-widest opacity-80">Register Today's Program</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setShowProgramModal(false)} className="p-2 hover:bg-white/10 rounded-xl transition-all text-white/80 hover:text-white">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        
-                        {/* Body */}
-                        <div className="p-6 bg-slate-50/50 flex flex-col gap-5 overflow-y-auto max-h-[60vh] custom-scrollbar">
-                            {(() => {
-                                const currentPrograms = globalLog.programs || (globalLog.programTitle || globalLog.programSummary 
-                                    ? [{ title: globalLog.programTitle || '', summary: globalLog.programSummary || '' }]
-                                    : [{ title: '', summary: '' }]);
-                                    
-                                return (
-                                    <>
-                                        <div className="flex flex-col gap-6">
-                                            {currentPrograms.map((prog, idx) => (
-                                                <div key={idx} className="bg-white border border-slate-100 p-5 rounded-2xl flex flex-col gap-3.5 shadow-sm relative group animate-in slide-in-from-bottom-2">
-                                                    {/* Index & Delete Action */}
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-[10px] font-black text-wood-600 bg-wood-50 px-2 py-0.5 rounded-full border border-wood-100/50">
-                                                            プログラム #{idx + 1}
-                                                        </span>
-                                                        {currentPrograms.length > 1 && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    const updated = currentPrograms.filter((_, i) => i !== idx);
-                                                                    updateGlobalPrograms(updated);
-                                                                }}
-                                                                className="p-1 text-slate-400 hover:text-apple-600 hover:bg-apple-50 rounded-lg transition-all active:scale-90"
-                                                                title="このプログラムを削除"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                    
-                                                    {/* Title Input */}
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
-                                                            プログラムのタイトル
-                                                        </label>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="例：ちぎり絵制作、プラ板キーホルダー作りなど..."
-                                                            value={prog.title || ''}
-                                                            onChange={(e) => {
-                                                                const updated = [...currentPrograms];
-                                                                updated[idx] = { ...updated[idx], title: e.target.value };
-                                                                updateGlobalPrograms(updated);
-                                                            }}
-                                                            className="w-full px-4 py-2.5 bg-slate-50/50 border border-slate-100 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-wood-400 focus:bg-white transition-all shadow-inner"
-                                                        />
-                                                    </div>
-                                                    
-                                                    {/* Summary TextArea */}
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
-                                                            プログラムの概要
-                                                        </label>
-                                                        <textarea
-                                                            rows="4"
-                                                            placeholder="具体的な手順やねらいを入力してください。ツリー通信の入力画面でワンクリックで引用できます。"
-                                                            value={prog.summary || ''}
-                                                            onChange={(e) => {
-                                                                const updated = [...currentPrograms];
-                                                                updated[idx] = { ...updated[idx], summary: e.target.value };
-                                                                updateGlobalPrograms(updated);
-                                                            }}
-                                                            className="w-full px-4 py-2.5 bg-slate-50/50 border border-slate-100 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:border-wood-400 focus:bg-white transition-all leading-relaxed shadow-inner resize-none"
-                                                        />
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                        
-                                        {/* Add Program Button */}
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const updated = [...currentPrograms, { title: '', summary: '' }];
-                                                updateGlobalPrograms(updated);
-                                            }}
-                                            className="w-full py-3.5 border-2 border-dashed border-slate-200 hover:border-wood-400 hover:bg-wood-50/20 text-slate-400 hover:text-wood-600 rounded-2xl font-black text-xs transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                                        >
-                                            <Plus className="w-4 h-4" />
-                                            <span>プログラムを追加</span>
-                                        </button>
-                                    </>
-                                );
-                            })()}
-                        </div>
-                        
-                        {/* Footer */}
-                        <div className="p-6 bg-white border-t border-slate-100 flex items-center justify-between flex-shrink-0">
-                            <button
-                                onClick={() => {
-                                    if (confirm('登録内容をクリアしますか？')) {
-                                        updateGlobalPrograms([{ title: '', summary: '' }]);
-                                    }
-                                }}
-                                className="px-5 py-2.5 font-bold text-xs text-apple-500 hover:bg-apple-50 rounded-xl transition-all"
-                            >
-                                クリア
-                            </button>
-                            <button
-                                onClick={() => setShowProgramModal(false)}
-                                className="px-6 py-3 bg-wood-600 hover:bg-wood-700 text-white rounded-xl font-black text-xs shadow-md transition-all active:scale-95 flex items-center gap-2 uppercase tracking-widest"
-                            >
-                                <Check className="w-4 h-4" />
-                                <span>閉じる</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+
             {showSettingsModal && (
                 <SettingsModal
                     onClose={() => setShowSettingsModal(false)}
@@ -2616,11 +2958,24 @@ export default function App() {
                 />
             )}
 
-            <ActivitiesModal
-                show={showActivitiesModal}
-                onClose={() => setShowActivitiesModal(false)}
-                activities={globalLog.activities}
-                onSave={(val) => updateGlobalLog('activities', val)}
+            <CSVImportModal
+                show={showCSVImportModal}
+                onClose={() => setShowCSVImportModal(false)}
+                masterChildren={masterChildren}
+                offices={offices}
+                selectedOffice={selectedOffice}
+                selectedDate={selectedDate}
+                cs={cs}
+                onRefresh={() => fetchDailyData(selectedDate, selectedOffice?.id)}
+                onImportSandbox={(date, officeId, sandboxReport) => {
+                    if (date === selectedDate && officeId === selectedOffice?.id) {
+                        setChildren(sandboxReport.children || []);
+                        setDailyTable(sandboxReport.dailyTable || {});
+                        setResults(sandboxReport.results || {});
+                        setSummaryC(sandboxReport.summaryC || '');
+                    }
+                    setIsSandboxMode(true);
+                }}
             />
 
             <LogModal
@@ -2669,6 +3024,14 @@ export default function App() {
                         </button>
 
                         <button
+                            onClick={() => { setShowCSVImportModal(true); setIsMobileMenuOpen(false); }}
+                            className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
+                        >
+                            <FileSpreadsheet className="w-4 h-4 text-indigo-500" />
+                            <span>CSVインポート</span>
+                        </button>
+
+                        <button
                             id="guide-attendance-mobile-btn"
                             onClick={() => { setShowAttendanceModal(true); setIsMobileMenuOpen(false); }}
                             className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
@@ -2677,23 +3040,7 @@ export default function App() {
                             <span>勤怠管理</span>
                         </button>
 
-                        <button
-                            id="guide-activities-mobile-btn"
-                            onClick={() => { setShowActivitiesModal(true); setIsMobileMenuOpen(false); }}
-                            className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
-                        >
-                            <ClipboardList className="w-4 h-4 text-slate-400" />
-                            <span>業務活動内容登録</span>
-                        </button>
 
-                        <button
-                            id="guide-notice-mobile-btn"
-                            onClick={() => { setShowNoticeModal(true); setIsMobileMenuOpen(false); }}
-                            className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
-                        >
-                            <FileText className="w-4 h-4 text-slate-400" />
-                            <span>全体的な様子登録</span>
-                        </button>
 
                         <button
                             onClick={() => { setShowHelpGuide(true); setIsMobileMenuOpen(false); }}

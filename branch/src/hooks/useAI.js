@@ -68,7 +68,7 @@ export function useAI() {
     }, []);
 
     const generateDocuments = useCallback(async ({
-        children, selectedGenerateIds, dailyMessages, results, summaryC, selectedDate, staffList = [], onComplete
+        children, selectedGenerateIds, dailyMessages, results, summaryC, selectedDate, staffList = [], globalLog = {}, onComplete
     }) => {
         const toGenerate = children.filter(c => selectedGenerateIds.includes(c.id));
         const quota = ensureReset(getQuota());
@@ -82,6 +82,13 @@ export function useAI() {
             alert(`本日の残り生成回数は${remaining}回です。対象を減らしてください。`);
             return;
         }
+
+        const currentPrograms = globalLog.programs || (globalLog.programTitle || globalLog.programSummary 
+            ? [{ title: globalLog.programTitle || '', summary: globalLog.programSummary || '' }]
+            : []);
+        const programsContext = currentPrograms.length > 0 
+            ? currentPrograms.map((p, idx) => `[プログラム #${idx + 1}] タイトル: ${p.title}\n内容・手順: ${p.summary}`).join('\n')
+            : '登録なし';
 
         setLoading(true);
         setProgress(0);
@@ -114,9 +121,13 @@ export function useAI() {
                     : '{"B_result": "...", "B_plan": "...", "B_item": "...", "D": "..."}';
 
                 const prompt = `
-あなたは療育施設の事務担当です。以下の児童メモを元に、書類を作成しJSONで返してください。
+あなたは療育施設の事務担当です。以下の情報（本日のプログラム内容、および個別児童のメモ）を元に、書類を作成しJSONで返してください。
 
-メモ内容: ${content}
+【本日のプログラム（施設全体）】
+${programsContext}
+
+【個別児童のメモ】
+${content}
 
 【共通ルール】
 - 児童名・実名や「〇〇君」「〇〇さん」などの呼称は一切使用しないでください。
@@ -132,6 +143,7 @@ export function useAI() {
 - 文字数: 300文字前後
 - トーン: 保護者向けのやわらかい文章。療育記録調や専門用語は禁止。
 ${getStaffInstruction(staffList.find(s => s.name === child.staff))}
+- 本日のプログラムの内容を反映させて、児童がその中でどう過ごしたか、つまずきや成長を交えて記述してください。
 - 否定的な表現は使わず、つまずきは「時間がかかった」「迷う様子」などで表現する。
 ${forceSheetInstruction}
 

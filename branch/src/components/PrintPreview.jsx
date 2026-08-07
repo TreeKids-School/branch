@@ -23,36 +23,37 @@ const PREVIEW_STYLES = `
     box-shadow: 0 15px 35px rgba(0,0,0,0.4);
     box-sizing: border-box;
     font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', sans-serif;
-    font-size: 9pt;
+    font-size: 10pt;
     color: black;
     position: relative;
     border-radius: 4px;
+    text-align: left;
   }
-  .print-preview-paper .header-table { width: 100%; border-collapse: collapse; margin-bottom: 0; }
+  .print-preview-paper .header-table { width: 277mm; border-collapse: collapse; margin-bottom: 0; table-layout: fixed; }
   .print-preview-paper .header-table td { border: 1px solid black; padding: 4px; vertical-align: top; }
-  .print-preview-paper .title { font-size: 16pt; font-weight: bold; padding: 10px 0; border: none !important; }
+  .print-preview-paper .title { font-size: 18pt; font-weight: bold; padding: 12px 0; border: none !important; }
   .print-preview-paper .date-cell { border: none !important; text-align: right; font-size: 12pt; font-weight: bold; }
 
-  .print-preview-paper .staff-table { width: 100%; border-collapse: collapse; }
-  .print-preview-paper .staff-table td { border: 1px solid black; padding: 2px 5px; height: 1.5em; text-align: center; color: black; }
-  .print-preview-paper .role-cell { width: 80px; background: #eee; font-weight: bold; font-size: 8pt; }
-  .print-preview-paper .time-cell { width: 40px; font-size: 7pt; }
-  .print-preview-paper .name-cell { width: 120px; }
+  .print-preview-paper .staff-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .print-preview-paper .staff-table td { border: 1px solid black; padding: 2px 4px; height: 1.6em; text-align: center; color: black; font-size: 9pt; }
+  .print-preview-paper .role-cell { width: 30%; background: #eee; font-weight: bold; font-size: 9pt; }
+  .print-preview-paper .time-cell { width: 20%; font-size: 8.5pt; }
+  .print-preview-paper .name-cell { width: 50%; }
 
-  .print-preview-paper .notes-section { height: 100px; padding: 5px; font-size: 8pt; white-space: pre-wrap; word-break: break-all; text-align: left; }
-  .print-preview-paper .highlight-section { height: 100px; padding: 5px; font-size: 7pt; line-height: 1.2; text-align: left; }
-  .print-preview-paper .section-label { background: #eee; font-weight: bold; text-align: center !important; }
+  .print-preview-paper .notes-section { height: 70px; padding: 4px; font-size: 9.5pt; white-space: pre-wrap; word-break: break-all; text-align: left; }
+  .print-preview-paper .highlight-section { height: 70px; padding: 4px; font-size: 9.5pt; line-height: 1.2; text-align: left; }
+  .print-preview-paper .section-label { background: #eee; font-weight: bold; text-align: center !important; font-size: 9.5pt; }
 
-  .print-preview-paper .children-table { width: 100%; border-collapse: collapse; margin-top: -1px; }
+  .print-preview-paper .children-table { width: 277mm; border-collapse: collapse; margin-top: -1px; table-layout: fixed; }
   .print-preview-paper .children-table th, .print-preview-paper .children-table td { border: 1px solid black; padding: 3px 5px; vertical-align: middle; color: black; }
-  .print-preview-paper .children-table th { background: #eee; font-size: 8pt; font-weight: bold; }
-  .print-preview-paper .col-no { width: 30px; text-align: center; }
-  .print-preview-paper .col-name { width: 120px; }
-  .print-preview-paper .col-time { width: 45px; text-align: center; font-size: 7.5pt; }
-  .print-preview-paper .col-loc { width: 60px; text-align: center; font-size: 7.5pt; }
-  .print-preview-paper .col-study { width: 180px; font-size: 7.5pt; white-space: pre-wrap; word-break: break-all; text-align: left; }
-  .print-preview-paper .col-prog { width: 130px; font-size: 7.5pt; white-space: pre-wrap; word-break: break-all; text-align: left; }
-  .print-preview-paper .col-notes { font-size: 7.5pt; word-break: break-all; text-align: left; }
+  .print-preview-paper .children-table th { background: #eee; font-size: 9.5pt; font-weight: bold; }
+  .print-preview-paper .col-no { width: 3%; text-align: center; font-size: 9pt; }
+  .print-preview-paper .col-name { width: 11%; font-size: 9pt; }
+  .print-preview-paper .col-time { width: 5%; text-align: center; font-size: 8.5pt; }
+  .print-preview-paper .col-loc { width: 6%; text-align: center; font-size: 8.5pt; }
+  .print-preview-paper .col-study { width: 18%; font-size: 9pt; white-space: pre-wrap; word-break: break-all; text-align: left; }
+  .print-preview-paper .col-prog { width: 17%; font-size: 9pt; white-space: pre-wrap; word-break: break-all; text-align: left; }
+  .print-preview-paper .col-notes { width: 30%; font-size: 9pt; word-break: break-all; text-align: left; }
 
   .print-preview-paper .sub-head { background: #f9f9f9; text-align: center; font-weight: bold; font-size: 10pt; }
 `;

@@ -1,6 +1,6 @@
 {
     "hosting": {
-        "site": "test-branch-46c5a",
+        "site": "octopus2-ae965",
         "public": "dist",
         "ignore": [
             "firebase.json",
