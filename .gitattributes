@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────
+#  改行コードの統一ルール
+#  目的: Windows で保存するたびに全ファイルが
+#        「変更あり」に見えてしまう問題を防ぐ
+# ─────────────────────────────────────────────
+
+# 既定: テキストファイルは LF に統一する
+* text=auto eol=lf
+
+# ⚠️ Windows バッチファイルは CRLF を維持する
+#    (LF にするとダブルクリックで動かなくなる恐れがあるため)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# バイナリファイル: 改行変換を一切行わない
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
+*.woff   binary
+*.woff2  binary
+*.bundle binary
