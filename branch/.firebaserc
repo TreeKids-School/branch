@@ -1,6 +1,5 @@
 {
   "projects": {
-    "default": "octopus2-ae965",
-    "test": "test-octopus-5b254"
+    "default": "test-octopus-5b254"
   }
 }

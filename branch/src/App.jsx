@@ -25,8 +25,10 @@ import AddChildModal from './components/AddChildModal';
 import AttendanceModal from './components/AttendanceModal';
 import LogModal from './components/LogModal';
 import CSVImportModal from './components/CSVImportModal';
+import BackupImportModal from './components/BackupImportModal';
 
 import { printAllDocuments, GROUP1_ITEMS, GROUP2_ITEMS } from './utils/print';
+import { toCSV } from './utils/csv';
 
 
 
@@ -114,6 +116,11 @@ export default function App() {
     const [showAddChildModal, setShowAddChildModal] = useState(false);
     const [showAttendanceModal, setShowAttendanceModal] = useState(false);
     const [showCSVImportModal, setShowCSVImportModal] = useState(false);
+    const [showBackupImportModal, setShowBackupImportModal] = useState(false);
+    const [mobileExportOpen, setMobileExportOpen] = useState(false);
+    const [mobileImportOpen, setMobileImportOpen] = useState(false);
+    const [showExportMenu, setShowExportMenu] = useState(false);
+    const [showImportMenu, setShowImportMenu] = useState(false);
     const [isStaffCollapsed, setIsStaffCollapsed] = useState(false);
     const [isNoticeCollapsed, setIsNoticeCollapsed] = useState(false);
     const [isProgramCollapsed, setIsProgramCollapsed] = useState(false);
@@ -320,19 +327,17 @@ export default function App() {
 
         // 横方向のスワイプ判定（縦方向の移動より横方向が大きく、かつしきい値が60px以上）
         if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 60) {
-            const tabs = ['learning', 'transport', 'copy', 'futurePlan', 'remarks'];
+            const tabs = ['learning', 'program', 'transport', 'copy', 'futurePlan', 'remarks'];
             const currentIndex = tabs.indexOf(activeTableTab);
 
             if (diffX < 0) {
-                // 左フリック（右から左へスワイプ） ➔ 次のタブへ
-                if (currentIndex < tabs.length - 1) {
-                    setActiveTableTab(tabs[currentIndex + 1]);
-                }
+                // 左フリック（右から左へスワイプ） ➔ 次のタブへ（ループ）
+                const nextIndex = (currentIndex + 1) % tabs.length;
+                setActiveTableTab(tabs[nextIndex]);
             } else {
-                // 右フリック（左から右へスワイプ） ➔ 前のタブへ
-                if (currentIndex > 0) {
-                    setActiveTableTab(tabs[currentIndex - 1]);
-                }
+                // 右フリック（左から右へスワイプ） ➔ 前のタブへ（ループ）
+                const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+                setActiveTableTab(tabs[prevIndex]);
             }
         }
     };
@@ -1544,16 +1549,54 @@ export default function App() {
             .map(id => children.find(c => c.id === id))
             .filter(Boolean);
 
-        const combinedNames = getCombinedChildrenNames(activeSelectedChildren);
-        let text = `${combinedNames}\n\n`;
-        let count = 0;
+        // 兄弟グループ化（同じ姓でグループ）
+        const lastNameGroups = {};
+        const orderOfLastNames = [];
 
         activeSelectedChildren.forEach(child => {
-            const result = results[child.id] || {};
-            const content = result.D || '';
-            if (content.trim()) {
-                text += `${content.trim()}\n\n`;
-                count++;
+            const ln = child.lastName || '';
+            if (ln) {
+                if (!lastNameGroups[ln]) {
+                    lastNameGroups[ln] = [];
+                    orderOfLastNames.push(ln);
+                }
+                lastNameGroups[ln].push(child);
+            } else {
+                const key = `_empty_${child.id}`;
+                lastNameGroups[key] = [child];
+                orderOfLastNames.push(key);
+            }
+        });
+
+        let text = '';
+        let count = 0;
+
+        orderOfLastNames.forEach(key => {
+            const group = lastNameGroups[key];
+
+            // 名前を結合（山田太郎さん次郎さん）
+            let nameStr;
+            if (key.startsWith('_empty_')) {
+                nameStr = `${group[0].name || '名称未設定'}さん`;
+            } else if (group.length > 1) {
+                // 兄弟をまとめた時だけ【】で囲む
+                nameStr = `【${key}${group.map(c => `${c.firstName}さん`).join('')}】`;
+            } else {
+                nameStr = `${key}${group[0].firstName}さん`;
+            }
+
+            // コンテンツを収集（重複除去）
+            const contents = [];
+            group.forEach(child => {
+                const content = (results[child.id]?.D || '').trim();
+                if (content && !contents.includes(content)) {
+                    contents.push(content);
+                }
+            });
+
+            if (contents.length > 0) {
+                text += `${nameStr}\n${contents.join('\n')}\n\n`;
+                count += group.length;
             }
         });
 
@@ -1566,7 +1609,7 @@ export default function App() {
 
         navigator.clipboard.writeText(text)
             .then(() => {
-                alert(`選択した${count}名分のツリー通信を選択順で一括コピーしました！`);
+                alert(`${count}名分のツリー通信を兄弟結合してコピーしました！`);
                 setSelectedChildIdsForCopy([]);
                 setIsCopySelectionMode(false);
             })
@@ -1669,6 +1712,102 @@ export default function App() {
         }).filter(t => t).join(' / ');
     };
 
+    const exportBackupCSV = async (range = 'day') => {
+        const officeId = selectedOffice?.id;
+        if (!officeId) { showToast('事業所が選択されていません'); return; }
+
+        // 対象日付リストを生成
+        const today = new Date(selectedDate);
+        const dates = [];
+        if (range === 'day') {
+            dates.push(selectedDate);
+        } else {
+            let startDate = new Date(today);
+            if (range === 'week') startDate.setDate(today.getDate() - 6);
+            else if (range === 'month') startDate.setMonth(today.getMonth() - 1);
+            else if (range === 'year') startDate.setFullYear(today.getFullYear() - 1);
+            else if (range === 'all') startDate = new Date('2024-01-01');
+            for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
+                dates.push(d.toISOString().split('T')[0]);
+            }
+        }
+
+        showToast(`${dates.length}日分のデータを取得中...`);
+
+        // 末尾の「復元用データ」は取り込み時の完全復元用（人が読む必要はない）
+        const headers = ["児童名", "日付", "学習", "プログラム", "送迎時間", "終了時間", "迎え場所", "ツリー通信", "チャットメモ", "今後の予定", "備考", "復元用データ"];
+        const allRows = [];
+
+        for (const dateStr of dates) {
+            let dayChildren, dayResults, dayMessages, dayTable;
+            if (dateStr === selectedDate) {
+                // 現在表示中の日はローカルデータを使用
+                dayChildren = children;
+                dayResults = results;
+                dayMessages = dailyMessages;
+                dayTable = dailyTable;
+            } else {
+                // 他の日はFirestoreから取得
+                try {
+                    const data = await cs({ action: 'getReport', date: dateStr, officeId });
+                    if (!data || typeof data !== 'object') continue;
+                    dayChildren = Array.isArray(data.children) ? data.children : [];
+                    dayResults = data.results || {};
+                    dayMessages = data.messages || {};
+                    dayTable = data.dailyTable || {};
+                } catch { continue; }
+            }
+
+            dayChildren.filter(c => !c.isPlaceholder).forEach(child => {
+                const row = dayTable[child.id] || {};
+                const result = dayResults[child.id] || {};
+                const msgs = dayMessages[child.id] || [];
+                const chatText = msgs.map(m => `${m.tag || ''}${m.text || ''}`).join(' | ');
+                const studyMsgs = msgs.filter(m => {
+                    const hasTag = m.tag && (m.tag === '【ツリー式学習】' || m.tag === '【学習】' || m.tag === '【宿題】' || m.tag === '【プリント】');
+                    const hasPrefix = m.text && (m.text.includes('【ツリー式学習】') || m.text.includes('【学習】') || m.text.includes('【宿題】') || m.text.includes('【プリント】'));
+                    return hasTag || hasPrefix;
+                }).map(m => { let t = m.text.trim(); if (m.tag && !t.includes(m.tag)) t = `${m.tag}${t}`; return t; }).filter(t => t).join('\n');
+                const progMsgs = msgs.filter(m => {
+                    const hasTag = m.tag && m.tag === '【プログラム】';
+                    const hasPrefix = m.text && m.text.includes('【プログラム】');
+                    return hasTag || hasPrefix;
+                }).map(m => { let t = m.text.trim(); if (m.tag && !t.includes(m.tag)) t = `${m.tag}${t}`; return t; }).filter(t => t).join(' / ');
+                const futureText = msgs.filter(m => m.tag === '【今後の予定】' || (m.text && m.text.includes('【今後の予定】'))).map(m => m.text).join(' | ');
+                const remarksText = msgs.filter(m => m.tag === '【備考】' || (m.text && m.text.startsWith('【備考】'))).map(m => m.text).join(' | ');
+                // 復元用データ: メモ配列・書類・表の行を、そのままの形で保持する
+                let restoreJSON = '';
+                try {
+                    restoreJSON = JSON.stringify({ v: 1, m: msgs, r: result, t: row });
+                } catch { restoreJSON = ''; }
+
+                allRows.push([
+                    child.name, dateStr, studyMsgs, progMsgs,
+                    row.transportTime || '', row.endTime || '', row.pickupLocation || '',
+                    result.D || '', chatText, futureText, remarksText,
+                    restoreJSON
+                ]);
+            });
+        }
+
+        if (allRows.length === 0) { showToast('エクスポートするデータがありません'); return; }
+
+        const rangeLabels = { day: selectedDate, week: '1週間', month: '1ヶ月', year: '1年', all: '全期間' };
+        const csvContent = '\uFEFF' + toCSV([headers, ...allRows]);
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `バックアップ_${rangeLabels[range] || selectedDate}_${selectedDate}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`${allRows.length}件のデータをエクスポートしました`);
+    };
+
+
+
     const getRemarksText = (childId) => {
         const msgs = dailyMessages[childId] || [];
         return msgs.filter(m => {
@@ -1714,7 +1853,10 @@ export default function App() {
     }
 
     return (
-        <div className="min-h-screen p-3 md:p-6 pb-24 space-y-4 md:space-y-6 max-w-[1800px] mx-auto overflow-x-hidden">
+        <div 
+            onClick={() => { if (showExportMenu) setShowExportMenu(false); if (showImportMenu) setShowImportMenu(false); }}
+            className="min-h-screen p-3 md:p-6 pb-24 space-y-4 md:space-y-6 max-w-[1800px] mx-auto overflow-x-hidden"
+        >
             {isSandboxMode && (
                 <div className="bg-amber-500 text-white px-5 py-3 rounded-2xl flex items-center justify-between shadow-lg font-black text-xs md:text-sm animate-in slide-in-from-top-4 duration-300 no-print">
                     <div className="flex items-center gap-2">
@@ -1743,9 +1885,28 @@ export default function App() {
                         </div>
                         <h1 className="text-base md:text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
                             <span>業務管理日誌</span>
-                            <span className="text-[10px] font-bold text-apple-600 bg-apple-50 border border-apple-200 px-2 py-0.5 rounded-full select-none">
-                                テストbranch
-                            </span>
+                            {offices.length > 0 ? (
+                                <div className="relative inline-flex items-center">
+                                    <select
+                                        value={selectedOffice?.id || ''}
+                                        onChange={(e) => {
+                                            const office = offices.find(o => o.id === e.target.value);
+                                            if (office) {
+                                                setSelectedOffice(office);
+                                                localStorage.setItem('care_pro_selected_office', JSON.stringify(office));
+                                            }
+                                        }}
+                                        className="text-[10px] font-bold text-tree-700 bg-tree-50 border border-tree-200 pl-2 pr-5 py-0.5 rounded-full select-none cursor-pointer appearance-none outline-none hover:bg-tree-100 transition-all"
+                                    >
+                                        {offices.map(o => (
+                                            <option key={o.id} value={o.id}>{o.name}</option>
+                                        ))}
+                                    </select>
+                                    <ChevronDown className="w-3 h-3 text-tree-500 absolute right-1.5 pointer-events-none" />
+                                </div>
+                            ) : (
+                                <span className="text-[10px] font-bold text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full select-none">未選択</span>
+                            )}
                             <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full select-none">
                                 v{APP_VERSION}
                             </span>
@@ -1796,24 +1957,74 @@ export default function App() {
                                 <span className="hidden sm:inline">印刷</span>
                             </button>
                             
-                            <button
-                                id="guide-export"
-                                onClick={() => setShowExportModal(true)}
-                                className="px-2.5 py-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-full border border-slate-200/60 hover:border-slate-300 shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
-                                title="データ出力"
-                            >
-                                <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400" />
-                                <span className="text-[10px] font-black">データ出力</span>
-                            </button>
+                            <div className="relative">
+                                <button
+                                    id="guide-export"
+                                    onClick={() => { setShowExportMenu(!showExportMenu); setShowImportMenu(false); }}
+                                    className="px-2.5 py-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-50 rounded-full border border-slate-200/60 hover:border-slate-300 shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+                                    title="エクスポート"
+                                >
+                                    <FileSpreadsheet className="w-3.5 h-3.5 text-slate-400" />
+                                    <span className="text-[10px] font-black">エクスポート</span>
+                                    <ChevronDown className="w-3 h-3 text-slate-300" />
+                                </button>
+                                {showExportMenu && (
+                                    <div className="absolute top-full left-0 mt-1 w-56 bg-white/95 backdrop-blur-xl rounded-xl shadow-xl border border-slate-200 p-1.5 z-[100] animate-in fade-in duration-200">
+                                        <button onClick={() => { setShowExportModal(true); setShowExportMenu(false); }} className="w-full px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-all flex items-center gap-2">
+                                            <FileText className="w-3.5 h-3.5 text-wood-500" />
+                                            業務管理日誌に上書き
+                                        </button>
+                                        <div className="h-px bg-slate-100 my-1" />
+                                        <div className="px-3 py-1">
+                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">CSVでエクスポート</span>
+                                        </div>
+                                        <button onClick={() => { exportBackupCSV('day'); setShowExportMenu(false); }} className="w-full px-3 py-1.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-all flex items-center gap-2">
+                                            <FileSpreadsheet className="w-3.5 h-3.5 text-tree-500" />
+                                            本日のデータ
+                                        </button>
+                                        <button onClick={() => { exportBackupCSV('week'); setShowExportMenu(false); }} className="w-full px-3 py-1.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-all flex items-center gap-2">
+                                            <FileSpreadsheet className="w-3.5 h-3.5 text-tree-500" />
+                                            1週間分
+                                        </button>
+                                        <button onClick={() => { exportBackupCSV('month'); setShowExportMenu(false); }} className="w-full px-3 py-1.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-all flex items-center gap-2">
+                                            <FileSpreadsheet className="w-3.5 h-3.5 text-tree-500" />
+                                            1ヶ月分
+                                        </button>
+                                        <button onClick={() => { exportBackupCSV('year'); setShowExportMenu(false); }} className="w-full px-3 py-1.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-all flex items-center gap-2">
+                                            <FileSpreadsheet className="w-3.5 h-3.5 text-tree-500" />
+                                            1年分
+                                        </button>
+                                        <button onClick={() => { exportBackupCSV('all'); setShowExportMenu(false); }} className="w-full px-3 py-1.5 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-all flex items-center gap-2">
+                                            <FileSpreadsheet className="w-3.5 h-3.5 text-tree-500" />
+                                            全データ
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
 
-                            <button
-                                onClick={() => setShowCSVImportModal(true)}
-                                className="px-2.5 py-1.5 text-slate-500 hover:text-indigo-700 hover:bg-indigo-50/50 rounded-full border border-slate-200/60 hover:border-indigo-200 shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
-                                title="CSVインポート"
-                            >
-                                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" />
-                                <span className="text-[10px] font-black">CSVインポート</span>
-                            </button>
+                            <div className="relative">
+                                <button
+                                    onClick={() => { setShowImportMenu(!showImportMenu); setShowExportMenu(false); }}
+                                    className="px-2.5 py-1.5 text-slate-500 hover:text-indigo-700 hover:bg-indigo-50/50 rounded-full border border-slate-200/60 hover:border-indigo-200 shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+                                    title="インポート"
+                                >
+                                    <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" />
+                                    <span className="text-[10px] font-black">インポート</span>
+                                    <ChevronDown className="w-3 h-3 text-slate-300" />
+                                </button>
+                                {showImportMenu && (
+                                    <div className="absolute top-full left-0 mt-1 w-56 bg-white/95 backdrop-blur-xl rounded-xl shadow-xl border border-slate-200 p-1.5 z-[100] animate-in fade-in duration-200">
+                                        <button onClick={() => { setShowCSVImportModal(true); setShowImportMenu(false); }} className="w-full px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-all flex items-center gap-2">
+                                            <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" />
+                                            送迎管理アプリからインポート
+                                        </button>
+                                        <button onClick={() => { setShowBackupImportModal(true); setShowImportMenu(false); }} className="w-full px-3 py-2 text-left text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-lg transition-all flex items-center gap-2">
+                                            <FileSpreadsheet className="w-3.5 h-3.5 text-tree-500" />
+                                            バックアップから復元
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
 
                             <button
                                 id="guide-attendance"
@@ -1908,15 +2119,21 @@ export default function App() {
                 
                 {/* 1. 勤怠管理 */}
                 <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
-                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-tree-50/80 border-b border-tree-100 flex-shrink-0">
+                    <div
+                        className="flex items-center justify-between gap-4 px-3 py-2 bg-tree-50/80 border-b border-tree-100 flex-shrink-0 cursor-pointer hover:bg-tree-100/60 transition-all select-none"
+                        onClick={() => setIsStaffCollapsed(!isStaffCollapsed)}
+                    >
                         <div className="flex items-center gap-2">
                             <UserCheck className="w-3.5 h-3.5 text-tree-600" />
                             <span className="text-xs font-black text-tree-700 uppercase tracking-widest whitespace-nowrap">勤怠管理</span>
+                            {isStaffCollapsed && Object.keys(attendance).length > 0 && (
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="入力済み" />
+                            )}
                         </div>
                         <button
-                            onClick={() => setIsStaffCollapsed(!isStaffCollapsed)}
-                            className="p-1 hover:bg-tree-100/50 rounded-full transition-all cursor-pointer flex-shrink-0"
+                            className="p-1 hover:bg-tree-100/50 rounded-full transition-all flex-shrink-0"
                             title={isStaffCollapsed ? "展開する" : "最小化する"}
+                            onClick={(e) => { e.stopPropagation(); setIsStaffCollapsed(!isStaffCollapsed); }}
                         >
                             {isStaffCollapsed ? (
                                 <ChevronDown className="w-4 h-4 text-tree-500" />
@@ -1925,7 +2142,7 @@ export default function App() {
                             )}
                         </button>
                     </div>
-                    {!isStaffCollapsed && (
+                    <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isStaffCollapsed ? 'max-h-0 opacity-0' : 'max-h-[2000px] opacity-100'}`}>
                         <div className="flex flex-col">
                             {filteredStaffList.length === 0 ? (
                                 <div className="py-6 text-center text-slate-300 text-[10px] font-bold">スタッフ未登録</div>
@@ -2018,20 +2235,26 @@ export default function App() {
                                 });
                             })()}
                         </div>
-                    )}
+                    </div>
                 </div>
 
                 {/* 2. 本日の特記事項 (旧 全体的な様子) */}
                 <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
-                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-apple-50/80 border-b border-apple-100 flex-shrink-0">
+                    <div
+                        className="flex items-center justify-between gap-4 px-3 py-2 bg-apple-50/80 border-b border-apple-100 flex-shrink-0 cursor-pointer hover:bg-apple-100/60 transition-all select-none"
+                        onClick={() => setIsNoticeCollapsed(!isNoticeCollapsed)}
+                    >
                         <div className="flex items-center gap-2">
                             <FileText className="w-4 h-4 text-apple-600" />
                             <span className="text-xs font-black text-apple-700 uppercase tracking-widest whitespace-nowrap">本日の特記事項</span>
+                            {isNoticeCollapsed && localNotice && localNotice.trim() !== '' && (
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="入力済み" />
+                            )}
                         </div>
                         <button
-                            onClick={() => setIsNoticeCollapsed(!isNoticeCollapsed)}
-                            className="p-1 hover:bg-apple-100/50 rounded-full transition-all cursor-pointer flex-shrink-0"
+                            className="p-1 hover:bg-apple-100/50 rounded-full transition-all flex-shrink-0"
                             title={isNoticeCollapsed ? "展開する" : "最小化する"}
+                            onClick={(e) => { e.stopPropagation(); setIsNoticeCollapsed(!isNoticeCollapsed); }}
                         >
                             {isNoticeCollapsed ? (
                                 <ChevronDown className="w-4 h-4 text-apple-500" />
@@ -2040,7 +2263,7 @@ export default function App() {
                             )}
                         </button>
                     </div>
-                    {!isNoticeCollapsed && (
+                    <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isNoticeCollapsed ? 'max-h-0 opacity-0' : 'flex-1 flex flex-col min-h-0 max-h-[2000px] opacity-100'}`}>
                         <div className="p-3 flex-1 flex flex-col">
                             <textarea
                                 value={localNotice}
@@ -2048,21 +2271,24 @@ export default function App() {
                                 onBlur={(e) => updateGlobalLog('notice', e.target.value)}
                                 placeholder="本日の様子や業務上の特記事項を入力してください（自動保存）..."
                                 style={{ fontSize: '14px' }}
-                                className="w-full flex-1 text-xs md:text-sm font-medium leading-relaxed bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-apple-400 focus:ring-4 focus:ring-apple-50 transition-all resize-none text-slate-700 shadow-inner"
+                                className="w-full flex-1 min-h-0 text-xs md:text-sm font-medium leading-relaxed bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-apple-400 focus:ring-4 focus:ring-apple-50 transition-all resize-none text-slate-700 shadow-inner"
                             />
                         </div>
-                    )}
+                    </div>
                 </div>
 
                 {/* 3. 本日のプログラム */}
                 <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
-                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-purple-50/80 border-b border-purple-100 flex-shrink-0">
+                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-purple-50/80 border-b border-purple-100 flex-shrink-0 cursor-pointer hover:bg-purple-100/60 transition-all select-none" onClick={() => setIsProgramCollapsed(!isProgramCollapsed)}>
                         <div className="flex items-center gap-2">
                             <ClipboardCheck className="w-4 h-4 text-purple-600" />
                             <span className="text-xs font-black text-purple-750 uppercase tracking-widest whitespace-nowrap">本日のプログラム</span>
+                            {isProgramCollapsed && globalLog.programs && globalLog.programs.some(p => p.title || p.summary) && (
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="入力済み" />
+                            )}
                         </div>
                         <button
-                            onClick={() => setIsProgramCollapsed(!isProgramCollapsed)}
+                            onClick={(e) => { e.stopPropagation(); setIsProgramCollapsed(!isProgramCollapsed); }}
                             className="p-1 hover:bg-purple-100/50 rounded-full transition-all cursor-pointer flex-shrink-0"
                             title={isProgramCollapsed ? "展開する" : "最小化する"}
                         >
@@ -2073,7 +2299,7 @@ export default function App() {
                             )}
                         </button>
                     </div>
-                    {!isProgramCollapsed && (
+                    <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isProgramCollapsed ? 'max-h-0 opacity-0' : 'max-h-[2000px] opacity-100'}`}>
                         <div className="p-3 flex-1 flex flex-col gap-3 min-h-0">
                             {(() => {
                                 const currentPrograms = globalLog.programs || (globalLog.programTitle || globalLog.programSummary 
@@ -2186,20 +2412,26 @@ export default function App() {
                                 );
                             })()}
                         </div>
-                    )}
+                    </div>
                 </div>
 
                 {/* 4. 共有事項 (旧 業務・活動内容) */}
                 <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
-                    <div className="flex items-center justify-between gap-4 px-3 py-2 bg-wood-50/80 border-b border-wood-100 flex-shrink-0">
+                    <div
+                        className="flex items-center justify-between gap-4 px-3 py-2 bg-wood-50/80 border-b border-wood-100 flex-shrink-0 cursor-pointer hover:bg-wood-100/60 transition-all select-none"
+                        onClick={() => setIsActivitiesCollapsed(!isActivitiesCollapsed)}
+                    >
                         <div className="flex items-center gap-2">
                             <ClipboardList className="w-4 h-4 text-wood-600" />
                             <span className="text-xs font-black text-wood-700 uppercase tracking-widest whitespace-nowrap">共有事項</span>
+                            {isActivitiesCollapsed && localActivities && localActivities.trim() !== '' && (
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="入力済み" />
+                            )}
                         </div>
                         <button
-                            onClick={() => setIsActivitiesCollapsed(!isActivitiesCollapsed)}
-                            className="p-1 hover:bg-wood-100/50 rounded-full transition-all cursor-pointer flex-shrink-0"
+                            className="p-1 hover:bg-wood-100/50 rounded-full transition-all flex-shrink-0"
                             title={isActivitiesCollapsed ? "展開する" : "最小化する"}
+                            onClick={(e) => { e.stopPropagation(); setIsActivitiesCollapsed(!isActivitiesCollapsed); }}
                         >
                             {isActivitiesCollapsed ? (
                                 <ChevronDown className="w-4 h-4 text-wood-500" />
@@ -2208,7 +2440,7 @@ export default function App() {
                             )}
                         </button>
                     </div>
-                    {!isActivitiesCollapsed && (
+                    <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isActivitiesCollapsed ? 'max-h-0 opacity-0' : 'flex-1 flex flex-col min-h-0 max-h-[2000px] opacity-100'}`}>
                         <div className="p-3 flex-1 flex flex-col">
                             <textarea
                                 value={localActivities}
@@ -2216,10 +2448,10 @@ export default function App() {
                                 onBlur={(e) => updateGlobalLog('activities', e.target.value)}
                                 placeholder="共有事項・連絡事項を入力してください（自動保存）..."
                                 style={{ fontSize: '14px' }}
-                                className="w-full flex-1 text-xs md:text-sm font-medium leading-relaxed bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-wood-400 focus:ring-4 focus:ring-wood-50 transition-all resize-none text-slate-700 shadow-inner"
+                                className="w-full flex-1 min-h-0 text-xs md:text-sm font-medium leading-relaxed bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-wood-400 focus:ring-4 focus:ring-wood-50 transition-all resize-none text-slate-700 shadow-inner"
                             />
                         </div>
-                    )}
+                    </div>
                 </div>
             </div>
 
@@ -2367,39 +2599,46 @@ export default function App() {
                         {/* Table Header Controls */}
                         <div className="flex items-center justify-between px-4 py-2 bg-tree-100 border-b border-tree-200">
                             <h3 className="font-black text-tree-800 text-xs tracking-widest hidden sm:block">本日の業務</h3>
-                            <div className="flex bg-white rounded-full p-0.5 border border-slate-200/60 shadow-sm mx-auto sm:mx-0 lg:hidden overflow-x-auto custom-scrollbar-hidden whitespace-nowrap max-w-full gap-1">
+                            <div className="flex bg-white rounded-full p-0.5 border border-slate-200/60 shadow-sm mx-auto sm:mx-0 lg:hidden overflow-x-auto custom-scrollbar-hidden whitespace-nowrap max-w-full gap-0.5">
                                 <button
                                     data-tab-btn="learning"
                                     onClick={() => setActiveTableTab('learning')}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'learning' ? 'bg-tree-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`px-2.5 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'learning' ? 'bg-tree-600 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                                 >
-                                    学習・プログラム
+                                    学習
+                                </button>
+                                <button
+                                    data-tab-btn="program"
+                                    onClick={() => setActiveTableTab('program')}
+                                    className={`px-2.5 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'program' ? 'bg-purple-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                >
+                                    プログラム
                                 </button>
                                 <button
                                     data-tab-btn="transport"
                                     onClick={() => setActiveTableTab('transport')}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'transport' ? 'bg-wood-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`px-2.5 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'transport' ? 'bg-wood-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                                 >
-                                    送迎・終了
+                                    時間
                                 </button>
                                 <button
                                     data-tab-btn="copy"
                                     onClick={() => setActiveTableTab('copy')}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'copy' ? 'bg-apple-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`px-2.5 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'copy' ? 'bg-apple-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                                 >
-                                    通信コピー
+                                    ツリー通信
                                 </button>
                                 <button
                                     data-tab-btn="futurePlan"
                                     onClick={() => setActiveTableTab('futurePlan')}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'futurePlan' ? 'bg-tree-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`px-2.5 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'futurePlan' ? 'bg-tree-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                                 >
                                     今後の予定
                                 </button>
                                 <button
                                     data-tab-btn="remarks"
                                     onClick={() => setActiveTableTab('remarks')}
-                                    className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'remarks' ? 'bg-wood-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
+                                    className={`px-2.5 py-1.5 rounded-full text-[10px] font-black transition-all flex-shrink-0 whitespace-nowrap ${activeTableTab === 'remarks' ? 'bg-wood-500 text-white shadow-md' : 'text-slate-500 hover:bg-slate-50'}`}
                                 >
                                     備考
                                 </button>
@@ -2419,8 +2658,8 @@ export default function App() {
                                             <span>児童氏名</span>
                                         </th>
 
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[35%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`}>学習</th>
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[35%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`}>プログラム</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`}>学習</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'program' ? 'table-cell' : 'hidden'} lg:table-cell`}>プログラム</th>
                                         <th className={`p-2 text-[10px] font-black text-slate-400 w-[23%] lg:w-[6%] min-w-[60px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>送迎</th>
                                         <th className={`p-2 text-[10px] font-black text-slate-400 w-[23%] lg:w-[6%] min-w-[60px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>終了</th>
                                         <th className={`p-2 text-[10px] font-black text-slate-400 w-[24%] lg:w-[8%] min-w-[75px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>迎え場所</th>
@@ -2532,7 +2771,7 @@ export default function App() {
                                                         <div className={`tracking-tight whitespace-pre-wrap break-all ${isLocked ? 'text-slate-400' : 'text-tree-600'}`}>{getStudyText(child.id)}</div>
                                                     )}
                                                 </td>
-                                                <td className={`p-3 md:p-5 text-[10px] md:text-[12px] border-r border-slate-100 leading-relaxed font-bold align-top transition-colors ${isLocked ? 'bg-slate-100/60 text-slate-400 cursor-not-allowed' : lockingChildId === child.id ? 'cursor-wait text-slate-600' : 'cursor-pointer hover:bg-slate-50 text-slate-600'} ${selectedChildId === child.id ? 'bg-tree-50/20' : ''} ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`} onClick={() => {
+                                                <td className={`p-3 md:p-5 text-[10px] md:text-[12px] border-r border-slate-100 leading-relaxed font-bold align-top transition-colors ${isLocked ? 'bg-slate-100/60 text-slate-400 cursor-not-allowed' : lockingChildId === child.id ? 'cursor-wait text-slate-600' : 'cursor-pointer hover:bg-slate-50 text-slate-600'} ${selectedChildId === child.id ? 'bg-tree-50/20' : ''} ${activeTableTab === 'program' ? 'table-cell' : 'hidden'} lg:table-cell`} onClick={() => {
                                                     if (isLocked) {
                                                         showToast(`${lockOwner.userName || lockOwner.userEmail || '他ユーザー'}が入力中のため編集できません。`);
                                                         return;
@@ -2579,9 +2818,37 @@ export default function App() {
                                                         />
                                                     )}
                                                 </td>
-                                                <td className={`p-3 border-r border-slate-100/50 text-center ${isLocked ? 'bg-slate-100/40' : ''} ${activeTableTab === 'copy' ? 'table-cell' : 'hidden'} lg:table-cell`}>
+                                                <td className={`p-2 border-r border-slate-100/50 align-top ${isLocked ? 'bg-slate-100/40' : ''} ${activeTableTab === 'copy' ? 'table-cell' : 'hidden'} lg:table-cell`}>
                                                     {!isPlaceholder && (
-                                                        <div className="flex flex-row items-center justify-center gap-4">
+                                                        <div className="flex flex-col gap-2">
+                                                            {/* ツリー通信テキスト表示（約5行で頭打ち・枠内スクロール） */}
+                                                            <div
+                                                                className={`custom-scrollbar-thin text-[10px] md:text-[12px] leading-relaxed whitespace-pre-wrap break-all cursor-pointer hover:bg-slate-50/50 rounded-lg p-1 transition-all min-h-[20px] max-h-[85px] md:max-h-[100px] overflow-y-auto ${results[child.id]?.D?.trim() ? 'text-slate-600 font-medium' : 'text-slate-300 italic'}`}
+                                                                onPointerDown={(e) => {
+                                                                    e.currentTarget.dataset.tapX = e.clientX;
+                                                                    e.currentTarget.dataset.tapY = e.clientY;
+                                                                }}
+                                                                onPointerUp={(e) => {
+                                                                    // スクロール操作（指やマウスを動かした場合）は編集パネルを開かない
+                                                                    const startX = e.currentTarget.dataset.tapX;
+                                                                    const startY = e.currentTarget.dataset.tapY;
+                                                                    delete e.currentTarget.dataset.tapX;
+                                                                    delete e.currentTarget.dataset.tapY;
+                                                                    if (startX === undefined || startY === undefined) return;
+                                                                    if (Math.abs(e.clientX - Number(startX)) > 8 || Math.abs(e.clientY - Number(startY)) > 8) return;
+
+                                                                    if (isLocked) {
+                                                                        showToast(`${lockOwner.userName || lockOwner.userEmail || '他ユーザー'}が入力中のため編集できません。`);
+                                                                        return;
+                                                                    }
+                                                                    if (lockingChildId) return;
+                                                                    handleOpenChildPanel(child.id, 'tree');
+                                                                }}
+                                                            >
+                                                                {results[child.id]?.D?.trim() || '未入力'}
+                                                            </div>
+                                                            {/* ボタン群 */}
+                                                            <div className="flex flex-row items-center justify-center gap-4">
                                                             {isCopySelectionMode ? (
                                                                 <button
                                                                     onClick={(e) => {
@@ -2658,6 +2925,7 @@ export default function App() {
                                                                 />
                                                                 <span className="text-[10px] font-bold">送信</span>
                                                             </label>
+                                                        </div>
                                                         </div>
                                                     )}
                                                 </td>
@@ -2978,6 +3246,17 @@ export default function App() {
                 }}
             />
 
+            <BackupImportModal
+                show={showBackupImportModal}
+                onClose={() => setShowBackupImportModal(false)}
+                masterChildren={masterChildren}
+                currentChildren={children}
+                selectedDate={selectedDate}
+                selectedOffice={selectedOffice}
+                cs={cs}
+                onRefresh={() => fetchDailyData(selectedDate, selectedOffice?.id)}
+            />
+
             <LogModal
                 show={showLogModal}
                 onClose={() => setShowLogModal(false)}
@@ -2991,15 +3270,7 @@ export default function App() {
             <div className="lg:hidden fixed bottom-6 right-6 z-[90] no-print">
                 {/* Expandable Menu Panel */}
                 {isMobileMenuOpen && (
-                    <div className="absolute bottom-16 right-0 mb-2 w-56 glass-card bg-white/95 backdrop-blur-xl rounded-[2rem] shadow-2xl border border-slate-100 p-4 space-y-2.5 animate-in slide-in-from-bottom-5 duration-300">
-                        <button
-                                id="guide-add-child-mobile-btn"
-                                onClick={() => { setShowAddChildModal(true); setIsMobileMenuOpen(false); }}
-                                className="w-full px-4 py-3 bg-tree-50 text-tree-700 hover:bg-tree-100 rounded-2xl font-black text-xs transition-all active:scale-95 flex items-center gap-3"
-                            >
-                                <PlusCircle className="w-4 h-4 text-tree-600" />
-                                <span>児童追加</span>
-                            </button>
+                    <div className="absolute bottom-16 right-0 mb-2 w-56 glass-card bg-white/95 backdrop-blur-xl rounded-[2rem] shadow-2xl border border-slate-100 p-4 space-y-2.5 animate-in slide-in-from-bottom-5 duration-300 max-h-[70vh] overflow-y-auto custom-scrollbar">
 
                             <button
                                 id="guide-print-mobile-btn"
@@ -3014,31 +3285,70 @@ export default function App() {
 
                         <div className="h-px bg-slate-100 my-1" />
 
+                        {/* エクスポート（タップで開く小メニュー） */}
                         <button
-                            id="guide-export-mobile-btn"
-                            onClick={() => { setShowExportModal(true); setIsMobileMenuOpen(false); }}
+                            onClick={() => { setMobileExportOpen(!mobileExportOpen); setMobileImportOpen(false); }}
                             className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
                         >
                             <FileSpreadsheet className="w-4 h-4 text-slate-400" />
-                            <span>データ出力</span>
+                            <span className="flex-1 text-left">エクスポート</span>
+                            {mobileExportOpen ? <ChevronUp className="w-3.5 h-3.5 text-slate-300" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-300" />}
                         </button>
+                        {mobileExportOpen && (
+                            <div className="pl-3 ml-2 border-l-2 border-slate-100 space-y-1 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <button onClick={() => { setShowExportModal(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3">
+                                    <FileText className="w-4 h-4 text-wood-500" />
+                                    <span>業務管理日誌に上書き</span>
+                                </button>
+                                <div className="px-3 pt-1">
+                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">CSVエクスポート</span>
+                                </div>
+                                <button onClick={() => { exportBackupCSV('day'); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3">
+                                    <FileSpreadsheet className="w-4 h-4 text-tree-500" />
+                                    <span>本日のデータ</span>
+                                </button>
+                                <button onClick={() => { exportBackupCSV('week'); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3">
+                                    <FileSpreadsheet className="w-4 h-4 text-tree-500" />
+                                    <span>1週間分</span>
+                                </button>
+                                <button onClick={() => { exportBackupCSV('month'); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3">
+                                    <FileSpreadsheet className="w-4 h-4 text-tree-500" />
+                                    <span>1ヶ月分</span>
+                                </button>
+                                <button onClick={() => { exportBackupCSV('year'); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3">
+                                    <FileSpreadsheet className="w-4 h-4 text-tree-500" />
+                                    <span>1年分</span>
+                                </button>
+                                <button onClick={() => { exportBackupCSV('all'); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3">
+                                    <FileSpreadsheet className="w-4 h-4 text-tree-500" />
+                                    <span>全データ</span>
+                                </button>
+                            </div>
+                        )}
 
+                        {/* インポート（タップで開く小メニュー） */}
                         <button
-                            onClick={() => { setShowCSVImportModal(true); setIsMobileMenuOpen(false); }}
+                            onClick={() => { setMobileImportOpen(!mobileImportOpen); setMobileExportOpen(false); }}
                             className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
                         >
                             <FileSpreadsheet className="w-4 h-4 text-indigo-500" />
-                            <span>CSVインポート</span>
+                            <span className="flex-1 text-left">インポート</span>
+                            {mobileImportOpen ? <ChevronUp className="w-3.5 h-3.5 text-slate-300" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-300" />}
                         </button>
+                        {mobileImportOpen && (
+                            <div className="pl-3 ml-2 border-l-2 border-slate-100 space-y-1 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <button onClick={() => { setShowCSVImportModal(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3">
+                                    <FileSpreadsheet className="w-4 h-4 text-indigo-500" />
+                                    <span>送迎アプリからインポート</span>
+                                </button>
+                                <button onClick={() => { setShowBackupImportModal(true); setIsMobileMenuOpen(false); }} className="w-full px-3 py-2 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3">
+                                    <FileSpreadsheet className="w-4 h-4 text-tree-500" />
+                                    <span>バックアップから復元</span>
+                                </button>
+                            </div>
+                        )}
 
-                        <button
-                            id="guide-attendance-mobile-btn"
-                            onClick={() => { setShowAttendanceModal(true); setIsMobileMenuOpen(false); }}
-                            className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
-                        >
-                            <UserCheck className="w-4 h-4 text-slate-400" />
-                            <span>勤怠管理</span>
-                        </button>
+
 
 
 
@@ -3066,33 +3376,7 @@ export default function App() {
                             <span>変更履歴</span>
                         </button>
 
-                        <div className="h-px bg-slate-100 my-1" />
 
-                        {/* 表示事業所選択 (モバイルメニュー) */}
-                        {offices.length > 0 && (
-                            <div className="px-4 py-2 flex flex-col gap-1.5">
-                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">表示事業所</span>
-                                <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 border border-slate-100 rounded-xl relative">
-                                    <LayoutPanelLeft className="w-4 h-4 text-tree-600 flex-shrink-0" />
-                                    <select
-                                        value={selectedOffice?.id || ''}
-                                        onChange={(e) => {
-                                            const office = offices.find(o => o.id === e.target.value);
-                                            if (office) {
-                                                setSelectedOffice(office);
-                                                localStorage.setItem('care_pro_selected_office', JSON.stringify(office));
-                                            }
-                                        }}
-                                        className="w-full bg-transparent font-black text-slate-700 text-xs tracking-tight border-none outline-none cursor-pointer pr-4 appearance-none"
-                                    >
-                                        {offices.map(o => (
-                                            <option key={o.id} value={o.id}>{o.name}</option>
-                                        ))}
-                                    </select>
-                                    <ChevronDown className="w-3 h-3 text-slate-300 absolute right-3 pointer-events-none" />
-                                </div>
-                            </div>
-                        )}
 
                         <div className="h-px bg-slate-100 my-1" />
 
@@ -3114,7 +3398,7 @@ export default function App() {
                 {/* FAB Trigger Button */}
                 <button
                     id="guide-mobile-menu-btn"
-                    onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                    onClick={() => { const next = !isMobileMenuOpen; setIsMobileMenuOpen(next); if (!next) { setMobileExportOpen(false); setMobileImportOpen(false); } }}
                     className={cn(
                         "p-4 bg-tree-600 hover:bg-tree-700 text-white rounded-full shadow-2xl transition-all duration-300 active:scale-90 flex items-center justify-center border-4 border-white/60",
                         isMobileMenuOpen ? "rotate-90" : "rotate-0"
