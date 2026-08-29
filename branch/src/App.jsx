@@ -84,6 +84,9 @@ export default function App() {
     const [toast, setToast] = useState(null);
     const [results, setResults] = useState({});
     const [changeLogs, setChangeLogs] = useState([]);
+    const [swipeChildId, setSwipeChildId] = useState(null);
+    const [swipeOffset, setSwipeOffset] = useState(0);
+    const touchStartX = useRef(0);
     const [greetingTemplates, setGreetingTemplates] = useState({});
     const [okWords, setOkWords] = useState([]);
     const [showLogModal, setShowLogModal] = useState(false);
@@ -884,13 +887,13 @@ export default function App() {
         displayRegular.push({ id: `empty-${displayRegular.length}`, name: '未設定', isPlaceholder: true });
     }
 
-    const saveDailyData = async (date, ch, msgs, res, sum, table, global) => {
+    const saveDailyData = async (date, ch, msgs, res, sum, table, global, customLogs) => {
         if (isSandboxMode) {
             console.log('[Sandbox] saveDailyData bypassed');
             return;
         }
         setIsSyncing(true);
-        const dailyData = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, changeLogs: changeLogs, updatedAt: new Date().toISOString() };
+        const dailyData = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, changeLogs: customLogs || changeLogs, updatedAt: new Date().toISOString() };
 
         const savePromise = (async () => {
             // 1. Save traditional daily bulk report
@@ -1195,7 +1198,7 @@ export default function App() {
                 restoreValue: currVal
             };
             
-            const updatedLogs = [restoreLog, ...changeLogs].slice(0, 10);
+            const updatedLogs = [restoreLog, ...changeLogs].slice(0, 100);
             setChangeLogs(updatedLogs);
             updatePayload.changeLogs = updatedLogs;
             
@@ -1326,7 +1329,24 @@ export default function App() {
             setIsWaitlistExpanded(true);
         }
         
-        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newTable, globalLog);
+        const newLogs = newChildrenToAdd.map(sc => ({
+            id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toISOString(),
+            staffName: currentStaffName || 'スタッフ',
+            childId: sc.id,
+            childName: sc.lastName ? `${sc.lastName} ${sc.firstName}` : sc.name,
+            type: 'add',
+            field: 'add',
+            description: '児童追加',
+            prevDisplay: '未所属',
+            newDisplay: isWaitlist ? 'キャンセル待ち' : '通常（出席）',
+            restoreValue: null
+        }));
+        
+        const updatedLogs = [...newLogs, ...changeLogs].slice(0, 100);
+        setChangeLogs(updatedLogs);
+        
+        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newTable, globalLog, updatedLogs);
         showToast(`${newChildrenToAdd.length}名の児童を${isWaitlist ? 'キャンセル待ち' : '通常児童'}として追加しました。`);
     };
 
@@ -1355,10 +1375,56 @@ export default function App() {
             setIsAbsentExpanded(true);
         }
         
-        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, dailyTable, globalLog);
-        
         const statusNames = { regular: '通常（出席）', waitlist: 'キャンセル待ち', absent: '欠席' };
+        const prevStatusName = targetChild.isWaitlist ? 'キャンセル待ち' : (targetChild.isAbsent ? '欠席' : '通常（出席）');
+        
+        const newLog = {
+            id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
+            timestamp: new Date().toISOString(),
+            staffName: currentStaffName || 'スタッフ',
+            childId: targetChild.id,
+            childName: targetChild.lastName ? `${targetChild.lastName} ${targetChild.firstName}` : targetChild.name,
+            type: 'status',
+            field: 'status',
+            description: '状態変更',
+            prevDisplay: prevStatusName,
+            newDisplay: statusNames[targetStatus],
+            restoreValue: { isWaitlist: targetChild.isWaitlist, isAbsent: targetChild.isAbsent }
+        };
+        
+        const updatedLogs = [newLog, ...changeLogs].slice(0, 100);
+        setChangeLogs(updatedLogs);
+        
+        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, dailyTable, globalLog, updatedLogs);
+        
         showToast(`${targetChild.lastName ? `${targetChild.lastName} ${targetChild.firstName}` : targetChild.name}を${statusNames[targetStatus]}に移動しました。`);
+    };
+
+    const handleSwipeStart = (e, childId) => {
+        const targetChild = children.find(c => c.id === childId);
+        if (!targetChild || targetChild.isPlaceholder) return;
+        touchStartX.current = e.touches[0].clientX;
+        setSwipeChildId(childId);
+    };
+
+    const handleSwipeMove = (e) => {
+        if (!swipeChildId) return;
+        const currentX = e.touches[0].clientX;
+        const diffX = currentX - touchStartX.current;
+        if (diffX > 0) {
+            setSwipeOffset(Math.min(diffX, 160));
+        } else {
+            setSwipeOffset(0);
+        }
+    };
+
+    const handleSwipeEnd = () => {
+        if (swipeOffset > 60) {
+            setSwipeOffset(140);
+        } else {
+            setSwipeChildId(null);
+            setSwipeOffset(0);
+        }
     };
 
     const startLongPress = (e, childId, type) => {
@@ -2062,7 +2128,7 @@ export default function App() {
                 </div>
 
                 {/* 2段目: 昨日 ← 今日 → 明日 (日付切り替え) */}
-                <div className="flex items-center justify-center w-full">
+                <div className="flex flex-col items-center justify-center w-full gap-2">
                     <div className="flex items-center bg-slate-100/50 p-1 rounded-full border border-slate-200/30 max-w-[340px] md:max-w-md w-full justify-between shadow-inner">
                         {/* 昨日 */}
                         <button
@@ -2101,6 +2167,14 @@ export default function App() {
                             {getFormattedDateWithDay(getOffsetDateString(selectedDate, 1))}
                         </button>
                     </div>
+                    {selectedDate !== new Date().toISOString().split('T')[0] && (
+                        <button
+                            onClick={() => handleDateChange(new Date().toISOString().split('T')[0])}
+                            className="text-[10px] text-tree-700 hover:text-tree-900 font-black px-3 py-1.5 bg-tree-50 hover:bg-tree-100 rounded-full transition-all active:scale-95 shadow-sm inline-flex items-center"
+                        >
+                            今日の日付に戻る
+                        </button>
+                    )}
                 </div>
             </header>
 
@@ -2697,65 +2771,107 @@ export default function App() {
                                         const isLocked = !isPlaceholder && !!lockOwner;
                                         return (
                                             <tr key={child.id} className={`border-b border-slate-100 group transition-all ${isPlaceholder ? 'row-placeholder bg-slate-50/10 no-print' : selectedChildId === child.id ? 'bg-tree-50/30' : 'hover:bg-slate-50/20'}`}>
-                                                <td className={`sticky left-0 z-10 p-3 md:p-4 font-black border-r border-slate-100 relative ${isLocked ? 'bg-[#e2e8f0] text-slate-400 cursor-not-allowed' : selectedChildId === child.id ? 'bg-[#e3f4e9]' : 'bg-white group-hover:bg-slate-50'} ${isPlaceholder ? 'text-[10px] py-2' : 'text-[12px] md:text-sm'}`}>
-                                                    {pressingChildId && pressingChildId.id === child.id && (
-                                                        <div className="absolute inset-0 bg-slate-200/50 pointer-events-none overflow-hidden z-20">
-                                                            <div className="h-full bg-tree-500/20 animate-long-press" />
+                                                <td className={`sticky left-0 z-10 p-0 font-black border-r border-slate-100 relative overflow-hidden ${isLocked ? 'bg-[#e2e8f0] text-slate-400 cursor-not-allowed' : selectedChildId === child.id ? 'bg-[#e3f4e9]' : 'bg-white group-hover:bg-slate-50'} ${isPlaceholder ? 'text-[10px] py-2' : 'text-[12px] md:text-sm'}`} style={{ minWidth: '180px' }}>
+                                                    {/* Swiped Underlay Action Buttons */}
+                                                    {!isPlaceholder && swipeChildId === child.id && (
+                                                        <div className="absolute inset-y-0 left-0 flex items-center bg-slate-50 border-r border-slate-200/50 rounded-lg pl-2 pr-4 gap-2 z-0 animate-in fade-in duration-200">
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'regular'); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                                className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-black shadow-sm transition-all active:scale-95 flex items-center gap-0.5"
+                                                            >
+                                                                出席
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'absent'); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                                className="px-2.5 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-[10px] font-black shadow-sm transition-all active:scale-95 flex items-center gap-0.5"
+                                                            >
+                                                                欠席
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'waitlist'); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                                className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-black shadow-sm transition-all active:scale-95 flex items-center gap-0.5"
+                                                            >
+                                                                待機
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                                className="text-slate-400 hover:text-slate-600 px-1 text-[9px] font-black"
+                                                            >
+                                                                戻る
+                                                            </button>
                                                         </div>
                                                     )}
-                                                    <div className="flex flex-col gap-2 w-full">
-                                                        <div className="flex items-center justify-between w-full">
-                                                            <button
-                                                                id={index === 0 ? "guide-child-name" : undefined}
-                                                                onClick={(e) => {
-                                                                    if (hasTriggeredLongPress.current[child.id]) {
-                                                                        hasTriggeredLongPress.current[child.id] = false;
-                                                                        return;
-                                                                    }
-                                                                    if (isLocked) {
-                                                                        showToast(`${lockOwner.userName || lockOwner.userEmail || '他ユーザー'}が入力中のため編集できません。`);
-                                                                        return;
-                                                                    }
-                                                                    if (lockingChildId) return;
-                                                                    if (!isPlaceholder) {
-                                                                        handleOpenChildPanel(child.id, 'tree');
-                                                                    } else {
-                                                                        setShowAddChildModal(true);
-                                                                    }
-                                                                }}
-                                                                onMouseDown={(e) => {
-                                                                    if (!isPlaceholder && !isLocked && !lockingChildId) startLongPress(e, child.id, 'regular');
-                                                                }}
-                                                                onMouseUp={(e) => {
-                                                                    if (!isPlaceholder) cancelLongPress(e, child.id);
-                                                                }}
-                                                                onMouseLeave={(e) => {
-                                                                    if (!isPlaceholder) cancelLongPress(e, child.id);
-                                                                }}
-                                                                onTouchStart={(e) => {
-                                                                    if (!isPlaceholder && !isLocked && !lockingChildId) handleTouchStart(e, child.id, 'regular');
-                                                                }}
-                                                                onTouchEnd={(e) => {
-                                                                    if (!isPlaceholder) cancelLongPress(e, child.id);
-                                                                }}
-                                                                onTouchMove={(e) => {
-                                                                    if (!isPlaceholder) handleTouchMove(e, child.id);
-                                                                }}
-                                                                onContextMenu={(e) => {
-                                                                    if (!isPlaceholder) e.preventDefault();
-                                                                }}
-                                                                disabled={!isPlaceholder && (isLocked || !!lockingChildId)}
-                                                                className={`flex-1 text-left transition-colors flex flex-col min-w-0 longpress-safe select-none ${isLocked ? 'text-slate-400 cursor-not-allowed' : isPlaceholder ? 'text-slate-300 cursor-pointer hover:text-tree-600 hover:bg-slate-50/50' : 'hover:text-tree-600'}`}>
-                                                                <span className="whitespace-nowrap font-black block text-sm md:text-base flex items-center gap-1.5">
-                                                                    {lockingChildId === child.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-tree-600" />}
-                                                                    {child.lastName ? `${child.lastName} ${child.firstName}` : (child.name || '名称未設定')}
-                                                                </span>
-                                                                {!isPlaceholder && (child.lastNameFurigana || child.nameFurigana) && (
-                                                                    <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider opacity-60 whitespace-nowrap block">
-                                                                        {child.lastNameFurigana ? `${child.lastNameFurigana} ${child.firstNameFurigana}` : child.nameFurigana}
+
+                                                    {/* Swipable Child Content block */}
+                                                    <div 
+                                                        className={`w-full h-full p-3 md:p-4 z-10 transition-transform duration-200 bg-inherit relative`}
+                                                        style={{ transform: swipeChildId === child.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)' }}
+                                                        onTouchStart={(e) => handleSwipeStart(e, child.id)}
+                                                        onTouchMove={(e) => handleSwipeMove(e)}
+                                                        onTouchEnd={() => handleSwipeEnd()}
+                                                    >
+                                                        {pressingChildId && pressingChildId.id === child.id && (
+                                                            <div className="absolute inset-0 bg-slate-200/50 pointer-events-none overflow-hidden z-20">
+                                                                <div className="h-full bg-tree-500/20 animate-long-press" />
+                                                            </div>
+                                                        )}
+                                                        <div className="flex flex-col gap-2 w-full">
+                                                            <div className="flex items-center justify-between w-full">
+                                                                <button
+                                                                    id={index === 0 ? "guide-child-name" : undefined}
+                                                                    onClick={(e) => {
+                                                                        if (hasTriggeredLongPress.current[child.id]) {
+                                                                            hasTriggeredLongPress.current[child.id] = false;
+                                                                            return;
+                                                                        }
+                                                                        if (isLocked) {
+                                                                            showToast(`${lockOwner.userName || lockOwner.userEmail || '他ユーザー'}が入力中のため編集できません。`);
+                                                                            return;
+                                                                        }
+                                                                        if (lockingChildId) return;
+                                                                        if (!isPlaceholder) {
+                                                                            handleOpenChildPanel(child.id, 'tree');
+                                                                        } else {
+                                                                            setShowAddChildModal(true);
+                                                                        }
+                                                                    }}
+                                                                    onMouseDown={(e) => {
+                                                                        if (!isPlaceholder && !isLocked && !lockingChildId) startLongPress(e, child.id, 'regular');
+                                                                    }}
+                                                                    onMouseUp={(e) => {
+                                                                        if (!isPlaceholder) cancelLongPress(e, child.id);
+                                                                    }}
+                                                                    onMouseLeave={(e) => {
+                                                                        if (!isPlaceholder) cancelLongPress(e, child.id);
+                                                                    }}
+                                                                    onTouchStart={(e) => {
+                                                                        handleSwipeStart(e, child.id);
+                                                                        if (!isPlaceholder && !isLocked && !lockingChildId) handleTouchStart(e, child.id, 'regular');
+                                                                    }}
+                                                                    onTouchEnd={(e) => {
+                                                                        handleSwipeEnd();
+                                                                        if (!isPlaceholder) cancelLongPress(e, child.id);
+                                                                    }}
+                                                                    onTouchMove={(e) => {
+                                                                        handleSwipeMove(e);
+                                                                        if (!isPlaceholder) handleTouchMove(e, child.id);
+                                                                    }}
+                                                                    onContextMenu={(e) => {
+                                                                        if (!isPlaceholder) e.preventDefault();
+                                                                    }}
+                                                                    disabled={!isPlaceholder && (isLocked || !!lockingChildId)}
+                                                                    className={`flex-1 text-left transition-colors flex flex-col min-w-0 longpress-safe select-none ${isLocked ? 'text-slate-400 cursor-not-allowed' : isPlaceholder ? 'text-slate-300 cursor-pointer hover:text-tree-600 hover:bg-slate-50/50' : 'hover:text-tree-600'}`}>
+                                                                    <span className="whitespace-nowrap font-black block text-sm md:text-base flex items-center gap-1.5">
+                                                                        {lockingChildId === child.id && <Loader2 className="w-3.5 h-3.5 animate-spin text-tree-600" />}
+                                                                        {child.lastName ? `${child.lastName} ${child.firstName}` : (child.name || '名称未設定')}
                                                                     </span>
-                                                                )}
-                                                            </button>
+                                                                    {!isPlaceholder && (child.lastNameFurigana || child.nameFurigana) && (
+                                                                        <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider opacity-60 whitespace-nowrap block">
+                                                                            {child.lastNameFurigana ? `${child.lastNameFurigana} ${child.firstNameFurigana}` : child.nameFurigana}
+                                                                        </span>
+                                                                    )}
+                                                                </button>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </td>
@@ -2975,32 +3091,75 @@ export default function App() {
                             return (
                                 <div 
                                     key={child.id} 
-                                    className="relative mt-3 p-5 rounded-[2rem] flex items-center justify-between bg-white border border-apple-200/40 shadow-sm shadow-apple-50/50 animate-in slide-in-from-top-4 overflow-hidden"
+                                    className="relative mt-3 p-0 rounded-[2rem] flex items-center justify-between bg-white border border-apple-200/40 shadow-sm shadow-apple-50/50 animate-in slide-in-from-top-4 overflow-hidden"
+                                    style={{ minHeight: '62px' }}
                                 >
-                                    {pressingChildId && pressingChildId.id === child.id && (
-                                        <div className="absolute inset-0 bg-slate-200/50 pointer-events-none z-20">
-                                            <div className="h-full bg-apple-500/20 animate-long-press" />
+                                    {/* Underlay Action Buttons */}
+                                    {swipeChildId === child.id && (
+                                        <div className="absolute inset-y-0 left-0 flex items-center bg-slate-50 border-r border-slate-100 rounded-[2rem] pl-4 pr-6 gap-2 z-0 animate-in fade-in duration-200">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'regular'); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-[10px] font-black shadow-sm transition-all active:scale-95"
+                                            >
+                                                出席
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'absent'); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                className="px-2.5 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-xl text-[10px] font-black shadow-sm transition-all active:scale-95"
+                                            >
+                                                欠席
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                className="text-slate-400 hover:text-slate-600 px-1 text-[9px] font-black"
+                                            >
+                                                戻る
+                                            </button>
                                         </div>
                                     )}
-                                    <span 
-                                        className="text-xs font-black text-slate-600 cursor-pointer select-none longpress-safe flex-1 py-1"
-                                        onMouseDown={(e) => startLongPress(e, child.id, 'waitlist')}
-                                        onMouseUp={(e) => cancelLongPress(e, child.id)}
-                                        onMouseLeave={(e) => cancelLongPress(e, child.id)}
-                                        onTouchStart={(e) => handleTouchStart(e, child.id, 'waitlist')}
-                                        onTouchEnd={(e) => cancelLongPress(e, child.id)}
-                                        onTouchMove={(e) => handleTouchMove(e, child.id)}
-                                        onContextMenu={(e) => e.preventDefault()}
+
+                                    {/* Swipable content wrapper */}
+                                    <div 
+                                        className="w-full h-full p-5 flex items-center justify-between bg-inherit z-10 transition-transform duration-200"
+                                        style={{ transform: swipeChildId === child.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)' }}
+                                        onTouchStart={(e) => handleSwipeStart(e, child.id)}
+                                        onTouchMove={(e) => handleSwipeMove(e)}
+                                        onTouchEnd={() => handleSwipeEnd()}
                                     >
-                                        {name}
-                                        <span className="text-[10px] text-apple-400 font-bold ml-2">キャンセル待ち (長押しで状態変更)</span>
-                                    </span>
-                                    <button 
-                                        onClick={() => removeChild(child.id)} 
-                                        className="p-3 text-slate-200 hover:text-apple-500 transition-colors z-10"
-                                    >
-                                        <Trash2 className="w-5 h-5" />
-                                    </button>
+                                        {pressingChildId && pressingChildId.id === child.id && (
+                                            <div className="absolute inset-0 bg-slate-200/50 pointer-events-none z-20">
+                                                <div className="h-full bg-apple-500/20 animate-long-press" />
+                                            </div>
+                                        )}
+                                        <span 
+                                            className="text-xs font-black text-slate-600 cursor-pointer select-none longpress-safe flex-1 py-1"
+                                            onMouseDown={(e) => startLongPress(e, child.id, 'waitlist')}
+                                            onMouseUp={(e) => cancelLongPress(e, child.id)}
+                                            onMouseLeave={(e) => cancelLongPress(e, child.id)}
+                                            onTouchStart={(e) => {
+                                                handleSwipeStart(e, child.id);
+                                                handleTouchStart(e, child.id, 'waitlist');
+                                            }}
+                                            onTouchEnd={(e) => {
+                                                handleSwipeEnd();
+                                                cancelLongPress(e, child.id);
+                                            }}
+                                            onTouchMove={(e) => {
+                                                handleSwipeMove(e);
+                                                handleTouchMove(e, child.id);
+                                            }}
+                                            onContextMenu={(e) => e.preventDefault()}
+                                        >
+                                            {name}
+                                            <span className="text-[10px] text-apple-400 font-bold ml-2">キャンセル待ち (長押し・スワイプで変更)</span>
+                                        </span>
+                                        <button 
+                                            onClick={() => removeChild(child.id)} 
+                                            className="p-3 text-slate-200 hover:text-apple-500 transition-colors z-10"
+                                        >
+                                            <Trash2 className="w-5 h-5" />
+                                        </button>
+                                    </div>
                                 </div>
                             );
                         })}
@@ -3019,32 +3178,75 @@ export default function App() {
                             return (
                                 <div 
                                     key={child.id} 
-                                    className="relative mt-3 p-5 rounded-[2rem] flex items-center justify-between bg-white border border-wood-200/40 shadow-sm shadow-wood-50/50 animate-in slide-in-from-top-4 overflow-hidden"
+                                    className="relative mt-3 p-0 rounded-[2rem] flex items-center justify-between bg-white border border-wood-200/40 shadow-sm shadow-wood-50/50 animate-in slide-in-from-top-4 overflow-hidden"
+                                    style={{ minHeight: '62px' }}
                                 >
-                                    {pressingChildId && pressingChildId.id === child.id && (
-                                        <div className="absolute inset-0 bg-slate-200/50 pointer-events-none z-20">
-                                            <div className="h-full bg-wood-500/20 animate-long-press" />
+                                    {/* Underlay Action Buttons */}
+                                    {swipeChildId === child.id && (
+                                        <div className="absolute inset-y-0 left-0 flex items-center bg-slate-50 border-r border-slate-100 rounded-[2rem] pl-4 pr-6 gap-2 z-0 animate-in fade-in duration-200">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'regular'); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-[10px] font-black shadow-sm transition-all active:scale-95"
+                                            >
+                                                出席
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'waitlist'); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-[10px] font-black shadow-sm transition-all active:scale-95"
+                                            >
+                                                待機
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); setSwipeChildId(null); setSwipeOffset(0); }}
+                                                className="text-slate-400 hover:text-slate-600 px-1 text-[9px] font-black"
+                                            >
+                                                戻る
+                                            </button>
                                         </div>
                                     )}
-                                    <span 
-                                        className="text-xs font-black text-slate-600 cursor-pointer select-none longpress-safe flex-1 py-1"
-                                        onMouseDown={(e) => startLongPress(e, child.id, 'absent')}
-                                        onMouseUp={(e) => cancelLongPress(e, child.id)}
-                                        onMouseLeave={(e) => cancelLongPress(e, child.id)}
-                                        onTouchStart={(e) => handleTouchStart(e, child.id, 'absent')}
-                                        onTouchEnd={(e) => cancelLongPress(e, child.id)}
-                                        onTouchMove={(e) => handleTouchMove(e, child.id)}
-                                        onContextMenu={(e) => e.preventDefault()}
+
+                                    {/* Swipable content wrapper */}
+                                    <div 
+                                        className="w-full h-full p-5 flex items-center justify-between bg-inherit z-10 transition-transform duration-200"
+                                        style={{ transform: swipeChildId === child.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)' }}
+                                        onTouchStart={(e) => handleSwipeStart(e, child.id)}
+                                        onTouchMove={(e) => handleSwipeMove(e)}
+                                        onTouchEnd={() => handleSwipeEnd()}
                                     >
-                                        {name}
-                                        <span className="text-[10px] text-wood-400 font-bold ml-2">欠席 (長押しで状態変更)</span>
-                                    </span>
-                                    <button 
-                                        onClick={() => removeChild(child.id)} 
-                                        className="p-3 text-slate-200 hover:text-apple-500 transition-colors z-10"
-                                    >
-                                        <Trash2 className="w-5 h-5" />
-                                    </button>
+                                        {pressingChildId && pressingChildId.id === child.id && (
+                                            <div className="absolute inset-0 bg-slate-200/50 pointer-events-none z-20">
+                                                <div className="h-full bg-wood-500/20 animate-long-press" />
+                                            </div>
+                                        )}
+                                        <span 
+                                            className="text-xs font-black text-slate-600 cursor-pointer select-none longpress-safe flex-1 py-1"
+                                            onMouseDown={(e) => startLongPress(e, child.id, 'absent')}
+                                            onMouseUp={(e) => cancelLongPress(e, child.id)}
+                                            onMouseLeave={(e) => cancelLongPress(e, child.id)}
+                                            onTouchStart={(e) => {
+                                                handleSwipeStart(e, child.id);
+                                                handleTouchStart(e, child.id, 'absent');
+                                            }}
+                                            onTouchEnd={(e) => {
+                                                handleSwipeEnd();
+                                                cancelLongPress(e, child.id);
+                                            }}
+                                            onTouchMove={(e) => {
+                                                handleSwipeMove(e);
+                                                handleTouchMove(e, child.id);
+                                            }}
+                                            onContextMenu={(e) => e.preventDefault()}
+                                        >
+                                            {name}
+                                            <span className="text-[10px] text-wood-400 font-bold ml-2">欠席 (長押し・スワイプで変更)</span>
+                                        </span>
+                                        <button 
+                                            onClick={() => removeChild(child.id)} 
+                                            className="p-3 text-slate-200 hover:text-apple-500 transition-colors z-10"
+                                        >
+                                            <Trash2 className="w-5 h-5" />
+                                        </button>
+                                    </div>
                                 </div>
                             );
                         })}
@@ -3216,7 +3418,20 @@ export default function App() {
                     onSaveOkWords={handleSaveOkWords}
                 />
             )}
-            <ExportModal show={showExportModal} onClose={() => setShowExportModal(false)} selectedDate={selectedDate} children={children} results={results} summaryC={summaryC} selectedOffice={selectedOffice} staffList={filteredStaffList} />
+            <ExportModal 
+                show={showExportModal} 
+                onClose={() => setShowExportModal(false)} 
+                selectedDate={selectedDate} 
+                children={children} 
+                results={results} 
+                summaryC={summaryC} 
+                selectedOffice={selectedOffice} 
+                staffList={filteredStaffList}
+                dailyTable={dailyTable}
+                dailyMessages={dailyMessages}
+                globalLog={globalLog}
+                attendance={attendance}
+            />
             {showAttendanceModal && (
                 <AttendanceModal
                     onClose={() => { setShowAttendanceModal(false); fetchDailyData(selectedDate, selectedOffice?.id); }}

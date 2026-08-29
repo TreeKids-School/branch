@@ -145,6 +145,8 @@ export default function MemoPanel({
     const [treeContent, setTreeContent] = useState('');
     const [isEditingTemplate, setIsEditingTemplate] = useState(false);
     const [templateDraft, setTemplateDraft] = useState('');
+    const [isFocused, setIsFocused] = useState(false);
+    const [activeToolbarMenu, setActiveToolbarMenu] = useState(null); // 'memo' | 'program' | null
 
     // Conflict detection states
     const [hasConflict, setHasConflict] = useState(false);
@@ -160,6 +162,27 @@ export default function MemoPanel({
         }
     };
 
+    const insertTextAtCursor = (textToInsert) => {
+        if (!textToInsert) return;
+        const textarea = treeTextareaRef.current;
+        if (textarea) {
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const before = treeContent.substring(0, start);
+            const after = treeContent.substring(end);
+            const newContent = before + textToInsert + after;
+            setTreeContent(newContent);
+            
+            setTimeout(() => {
+                textarea.focus();
+                const newCursorPos = start + textToInsert.length;
+                textarea.setSelectionRange(newCursorPos, newCursorPos);
+            }, 50);
+        } else {
+            setTreeContent(prev => prev ? prev + '\n' + textToInsert : textToInsert);
+        }
+    };
+
     const handleInsertTemplate = () => {
         const template = greetingTemplates[currentStaffName] || '';
         if (!template.trim()) {
@@ -170,23 +193,7 @@ export default function MemoPanel({
             }
             return;
         }
-
-        const textarea = treeTextareaRef.current;
-        if (textarea) {
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const before = treeContent.substring(0, start);
-            const after = treeContent.substring(end);
-            const newContent = before + template + after;
-            setTreeContent(newContent);
-            setTimeout(() => {
-                textarea.focus();
-                const newCursorPos = start + template.length;
-                textarea.setSelectionRange(newCursorPos, newCursorPos);
-            }, 0);
-        } else {
-            setTreeContent(prev => prev ? template + '\n' + prev : template);
-        }
+        insertTextAtCursor(template);
     };
 
     const handleStartEditTemplate = () => {
@@ -715,6 +722,8 @@ export default function MemoPanel({
                                         value={treeContent}
                                         onChange={(e) => setTreeContent(e.target.value)}
                                         onScroll={handleTextareaScroll}
+                                        onFocus={() => setIsFocused(true)}
+                                        onBlur={() => setTimeout(() => setIsFocused(false), 200)}
                                         placeholder="ご家庭向けのツリー通信をリアルタイム自動保存します..."
                                         className="w-full h-full p-3 text-xs md:text-sm bg-transparent border-0 outline-none transition-all leading-relaxed resize-none font-medium text-slate-700 overflow-y-auto block flex-1 relative z-10"
                                     />
@@ -1002,34 +1011,135 @@ export default function MemoPanel({
                             })}
                         </div>
 
-                        <div className="relative group">
-                            <textarea
-                                id="guide-chat-textarea"
-                                value={chatText}
-                                onChange={(e) => setChatText(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleChatSend(); }}
-                                placeholder="チャットメモを入力（スタッフ間共有用）..."
-                                className="w-full min-h-[100px] p-5 pb-16 text-[14px] bg-red-50/10 border-2 border-red-100/50 rounded-[2rem] outline-none focus:border-red-500 focus:bg-white focus:ring-8 focus:ring-red-50 transition-all shadow-inner leading-relaxed resize-none font-medium text-slate-800"
-                            />
-                            <div className="absolute bottom-4 right-4 flex items-center gap-2">
-                                <button 
-                                    onClick={handleClose}
-                                    className="p-3 bg-white hover:bg-slate-50 text-slate-600 rounded-xl border border-slate-200 shadow-lg transition-all active:scale-90 flex items-center gap-1"
-                                    type="button"
-                                >
-                                    <X className="w-4 h-4" />
-                                    <span className="text-xs font-black">閉じる</span>
-                                </button>
-                                <button 
-                                    onClick={handleChatSend}
-                                    disabled={!chatText.trim()}
-                                    className="p-3 bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-2xl transition-all active:scale-90 disabled:grayscale"
-                                    type="button"
-                                >
-                                    <Send className="w-4 h-4" />
-                                </button>
+                        <div className="flex items-end gap-2.5 w-full">
+                            <div className="flex-1">
+                                <textarea
+                                    id="guide-chat-textarea"
+                                    value={chatText}
+                                    onChange={(e) => setChatText(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleChatSend(); }}
+                                    placeholder="チャットメモを入力（スタッフ間共有用）..."
+                                    className="w-full min-h-[90px] max-h-[150px] p-4 text-[14px] bg-red-50/10 border-2 border-red-100/50 rounded-2xl outline-none focus:border-red-500 focus:bg-white focus:ring-4 focus:ring-red-50 transition-all shadow-inner leading-relaxed resize-none font-medium text-slate-800"
+                                />
                             </div>
+                            <button 
+                                onClick={handleChatSend}
+                                disabled={!chatText.trim()}
+                                className="h-12 w-12 bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-lg transition-all active:scale-90 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none flex items-center justify-center flex-shrink-0"
+                                type="button"
+                            >
+                                <Send className="w-5 h-5" />
+                            </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Mobile Keyboard Toolbar */}
+            {isTree && isFocused && (
+                <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-100 border-t border-slate-200 shadow-lg flex flex-col">
+                    {/* Popovers for quick insertions */}
+                    {activeToolbarMenu === 'memo' && (
+                        <div className="max-h-[200px] overflow-y-auto bg-white p-2 border-b border-slate-200 flex flex-col gap-1.5 custom-scrollbar">
+                            <div className="flex justify-between items-center px-2 py-1 text-[9px] font-black text-slate-400 uppercase">
+                                <span>挿入するチャットメモを選択</span>
+                                <button onMouseDown={(e) => { e.preventDefault(); setActiveToolbarMenu(null); }} className="text-slate-500 hover:text-slate-800">閉じる</button>
+                            </div>
+                            {messages.length === 0 ? (
+                                <p className="text-center py-4 text-xs text-slate-400">チャットメモがありません</p>
+                            ) : (
+                                messages.map((m, idx) => {
+                                    let cleanedText = m.text.trim();
+                                    for (const tag of tags) {
+                                        if (cleanedText.startsWith(tag)) {
+                                            cleanedText = cleanedText.substring(tag.length).trim();
+                                            break;
+                                        }
+                                    }
+                                    cleanedText = cleanedText.replace(/^(?:【[^】]+】|\[[^\]]+\])\s*/, '');
+                                    return (
+                                        <button
+                                            key={m.id || idx}
+                                            onMouseDown={(e) => {
+                                                e.preventDefault();
+                                                insertTextAtCursor(cleanedText);
+                                                setActiveToolbarMenu(null);
+                                            }}
+                                            className="text-left p-2 hover:bg-slate-50 border border-slate-150 rounded-xl text-xs font-bold text-slate-700 truncate"
+                                        >
+                                            {m.tag && <span className="text-[9px] bg-red-50 text-red-600 px-1 rounded mr-1">{m.tag}</span>}
+                                            {cleanedText}
+                                        </button>
+                                    );
+                                })
+                            )}
+                        </div>
+                    )}
+
+                    {activeToolbarMenu === 'program' && (
+                        <div className="max-h-[200px] overflow-y-auto bg-white p-2 border-b border-slate-200 flex flex-col gap-1.5 custom-scrollbar">
+                            <div className="flex justify-between items-center px-2 py-1 text-[9px] font-black text-slate-400 uppercase">
+                                <span>挿入するプログラムを選択</span>
+                                <button onMouseDown={(e) => { e.preventDefault(); setActiveToolbarMenu(null); }} className="text-slate-500 hover:text-slate-800">閉じる</button>
+                            </div>
+                            {(() => {
+                                const programsList = (programs && programs.length > 0)
+                                    ? programs
+                                    : (programTitle || programSummary ? [{ title: programTitle, summary: programSummary }] : []);
+                                const validProgs = programsList.filter(p => p.title || p.summary);
+                                return validProgs.length === 0 ? (
+                                    <p className="text-center py-4 text-xs text-slate-400">プログラムが登録されていません</p>
+                                ) : (
+                                    validProgs.map((prog, idx) => (
+                                        <button
+                                            key={idx}
+                                            onMouseDown={(e) => {
+                                                e.preventDefault();
+                                                const textToInsert = (prog.title && prog.summary)
+                                                    ? `${prog.title}：${prog.summary}`
+                                                    : prog.title || prog.summary || '';
+                                                insertTextAtCursor(textToInsert);
+                                                setActiveToolbarMenu(null);
+                                            }}
+                                            className="text-left p-2 hover:bg-slate-50 border border-slate-150 rounded-xl text-xs font-bold text-slate-700 truncate"
+                                        >
+                                            {prog.title}
+                                        </button>
+                                    ))
+                                );
+                            })()}
+                        </div>
+                    )}
+
+                    {/* Main Toolbar Buttons */}
+                    <div className="flex justify-around items-center p-2 gap-2 h-12">
+                        <button
+                            type="button"
+                            onMouseDown={(e) => { e.preventDefault(); setActiveToolbarMenu(prev => prev === 'memo' ? null : 'memo'); }}
+                            className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 text-center flex items-center justify-center gap-1 ${activeToolbarMenu === 'memo' ? 'bg-red-500 text-white border-red-600' : 'bg-white text-red-600 border-red-200'}`}
+                        >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            <span>チャットメモ</span>
+                        </button>
+                        <button
+                            type="button"
+                            onMouseDown={(e) => { e.preventDefault(); setActiveToolbarMenu(prev => prev === 'program' ? null : 'program'); }}
+                            className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 text-center flex items-center justify-center gap-1 ${activeToolbarMenu === 'program' ? 'bg-wood-500 text-white border-wood-600' : 'bg-white text-wood-700 border-wood-200'}`}
+                        >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>プログラム</span>
+                        </button>
+                        <button
+                            type="button"
+                            onMouseDown={(e) => {
+                                e.preventDefault();
+                                handleInsertTemplate();
+                            }}
+                            className="flex-1 py-2 bg-tree-600 hover:bg-tree-700 text-white rounded-xl text-xs font-black shadow-sm border border-tree-700 transition-all active:scale-95 text-center flex items-center justify-center gap-1"
+                        >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>挨拶テンプレ</span>
+                        </button>
                     </div>
                 </div>
             )}

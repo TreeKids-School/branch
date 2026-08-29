@@ -68,9 +68,22 @@ export default function CalendarModal({ show, onClose, selectedDate, setSelected
                             className="p-3 rounded-full hover:bg-slate-100 text-slate-500 hover:text-indigo-600 transition-colors">
                             <ChevronLeft className="w-6 h-6" />
                         </button>
-                        <h2 className="text-2xl font-black text-indigo-900">
-                            {viewDate.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
-                        </h2>
+                        <div className="flex flex-col items-center">
+                            <h2 className="text-2xl font-black text-indigo-900 leading-none">
+                                {viewDate.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })}
+                            </h2>
+                            <button 
+                                onClick={() => {
+                                    setViewDate(new Date());
+                                    const todayStr = new Date().toISOString().split('T')[0];
+                                    setSelectedDate(todayStr);
+                                    onClose();
+                                }}
+                                className="mt-2 text-[10px] text-indigo-600 hover:text-indigo-800 font-black px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 rounded-full transition-all active:scale-95 shadow-sm inline-flex items-center"
+                            >
+                                今日へ戻る
+                            </button>
+                        </div>
                         <button onClick={() => { const d = new Date(viewDate); d.setMonth(d.getMonth() + 1); setViewDate(d); }}
                             className="p-3 rounded-full hover:bg-slate-100 text-slate-500 hover:text-indigo-600 transition-colors">
                             <ChevronRight className="w-6 h-6" />
