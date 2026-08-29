@@ -365,7 +365,8 @@ export default function App() {
                     if (data && data.version && data.version !== APP_VERSION) {
                         console.log(`[Version Check] New version available: ${data.version} (Current: ${APP_VERSION})`);
                         if (window.confirm(`新しいシステムアップデート（v${data.version}）が利用可能です。\n最新版を読み込むためにアプリを再起動しますか？`)) {
-                            window.location.reload(true);
+                            const timestamp = Date.now();
+                            window.location.href = window.location.origin + window.location.pathname + '?update=' + timestamp + window.location.hash;
                         }
                     }
                 }
