@@ -1818,6 +1818,7 @@ export default function App() {
 
         showToast(`${dates.length}日分のデータを取得中...`);
 
+        const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ms));
         const headers = ["児童名", "日付", "学習", "プログラム", "送迎時間", "終了時間", "迎え場所", "ツリー通信", "チャットメモ", "今後の予定", "備考", "復元用データ", "日次データ"];
         const allRows = [];
 
@@ -1843,9 +1844,13 @@ export default function App() {
                     };
                 } else {
                     try {
-                        const data = await cs({ action: 'getReport', date: dateStr, officeId });
+                        const data = await Promise.race([
+                            cs({ action: 'getReport', date: dateStr, officeId }),
+                            timeout(3000)
+                        ]);
                         return { dateStr, report: data };
-                    } catch {
+                    } catch (e) {
+                        console.warn(`[Export Timeout] Skipped date ${dateStr} due to timeout or error:`, e);
                         return { dateStr, report: null };
                     }
                 }
