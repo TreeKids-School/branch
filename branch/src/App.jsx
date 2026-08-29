@@ -1745,7 +1745,6 @@ export default function App() {
         setTimeout(() => setToast(null), 5000);
     };
 
-
     // タグ抽出
     const getStudyText = (childId) => {
         const msgs = dailyMessages[childId] || [];
@@ -1782,46 +1781,87 @@ export default function App() {
         const officeId = selectedOffice?.id;
         if (!officeId) { showToast('事業所が選択されていません'); return; }
 
-        // 対象日付リストを生成
+        let dates = [];
         const today = new Date(selectedDate);
-        const dates = [];
+
         if (range === 'day') {
             dates.push(selectedDate);
+        } else if (range === 'all') {
+            try {
+                showToast("データ日付一覧を取得中...");
+                const index = await cs({ action: 'getReportIndex', officeId });
+                if (Array.isArray(index)) {
+                    dates = [...index].sort();
+                }
+            } catch (err) {
+                console.error("Failed to get report index:", err);
+                showToast("日付一覧の取得に失敗しました");
+                return;
+            }
         } else {
             let startDate = new Date(today);
             if (range === 'week') startDate.setDate(today.getDate() - 6);
             else if (range === 'month') startDate.setMonth(today.getMonth() - 1);
             else if (range === 'year') startDate.setFullYear(today.getFullYear() - 1);
-            else if (range === 'all') startDate = new Date('2024-01-01');
             for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
                 dates.push(d.toISOString().split('T')[0]);
             }
         }
 
+        if (dates.length === 0) { showToast('対象のデータがありません'); return; }
+
         showToast(`${dates.length}日分のデータを取得中...`);
 
-        // 末尾の「復元用データ」は取り込み時の完全復元用（人が読む必要はない）
-        const headers = ["児童名", "日付", "学習", "プログラム", "送迎時間", "終了時間", "迎え場所", "ツリー通信", "チャットメモ", "今後の予定", "備考", "復元用データ"];
+        const headers = ["児童名", "日付", "学習", "プログラム", "送迎時間", "終了時間", "迎え場所", "ツリー通信", "チャットメモ", "今後の予定", "備考", "復元用データ", "日次データ"];
         const allRows = [];
 
-        for (const dateStr of dates) {
-            let dayChildren, dayResults, dayMessages, dayTable;
-            if (dateStr === selectedDate) {
-                // 現在表示中の日はローカルデータを使用
-                dayChildren = children;
-                dayResults = results;
-                dayMessages = dailyMessages;
-                dayTable = dailyTable;
-            } else {
-                // 他の日はFirestoreから取得
-                try {
-                    const data = await cs({ action: 'getReport', date: dateStr, officeId });
-                    if (!data || typeof data !== 'object') continue;
-                    dayChildren = Array.isArray(data.children) ? data.children : [];
-                    dayResults = data.results || {};
-                    dayMessages = data.messages || {};
-                    dayTable = data.dailyTable || {};
-                } catch { continue; }
+        // datesが多い場合を考慮してバッチ処理
+        const batchSize = 15;
+        const retrievedReports = [];
+
+        for (let i = 0; i < dates.length; i += batchSize) {
+            const batchDates = dates.slice(i, i + batchSize);
+            const promises = batchDates.map(async (dateStr) => {
+                if (dateStr === selectedDate) {
+                    return {
+                        dateStr,
+                        report: {
+                            children,
+                            results,
+                            messages: dailyMessages,
+                            dailyTable,
+                            summaryC,
+                            globalLog
+                        }
+                    };
+                } else {
+                    try {
+                        const data = await cs({ action: 'getReport', date: dateStr, officeId });
+                        return { dateStr, report: data };
+                    } catch {
+                        return { dateStr, report: null };
+                    }
+                }
+            });
+            const results = await Promise.all(promises);
+            retrievedReports.push(...results);
+        }
+
+        retrievedReports.forEach(({ dateStr, report }) => {
+            if (!report || typeof report !== 'object') return;
+
+            const dayChildren = Array.isArray(report.children) ? report.children : [];
+            const dayResults = report.results || {};
+            const dayMessages = report.messages || {};
+            const dayTable = report.dailyTable || {};
+            const daySummaryC = report.summaryC || '';
+            const dayGlobalLog = report.globalLog || {};
+
+            let dailyDataJSON = '';
+            try {
+                dailyDataJSON = JSON.stringify({ summaryC: daySummaryC, globalLog: dayGlobalLog });
+            } catch {
+                dailyDataJSON = '';
             }
 
             dayChildren.filter(c => !c.isPlaceholder).forEach(child => {
@@ -1841,7 +1881,7 @@ export default function App() {
                 }).map(m => { let t = m.text.trim(); if (m.tag && !t.includes(m.tag)) t = `${m.tag}${t}`; return t; }).filter(t => t).join(' / ');
                 const futureText = msgs.filter(m => m.tag === '【今後の予定】' || (m.text && m.text.includes('【今後の予定】'))).map(m => m.text).join(' | ');
                 const remarksText = msgs.filter(m => m.tag === '【備考】' || (m.text && m.text.startsWith('【備考】'))).map(m => m.text).join(' | ');
-                // 復元用データ: メモ配列・書類・表の行を、そのままの形で保持する
+                
                 let restoreJSON = '';
                 try {
                     restoreJSON = JSON.stringify({ v: 1, m: msgs, r: result, t: row });
@@ -1851,10 +1891,11 @@ export default function App() {
                     child.name, dateStr, studyMsgs, progMsgs,
                     row.transportTime || '', row.endTime || '', row.pickupLocation || '',
                     result.D || '', chatText, futureText, remarksText,
-                    restoreJSON
+                    restoreJSON,
+                    dailyDataJSON
                 ]);
             });
-        }
+        });
 
         if (allRows.length === 0) { showToast('エクスポートするデータがありません'); return; }
 
