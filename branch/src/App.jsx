@@ -1740,9 +1740,14 @@ export default function App() {
             });
     };
 
-    const showToast = (message) => {
+    const showToast = (message, duration = 5000) => {
         setToast(message);
-        setTimeout(() => setToast(null), 5000);
+        if (window.toastTimeout) {
+            clearTimeout(window.toastTimeout);
+        }
+        if (duration) {
+            window.toastTimeout = setTimeout(() => setToast(null), duration);
+        }
     };
 
     // タグ抽出
@@ -1820,6 +1825,7 @@ export default function App() {
         const retrievedReports = [];
 
         for (let i = 0; i < dates.length; i += batchSize) {
+            showToast(`${dates.length}日分のデータを取得中... (${i} / ${dates.length}日完了)`, 0);
             const batchDates = dates.slice(i, i + batchSize);
             const promises = batchDates.map(async (dateStr) => {
                 if (dateStr === selectedDate) {
@@ -1846,6 +1852,8 @@ export default function App() {
             const results = await Promise.all(promises);
             retrievedReports.push(...results);
         }
+
+        showToast("CSVファイルを作成中...", 0);
 
         retrievedReports.forEach(({ dateStr, report }) => {
             if (!report || typeof report !== 'object') return;
