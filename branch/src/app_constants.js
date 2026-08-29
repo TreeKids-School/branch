@@ -1,6 +1,6 @@
 // ── App Constants ─────────────────────────────────────────────────────────────
 
-export const APP_VERSION = '26.08.29.6';
+export const APP_VERSION = '26.08.29.7';
 
 export const DAILY_LIMIT = 20;
 
