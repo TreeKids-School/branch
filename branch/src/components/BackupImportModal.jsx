@@ -256,8 +256,8 @@ export default function BackupImportModal({
     // ── 集計 ─────────────────────────────────────────────
     const matchedCount = rows.filter(r => r.matchedChild).length;
     const unmatchedCount = rows.length - matchedCount;
-    const selectedCount = rows.filter(r => r.enabled && r.matchedChild).length;
-    const dateCount = new Set(rows.filter(r => r.enabled && r.matchedChild).map(r => r.date)).size;
+    const selectedCount = rows.filter(r => r.enabled).length;
+    const dateCount = new Set(rows.filter(r => r.enabled).map(r => r.date)).size;
     const restoreCount = rows.filter(r => r.restore).length;
 
     return (
