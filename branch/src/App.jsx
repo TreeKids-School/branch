@@ -1855,8 +1855,8 @@ export default function App() {
                     }
                 }
             });
-            const results = await Promise.all(promises);
-            retrievedReports.push(...results);
+            const batchResults = await Promise.all(promises);
+            retrievedReports.push(...batchResults);
         }
 
         showToast("CSVファイルを作成中...", 0);
