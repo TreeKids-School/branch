@@ -1333,7 +1333,7 @@ export default function App() {
         const newLogs = newChildrenToAdd.map(sc => ({
             id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toISOString(),
-            staffName: currentStaffName || 'スタッフ',
+            staffName: getCurrentStaffName(),
             childId: sc.id,
             childName: sc.lastName ? `${sc.lastName} ${sc.firstName}` : sc.name,
             type: 'add',
@@ -1382,7 +1382,7 @@ export default function App() {
         const newLog = {
             id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 9),
             timestamp: new Date().toISOString(),
-            staffName: currentStaffName || 'スタッフ',
+            staffName: getCurrentStaffName(),
             childId: targetChild.id,
             childName: targetChild.lastName ? `${targetChild.lastName} ${targetChild.firstName}` : targetChild.name,
             type: 'status',
