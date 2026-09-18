@@ -1,7 +1,7 @@
 import { firestore, auth } from '../firebase';
 import { 
     doc, getDoc, setDoc, updateDoc, collection, getDocs, deleteDoc, 
-    addDoc, serverTimestamp, query, where, orderBy, Timestamp 
+    addDoc, serverTimestamp, query, where, orderBy, Timestamp, arrayUnion
 } from 'firebase/firestore';
 
 const isLocal = () => false; // Force Firestore for testing/deployment
@@ -312,7 +312,8 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 const results = snap.docs.map(doc => {
                     const data = doc.data();
                     console.log(`[Firestore Debug] Staff Doc ID: ${doc.id}, Data:`, data);
-                    return { id: doc.id, ...data, name: data.name || doc.id };
+                    const name = data.name || (data.lastName && data.firstName ? `${data.lastName} ${data.firstName}` : doc.id);
+                    return { id: doc.id, ...data, name };
                 });
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return results;
@@ -330,7 +331,8 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return snap.docs.map(doc => {
                     const data = doc.data();
-                    return { id: doc.id, name: data.name || doc.id };
+                    const name = data.name || (data.lastName && data.firstName ? `${data.lastName} ${data.firstName}` : doc.id);
+                    return { id: doc.id, ...data, name };
                 });
             }
             case 'getAttendance': {
@@ -346,6 +348,31 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 const attendanceId = payload.officeId ? `${payload.officeId}_${date}` : date;
                 const docRef = doc(firestore, 'attendance', attendanceId);
                 await setDoc(docRef, data, { merge: true });
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return { status: 'OK' };
+            }
+            // ===== 変更履歴（専用コレクション） =====
+            case 'getChangeLogs': {
+                if (!date) throw new Error('date is required for getChangeLogs');
+                const logDocId = payload.officeId ? `${payload.officeId}_${date}` : date;
+                const docRef = doc(firestore, 'changeLogs', logDocId);
+                const snap = await getDoc(docRef);
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return snap.exists() ? (snap.data().logs || []) : [];
+            }
+            case 'saveChangeLogs': {
+                // payload.logs = array of new log entries to append
+                if (!date) throw new Error('date is required for saveChangeLogs');
+                const logDocId = payload.officeId ? `${payload.officeId}_${date}` : date;
+                const docRef = doc(firestore, 'changeLogs', logDocId);
+                const { logs: newEntries } = payload;
+                if (!newEntries || newEntries.length === 0) return { status: 'OK' };
+                await setDoc(docRef, {
+                    logs: arrayUnion(...newEntries),
+                    date,
+                    officeId: payload.officeId || null,
+                    updatedAt: new Date().toISOString()
+                }, { merge: true });
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
             }

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { X, Save, Settings, Tag, Plus, Trash2, CheckCircle2 } from 'lucide-react';
 
-export default function SettingsModal({ onClose, tags, onSaveTags, okWords = [], onSaveOkWords }) {
+export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSaveTags, okWords = [], onSaveOkWords }) {
     const [localTags, setLocalTags] = useState(tags);
+    const [localTagInsertTexts, setLocalTagInsertTexts] = useState(tagInsertTexts);
     const [newTag, setNewTag] = useState('');
+    const [newTagInsertText, setNewTagInsertText] = useState('');
 
     const [localOkWords, setLocalOkWords] = useState(okWords);
     const [newOkWord, setNewOkWord] = useState('');
@@ -15,11 +17,17 @@ export default function SettingsModal({ onClose, tags, onSaveTags, okWords = [],
     }, [tags]);
 
     useEffect(() => {
+        setLocalTagInsertTexts(tagInsertTexts);
+    }, [tagInsertTexts]);
+
+    useEffect(() => {
         setLocalOkWords(okWords);
     }, [okWords]);
 
     const handleSave = () => {
-        onSaveTags(localTags);
+        const cleanedTags = localTags.map(t => t.trim()).filter(Boolean);
+        const uniqueTags = Array.from(new Set(cleanedTags));
+        onSaveTags(uniqueTags, localTagInsertTexts);
         if (onSaveOkWords) {
             onSaveOkWords(localOkWords);
         }
@@ -28,13 +36,49 @@ export default function SettingsModal({ onClose, tags, onSaveTags, okWords = [],
 
     // Tags actions
     const addTag = () => {
-        if (!newTag.trim() || localTags.includes(newTag.trim())) return;
-        setLocalTags([...localTags, newTag.trim()]);
+        const trimmed = newTag.trim();
+        if (!trimmed || localTags.includes(trimmed)) return;
+        setLocalTags([...localTags, trimmed]);
+        if (newTagInsertText.trim()) {
+            setLocalTagInsertTexts(prev => ({ ...prev, [trimmed]: newTagInsertText.trim() }));
+        }
         setNewTag('');
+        setNewTagInsertText('');
     };
 
     const removeTag = (tag) => {
         setLocalTags(localTags.filter(t => t !== tag));
+        setLocalTagInsertTexts(prev => {
+            const next = { ...prev };
+            delete next[tag];
+            return next;
+        });
+    };
+
+    const handleUpdateTagName = (index, newName) => {
+        const oldTag = localTags[index];
+        setLocalTags(prev => {
+            const next = [...prev];
+            next[index] = newName;
+            return next;
+        });
+        if (oldTag && oldTag !== newName) {
+            setLocalTagInsertTexts(prev => {
+                const next = { ...prev };
+                if (oldTag in next) {
+                    next[newName] = next[oldTag];
+                    delete next[oldTag];
+                }
+                return next;
+            });
+        }
+    };
+
+    const handleUpdateInsertText = (tag, text) => {
+        setLocalTagInsertTexts(prev => ({
+            ...prev,
+            [tag]: text
+        }));
     };
 
     // OK Words actions
@@ -104,35 +148,117 @@ export default function SettingsModal({ onClose, tags, onSaveTags, okWords = [],
                                 <div className="w-2 h-2 rounded-full bg-tree-500 shadow-md" />
                                 <h4 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.25em]">チャットメモ用タグ管理</h4>
                             </div>
-                            <div className="glass-card p-8 md:p-10 rounded-[3.5rem] border border-white shadow-premium space-y-10">
-                                <div className="flex flex-wrap gap-3">
-                                    {localTags.map(tag => (
-                                        <div key={tag} className="flex items-center gap-2 px-5 py-2.5 bg-tree-50 text-tree-700 rounded-full text-xs font-black border border-tree-100 shadow-sm animate-in zoom-in-95 group hover:bg-tree-100 transition-colors">
-                                            {tag}
-                                            <button onClick={() => removeTag(tag)} className="p-0.5 hover:text-apple-500 transition-colors">
-                                                <X className="w-3.5 h-3.5" />
-                                            </button>
+                            <div className="glass-card p-6 md:p-8 rounded-[2.5rem] border border-white shadow-premium space-y-6">
+                                <p className="text-xs text-slate-500 font-bold leading-relaxed px-1">
+                                    タグを選択した際に、チャットメモ入力欄の先頭へ自動挿入される文字を設定できます。<br className="hidden md:inline" />
+                                    <span className="text-indigo-600 font-black">「＋プログラム内容」</span>ボタンを押すと、その日のプログラム概要が自動挿入されます。空欄にすると文字は自動挿入されません。
+                                </p>
+
+                                {/* Tag List with Auto-Insert Text Config */}
+                                <div className="space-y-3 max-h-[42vh] overflow-y-auto custom-scrollbar pr-1">
+                                    {localTags.length > 0 && (
+                                        <div className="hidden md:flex items-center gap-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                            <span className="w-44">タグの名称（直接変更可）</span>
+                                            <span className="flex-1">自動挿入する文字</span>
                                         </div>
-                                    ))}
+                                    )}
+                                    {localTags.map((tag, idx) => {
+                                        const currentVal = localTagInsertTexts[tag] ?? '';
+                                        return (
+                                            <div 
+                                                key={idx} 
+                                                className="p-3.5 md:p-4 bg-slate-50/80 hover:bg-slate-50 rounded-2xl border border-slate-200/70 transition-all flex flex-col md:flex-row md:items-center gap-2.5 shadow-xs group"
+                                            >
+                                                <div className="flex items-center justify-between md:w-44 flex-shrink-0 gap-1.5">
+                                                    <div className="relative w-full">
+                                                        <input
+                                                            type="text"
+                                                            value={tag}
+                                                            onChange={e => handleUpdateTagName(idx, e.target.value)}
+                                                            placeholder="例: 【宿題】"
+                                                            className="w-full px-3 py-2 bg-white border border-tree-200 rounded-xl text-xs font-black text-tree-800 placeholder:text-slate-300 focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none transition-all shadow-2xs"
+                                                            title="タグ名を変更できます"
+                                                        />
+                                                    </div>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => removeTag(tag)} 
+                                                        className="md:hidden text-slate-400 hover:text-rose-500 p-1 transition-colors flex-shrink-0"
+                                                        title="タグを削除"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                                
+                                                <div className="flex-1 flex items-center gap-2">
+                                                    <div className="relative flex-1">
+                                                        <input
+                                                            type="text"
+                                                            value={currentVal}
+                                                            onChange={e => handleUpdateInsertText(tag, e.target.value)}
+                                                            placeholder="自動挿入文字（空欄で自動挿入なし）"
+                                                            className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 placeholder:text-slate-300 focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none transition-all shadow-2xs"
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleUpdateInsertText(tag, '{プログラム内容}')}
+                                                        title="本日のプログラム概要を挿入する設定にします"
+                                                        className="px-2.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-[10px] font-black border border-indigo-200 transition-all active:scale-95 whitespace-nowrap shadow-2xs"
+                                                    >
+                                                        ＋プログラム内容
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => removeTag(tag)} 
+                                                        className="hidden md:flex text-slate-300 hover:text-rose-500 p-2 rounded-xl hover:bg-rose-50 transition-all flex-shrink-0"
+                                                        title="タグを削除"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                     {localTags.length === 0 && (
-                                        <span className="text-xs text-slate-400 font-bold p-2">タグが登録されていません。</span>
+                                        <div className="text-center py-6 text-xs text-slate-400 font-bold">
+                                            登録されているタグはありません。下のフォームから追加してください。
+                                        </div>
                                     )}
                                 </div>
-                                <div className="flex gap-3">
-                                    <div className="relative flex-1">
-                                        <Tag className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
+
+                                {/* Add New Tag Form */}
+                                <div className="p-4 bg-tree-50/40 rounded-2xl border border-tree-100/80 space-y-2.5">
+                                    <div className="text-[10px] font-black text-tree-700 uppercase tracking-wider px-1">新しいタグを追加</div>
+                                    <div className="flex flex-col md:flex-row gap-2">
+                                        <div className="relative md:w-44 flex-shrink-0">
+                                            <Tag className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
+                                            <input
+                                                type="text"
+                                                value={newTag}
+                                                onChange={e => setNewTag(e.target.value)}
+                                                onKeyDown={e => e.key === 'Enter' && addTag()}
+                                                placeholder="例: 【宿題】"
+                                                className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none text-xs font-bold text-slate-700 transition-all shadow-2xs"
+                                            />
+                                        </div>
                                         <input
                                             type="text"
-                                            value={newTag}
-                                            onChange={e => setNewTag(e.target.value)}
+                                            value={newTagInsertText}
+                                            onChange={e => setNewTagInsertText(e.target.value)}
                                             onKeyDown={e => e.key === 'Enter' && addTag()}
-                                            placeholder="新しいタグを追加..."
-                                            className="w-full pl-14 pr-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-full focus:border-tree-500 focus:bg-white focus:ring-8 focus:ring-tree-50 outline-none transition-all text-sm font-bold shadow-inner"
+                                            placeholder="自動挿入文字（任意）"
+                                            className="flex-1 px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none text-xs font-bold text-slate-700 transition-all shadow-2xs"
                                         />
+                                        <button 
+                                            type="button"
+                                            onClick={addTag} 
+                                            className="px-5 py-2.5 bg-tree-500 hover:bg-tree-600 text-white rounded-xl text-xs font-black shadow-md shadow-tree-100 transition-all active:scale-95 flex items-center justify-center gap-1.5 flex-shrink-0"
+                                        >
+                                            <Plus className="w-4 h-4" />
+                                            <span>タグ追加</span>
+                                        </button>
                                     </div>
-                                    <button onClick={addTag} className="p-5 bg-tree-500 hover:bg-tree-600 text-white rounded-full shadow-lg shadow-tree-100 transition-all active:scale-90 flex-shrink-0">
-                                        <Plus className="w-6 h-6" />
-                                    </button>
                                 </div>
                             </div>
                         </div>

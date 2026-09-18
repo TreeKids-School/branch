@@ -5,7 +5,7 @@ import {
     Trash2, Clock, CheckCircle2, AlertCircle, Loader2,
     ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileText, LayoutPanelLeft, UserCheck,
     FileEdit, X, Calendar as CalendarIcon, Settings, LogOut, HelpCircle, Menu,
-    Copy, Check, ClipboardList, ClipboardCheck, History, Plus
+    Copy, Check, ClipboardList, ClipboardCheck, History, Plus, Lock
 } from 'lucide-react';
 import MemoPanel from './components/MemoPanel';
 import DocViewer from './components/DocViewer';
@@ -119,6 +119,7 @@ export default function App() {
     const [showAddChildModal, setShowAddChildModal] = useState(false);
     const [showAttendanceModal, setShowAttendanceModal] = useState(false);
     const [showCSVImportModal, setShowCSVImportModal] = useState(false);
+    const [globalImportLock, setGlobalImportLock] = useState(null);
     const [showBackupImportModal, setShowBackupImportModal] = useState(false);
     const [mobileExportOpen, setMobileExportOpen] = useState(false);
     const [mobileImportOpen, setMobileImportOpen] = useState(false);
@@ -185,6 +186,33 @@ export default function App() {
         if (staff) return staff.name;
         return user.email ? user.email.split('@')[0] : 'Staff';
     }, [user, staffList]);
+
+    const getStaffColor = useCallback((staffName) => {
+        if (!staffName) return '#94a3b8';
+        const cleanTarget = String(staffName).replace(/\s+/g, '');
+        const s = staffList.find(item => {
+            if (!item) return false;
+            if (item.name === staffName || item.id === staffName) return true;
+            const cleanName = String(item.name || '').replace(/\s+/g, '');
+            const cleanId = String(item.id || '').replace(/\s+/g, '');
+            const cleanFull = String((item.lastName || '') + (item.firstName || '')).replace(/\s+/g, '');
+            return (cleanName && cleanName === cleanTarget) ||
+                   (cleanId && cleanId === cleanTarget) ||
+                   (cleanFull && cleanFull === cleanTarget);
+        });
+
+        if (s && (s.iconColor || s.color || s.themeColor || s.badgeColor || s.staffColor)) {
+            return s.iconColor || s.color || s.themeColor || s.badgeColor || s.staffColor;
+        }
+
+        const palette = [
+            '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
+            '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+        ];
+        let hash = 0;
+        for (let i = 0; i < staffName.length; i++) hash = staffName.charCodeAt(i) + ((hash << 5) - hash);
+        return palette[Math.abs(hash) % palette.length];
+    }, [staffList]);
 
     const getChildLockOwner = useCallback((childId) => {
         const lock = activeLocks[childId];
@@ -328,8 +356,8 @@ export default function App() {
         const diffX = tableTouchEnd - tableTouchStart;
         const diffY = tableTouchEndY - tableTouchStartY;
 
-        // 横方向のスワイプ判定（縦方向の移動より横方向が大きく、かつしきい値が60px以上）
-        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 60) {
+        // 横方向のスワイプ判定（縦方向の移動より横方向が大きく、かつしきい値が40px以上）
+        if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
             const tabs = ['learning', 'program', 'transport', 'copy', 'futurePlan', 'remarks'];
             const currentIndex = tabs.indexOf(activeTableTab);
 
@@ -343,6 +371,10 @@ export default function App() {
                 setActiveTableTab(tabs[prevIndex]);
             }
         }
+        setTableTouchStart(null);
+        setTableTouchEnd(null);
+        setTableTouchStartY(null);
+        setTableTouchEndY(null);
     };
 
     const handleDateChange = (newDateStr) => {
@@ -458,6 +490,20 @@ export default function App() {
         return defaultTags;
     });
 
+    const [tagInsertTexts, setTagInsertTexts] = useState(() => {
+        const defaultInsertTexts = {
+            '【プログラム】': '{プログラム内容}',
+            '【ツリー式学習】': 'ツリー式学習'
+        };
+        try {
+            const saved = localStorage.getItem('care_pro_tag_insert_texts');
+            if (saved) {
+                return { ...defaultInsertTexts, ...JSON.parse(saved) };
+            }
+        } catch (e) { console.error('Tag insert texts load error', e); }
+        return defaultInsertTexts;
+    });
+
     // --- Hooks (MUST be called before any early returns) ---
 
     // Storage helper
@@ -473,12 +519,13 @@ export default function App() {
             setChildren(Array.isArray(data.children) ? data.children : []);
             setDailyTable(data.dailyTable || {});
             setGlobalLog(data.globalLog || { admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
-            setChangeLogs(data.changeLogs || []);
         } else {
             setResults({}); setSummaryC(''); setDailyMessages({}); setChildren([]);
             setDailyTable({}); setGlobalLog({ admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
-            setChangeLogs([]);
         }
+        // 変更履歴は専用コレクションから読み込む（1日ごと・全員分）
+        const logs = await cs({ action: 'getChangeLogs', date: dateString, officeId });
+        setChangeLogs(Array.isArray(logs) ? logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)) : []);
 
         const att = await cs({ action: 'getAttendance', date: dateString, officeId });
         const formattedAtt = {};
@@ -610,6 +657,26 @@ export default function App() {
         setIsSandboxMode(false);
     }, [selectedDate, selectedOffice?.id]);
 
+    // CSVインポート処理中の他端末排他ロック監視
+    useEffect(() => {
+        if (!firestore) return;
+        const lockRef = doc(firestore, 'meta', 'importLock');
+        const unsub = onSnapshot(lockRef, (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                const now = Date.now();
+                if (data.isLocked && data.expiresAt > now && data.lockedBy !== user?.uid) {
+                    setGlobalImportLock(data);
+                } else {
+                    setGlobalImportLock(null);
+                }
+            } else {
+                setGlobalImportLock(null);
+            }
+        }, (err) => console.error('importLock onSnapshot error:', err));
+        return () => unsub();
+    }, [user]);
+
     useEffect(() => {
         if (!user || !selectedOffice) return;
 
@@ -634,7 +701,7 @@ export default function App() {
                     setChildren(Array.isArray(data.children) ? data.children : []);
                     setDailyTable(data.dailyTable || {});
                     setGlobalLog(data.globalLog || { admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
-                    setChangeLogs(data.changeLogs || []);
+                    // ※ changeLogs は専用コレクションで管理するためここでは更新しない
                 }
             } else {
                 setActiveLocks({});
@@ -645,7 +712,7 @@ export default function App() {
                     setChildren([]);
                     setDailyTable({});
                     setGlobalLog({ admin: '', supervisor: '', notice: '', activities: '', programTitle: '', programSummary: '' });
-                    setChangeLogs([]);
+                    // ※ changeLogs は専用コレクションで管理するためここでは更新しない
                 }
             }
             setIsSyncing(false);
@@ -720,6 +787,28 @@ export default function App() {
             console.error("Error listening to ok_words:", error);
         });
         return () => unsubscribeOkWords();
+    }, [user]);
+
+    // タグ設定（タグ一覧・自動挿入文字）のリアルタイム同期
+    useEffect(() => {
+        if (!user) return;
+        const ref = doc(firestore, 'meta', 'tag_settings');
+        const unsubscribeTagSettings = onSnapshot(ref, (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                if (Array.isArray(data.tags) && data.tags.length > 0) {
+                    setTags(data.tags);
+                    localStorage.setItem('care_pro_tags', JSON.stringify(data.tags));
+                }
+                if (data.tagInsertTexts) {
+                    setTagInsertTexts(prev => ({ ...prev, ...data.tagInsertTexts }));
+                    localStorage.setItem('care_pro_tag_insert_texts', JSON.stringify(data.tagInsertTexts));
+                }
+            }
+        }, (error) => {
+            console.error("Error listening to tag_settings:", error);
+        });
+        return () => unsubscribeTagSettings();
     }, [user]);
 
     // Heartbeat for keeping lock active (every 2 minutes)
@@ -828,9 +917,22 @@ export default function App() {
     }, [globalLog]);
 
     // 5. Normal Functions & Handlers
-    const handleUpdateTags = (newTags) => {
+    const handleUpdateTags = async (newTags, newInsertTexts) => {
         setTags(newTags);
         localStorage.setItem('care_pro_tags', JSON.stringify(newTags));
+        if (newInsertTexts !== undefined) {
+            setTagInsertTexts(newInsertTexts);
+            localStorage.setItem('care_pro_tag_insert_texts', JSON.stringify(newInsertTexts));
+        }
+        try {
+            const metaRef = doc(firestore, 'meta', 'tag_settings');
+            await setDoc(metaRef, { 
+                tags: newTags, 
+                tagInsertTexts: newInsertTexts !== undefined ? newInsertTexts : tagInsertTexts 
+            }, { merge: true });
+        } catch (e) {
+            console.error("Failed to save tag settings to Firestore:", e);
+        }
     };
 
     const handleLogout = async () => {
@@ -858,6 +960,12 @@ export default function App() {
             if (timeA === timeB) return (a.timestamp || 0) - (b.timestamp || 0);
             return sortConfig.direction === 'asc' ? timeA.localeCompare(timeB) : timeB.localeCompare(timeA);
         }
+        // デフォルト: 送迎時間の早い順（未設定は末尾）
+        const tA = dailyTable[a.id]?.transportTime || '';
+        const tB = dailyTable[b.id]?.transportTime || '';
+        if (!tA && tB) return 1;
+        if (tA && !tB) return -1;
+        if (tA !== tB) return tA.localeCompare(tB);
         return (a.timestamp || 0) - (b.timestamp || 0);
     });
     // Filter active and absent children
@@ -1019,7 +1127,7 @@ export default function App() {
             const added = currMsgs.filter(cm => !prevMsgs.some(pm => pm.id === cm.id));
             const updated = currMsgs.filter(cm => {
                 const pm = prevMsgs.find(p => p.id === cm.id);
-                return pm && pm.text !== cm.text;
+                return pm && (pm.text !== cm.text || pm.tag !== cm.tag);
             });
 
             if (deleted.length > 0) {
@@ -1074,16 +1182,25 @@ export default function App() {
             }
         }
 
-        let updatedLogs = [...changeLogs];
+        // 変更履歴を専用コレクションに保存（上限なし・全員分・日付ごとにリセット）
         if (newLogs.length > 0) {
-            updatedLogs = [...newLogs, ...updatedLogs].slice(0, 10);
-            setChangeLogs(updatedLogs);
+            // ローカルState に即座に反映（新しい順）
+            setChangeLogs(prev => [...newLogs, ...prev]);
         }
 
         const savePromise = (async () => {
             if (isSandboxMode) {
                 console.log('[Sandbox] saveDailyDataGranular bypassed');
                 return;
+            }
+            // 変更履歴は専用コレクションへ（reports ドキュメントには含めない）
+            if (newLogs.length > 0) {
+                await cs({
+                    action: 'saveChangeLogs',
+                    date: selectedDate,
+                    officeId: selectedOffice?.id,
+                    logs: newLogs
+                });
             }
             await cs({
                 action: 'updateDailyReportChildData',
@@ -1093,8 +1210,7 @@ export default function App() {
                 result,
                 tableRow,
                 messagesList,
-                childrenList: children,
-                changeLogs: updatedLogs
+                childrenList: children
             });
 
             const childObj = children.find(c => c.id === childId);
@@ -1199,9 +1315,9 @@ export default function App() {
                 restoreValue: currVal
             };
             
-            const updatedLogs = [restoreLog, ...changeLogs].slice(0, 100);
-            setChangeLogs(updatedLogs);
-            updatePayload.changeLogs = updatedLogs;
+            setChangeLogs(prev => [restoreLog, ...prev]);
+            // 専用コレクションに保存
+            cs({ action: 'saveChangeLogs', date: selectedDate, officeId: selectedOffice?.id, logs: [restoreLog] });
             
             await cs(updatePayload);
             
@@ -1344,10 +1460,12 @@ export default function App() {
             restoreValue: null
         }));
         
-        const updatedLogs = [...newLogs, ...changeLogs].slice(0, 100);
+        const updatedLogs = [...newLogs, ...changeLogs];
         setChangeLogs(updatedLogs);
+        // 専用コレクションに保存
+        cs({ action: 'saveChangeLogs', date: selectedDate, officeId: selectedOffice?.id, logs: newLogs });
         
-        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newTable, globalLog, updatedLogs);
+        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, newTable, globalLog, changeLogs);
         showToast(`${newChildrenToAdd.length}名の児童を${isWaitlist ? 'キャンセル待ち' : '通常児童'}として追加しました。`);
     };
 
@@ -1393,10 +1511,11 @@ export default function App() {
             restoreValue: { isWaitlist: targetChild.isWaitlist, isAbsent: targetChild.isAbsent }
         };
         
-        const updatedLogs = [newLog, ...changeLogs].slice(0, 100);
-        setChangeLogs(updatedLogs);
+        setChangeLogs(prev => [newLog, ...prev]);
+        // 専用コレクションに保存
+        cs({ action: 'saveChangeLogs', date: selectedDate, officeId: selectedOffice?.id, logs: [newLog] });
         
-        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, dailyTable, globalLog, updatedLogs);
+        await saveDailyData(selectedDate, newList, dailyMessages, results, summaryC, dailyTable, globalLog, changeLogs);
         
         showToast(`${targetChild.lastName ? `${targetChild.lastName} ${targetChild.firstName}` : targetChild.name}を${statusNames[targetStatus]}に移動しました。`);
     };
@@ -1532,8 +1651,17 @@ export default function App() {
         await saveDailyDataGranular({ childId, messagesList: childMsgs });
     };
 
-    const updateMessage = async (childId, msgId, newText) => {
-        const childMsgs = (dailyMessages[childId] || []).map(m => m.id === msgId ? { ...m, text: newText } : m);
+    const updateMessage = async (childId, msgId, newText, newTag) => {
+        const childMsgs = (dailyMessages[childId] || []).map(m => {
+            if (m.id === msgId) {
+                const updated = { ...m, text: newText };
+                if (newTag !== undefined) {
+                    updated.tag = newTag || null;
+                }
+                return updated;
+            }
+            return m;
+        });
         const newMessages = { ...dailyMessages, [childId]: childMsgs };
         setDailyMessages(newMessages);
         await saveDailyDataGranular({ childId, messagesList: childMsgs });
@@ -2726,7 +2854,12 @@ export default function App() {
                     <div id="guide-table-section" className="bg-white/90 backdrop-blur-3xl rounded-[2.5rem] md:rounded-[3.5rem] shadow-premium border border-white/60 overflow-hidden hover:shadow-2xl transition-all duration-700 flex flex-col">
                         
                         {/* Table Header Controls */}
-                        <div className="flex items-center justify-between px-4 py-2 bg-tree-100 border-b border-tree-200">
+                        <div 
+                            onTouchStart={handleTableTouchStart}
+                            onTouchMove={handleTableTouchMove}
+                            onTouchEnd={handleTableTouchEnd}
+                            className="flex items-center justify-between px-4 py-2 bg-tree-100 border-b border-tree-200"
+                        >
                             <h3 className="font-black text-tree-800 text-xs tracking-widest hidden sm:block">本日の業務</h3>
                             <div className="flex bg-white rounded-full p-0.5 border border-slate-200/60 shadow-sm mx-auto sm:mx-0 lg:hidden overflow-x-auto custom-scrollbar-hidden whitespace-nowrap max-w-full gap-0.5">
                                 <button
@@ -2774,7 +2907,7 @@ export default function App() {
                             </div>
                         </div>
 
-                        <div 
+                        <div
                             onTouchStart={handleTableTouchStart}
                             onTouchMove={handleTableTouchMove}
                             onTouchEnd={handleTableTouchEnd}
@@ -2827,43 +2960,10 @@ export default function App() {
                                         return (
                                             <tr key={child.id} className={`border-b border-slate-100 group transition-all ${isPlaceholder ? 'row-placeholder bg-slate-50/10 no-print' : selectedChildId === child.id ? 'bg-tree-50/30' : 'hover:bg-slate-50/20'}`}>
                                                 <td className={`sticky left-0 z-10 p-0 font-black border-r border-slate-100 relative overflow-hidden ${isLocked ? 'bg-[#e2e8f0] text-slate-400 cursor-not-allowed' : selectedChildId === child.id ? 'bg-[#e3f4e9]' : 'bg-white group-hover:bg-slate-50'} ${isPlaceholder ? 'text-[10px] py-2' : 'text-[12px] md:text-sm'}`} style={{ minWidth: '180px' }}>
-                                                    {/* Swiped Underlay Action Buttons */}
-                                                    {!isPlaceholder && swipeChildId === child.id && (
-                                                        <div className="absolute inset-y-0 left-0 flex items-center bg-slate-50 border-r border-slate-200/50 rounded-lg pl-2 pr-4 gap-2 z-0 animate-in fade-in duration-200">
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'regular'); setSwipeChildId(null); setSwipeOffset(0); }}
-                                                                className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-black shadow-sm transition-all active:scale-95 flex items-center gap-0.5"
-                                                            >
-                                                                出席
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'absent'); setSwipeChildId(null); setSwipeOffset(0); }}
-                                                                className="px-2.5 py-1.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-[10px] font-black shadow-sm transition-all active:scale-95 flex items-center gap-0.5"
-                                                            >
-                                                                欠席
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); updateChildStatus(child.id, 'waitlist'); setSwipeChildId(null); setSwipeOffset(0); }}
-                                                                className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-black shadow-sm transition-all active:scale-95 flex items-center gap-0.5"
-                                                            >
-                                                                待機
-                                                            </button>
-                                                            <button
-                                                                onClick={(e) => { e.stopPropagation(); setSwipeChildId(null); setSwipeOffset(0); }}
-                                                                className="text-slate-400 hover:text-slate-600 px-1 text-[9px] font-black"
-                                                            >
-                                                                戻る
-                                                            </button>
-                                                        </div>
-                                                    )}
-
                                                     {/* Swipable Child Content block */}
                                                     <div 
                                                         className={`w-full h-full p-3 md:p-4 z-10 transition-transform duration-200 bg-inherit relative`}
                                                         style={{ transform: swipeChildId === child.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)' }}
-                                                        onTouchStart={(e) => handleSwipeStart(e, child.id)}
-                                                        onTouchMove={(e) => handleSwipeMove(e)}
-                                                        onTouchEnd={() => handleSwipeEnd()}
                                                     >
                                                         {pressingChildId && pressingChildId.id === child.id && (
                                                             <div className="absolute inset-0 bg-slate-200/50 pointer-events-none overflow-hidden z-20">
@@ -2900,16 +3000,13 @@ export default function App() {
                                                                         if (!isPlaceholder) cancelLongPress(e, child.id);
                                                                     }}
                                                                     onTouchStart={(e) => {
-                                                                        handleSwipeStart(e, child.id);
                                                                         if (!isPlaceholder && !isLocked && !lockingChildId) handleTouchStart(e, child.id, 'regular');
                                                                     }}
-                                                                    onTouchEnd={(e) => {
-                                                                        handleSwipeEnd();
-                                                                        if (!isPlaceholder) cancelLongPress(e, child.id);
-                                                                    }}
                                                                     onTouchMove={(e) => {
-                                                                        handleSwipeMove(e);
                                                                         if (!isPlaceholder) handleTouchMove(e, child.id);
+                                                                    }}
+                                                                    onTouchEnd={(e) => {
+                                                                        if (!isPlaceholder) cancelLongPress(e, child.id);
                                                                     }}
                                                                     onContextMenu={(e) => {
                                                                         if (!isPlaceholder) e.preventDefault();
@@ -2926,6 +3023,16 @@ export default function App() {
                                                                         </span>
                                                                     )}
                                                                 </button>
+                                                                {/* ツリー通信 担当スタッフの1文字丸アイコン（右上） */}
+                                                                {!isPlaceholder && row.assignedStaff && (
+                                                                    <div 
+                                                                        className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-black shadow-xs flex-shrink-0 ml-1"
+                                                                        style={{ backgroundColor: getStaffColor(row.assignedStaff) }}
+                                                                        title={`ツリー通信担当: ${row.assignedStaff}`}
+                                                                    >
+                                                                        {row.assignedStaff.charAt(0)}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -3177,9 +3284,6 @@ export default function App() {
                                     <div 
                                         className="w-full h-full p-5 flex items-center justify-between bg-inherit z-10 transition-transform duration-200"
                                         style={{ transform: swipeChildId === child.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)' }}
-                                        onTouchStart={(e) => handleSwipeStart(e, child.id)}
-                                        onTouchMove={(e) => handleSwipeMove(e)}
-                                        onTouchEnd={() => handleSwipeEnd()}
                                     >
                                         {pressingChildId && pressingChildId.id === child.id && (
                                             <div className="absolute inset-0 bg-slate-200/50 pointer-events-none z-20">
@@ -3191,18 +3295,9 @@ export default function App() {
                                             onMouseDown={(e) => startLongPress(e, child.id, 'waitlist')}
                                             onMouseUp={(e) => cancelLongPress(e, child.id)}
                                             onMouseLeave={(e) => cancelLongPress(e, child.id)}
-                                            onTouchStart={(e) => {
-                                                handleSwipeStart(e, child.id);
-                                                handleTouchStart(e, child.id, 'waitlist');
-                                            }}
-                                            onTouchEnd={(e) => {
-                                                handleSwipeEnd();
-                                                cancelLongPress(e, child.id);
-                                            }}
-                                            onTouchMove={(e) => {
-                                                handleSwipeMove(e);
-                                                handleTouchMove(e, child.id);
-                                            }}
+                                            onTouchStart={(e) => handleTouchStart(e, child.id, 'waitlist')}
+                                            onTouchMove={(e) => handleTouchMove(e, child.id)}
+                                            onTouchEnd={(e) => cancelLongPress(e, child.id)}
                                             onContextMenu={(e) => e.preventDefault()}
                                         >
                                             {name}
@@ -3264,9 +3359,6 @@ export default function App() {
                                     <div 
                                         className="w-full h-full p-5 flex items-center justify-between bg-inherit z-10 transition-transform duration-200"
                                         style={{ transform: swipeChildId === child.id ? `translateX(${swipeOffset}px)` : 'translateX(0px)' }}
-                                        onTouchStart={(e) => handleSwipeStart(e, child.id)}
-                                        onTouchMove={(e) => handleSwipeMove(e)}
-                                        onTouchEnd={() => handleSwipeEnd()}
                                     >
                                         {pressingChildId && pressingChildId.id === child.id && (
                                             <div className="absolute inset-0 bg-slate-200/50 pointer-events-none z-20">
@@ -3278,18 +3370,9 @@ export default function App() {
                                             onMouseDown={(e) => startLongPress(e, child.id, 'absent')}
                                             onMouseUp={(e) => cancelLongPress(e, child.id)}
                                             onMouseLeave={(e) => cancelLongPress(e, child.id)}
-                                            onTouchStart={(e) => {
-                                                handleSwipeStart(e, child.id);
-                                                handleTouchStart(e, child.id, 'absent');
-                                            }}
-                                            onTouchEnd={(e) => {
-                                                handleSwipeEnd();
-                                                cancelLongPress(e, child.id);
-                                            }}
-                                            onTouchMove={(e) => {
-                                                handleSwipeMove(e);
-                                                handleTouchMove(e, child.id);
-                                            }}
+                                            onTouchStart={(e) => handleTouchStart(e, child.id, 'absent')}
+                                            onTouchMove={(e) => handleTouchMove(e, child.id)}
+                                            onTouchEnd={(e) => cancelLongPress(e, child.id)}
                                             onContextMenu={(e) => e.preventDefault()}
                                         >
                                             {name}
@@ -3321,6 +3404,7 @@ export default function App() {
                                 child={children.find(c => c.id === (selectedChildId || lastPanelData?.memo))}
                                 messages={dailyMessages[selectedChildId || lastPanelData?.memo] || []}
                                 tags={tags}
+                                tagInsertTexts={tagInsertTexts}
                                 onSave={sendMessage}
                                 onDelete={deleteMessage}
                                 onUpdate={updateMessage}
@@ -3445,6 +3529,60 @@ export default function App() {
                                         <span>欠席に移動</span>
                                     </button>
                                 )}
+
+                                {/* Tree Communication Staff Assignment Section */}
+                                <div className="pt-3 border-t border-slate-200/80 text-left">
+                                    <div className="flex items-center justify-between mb-2 px-1">
+                                        <span className="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
+                                            <UserCheck className="w-3.5 h-3.5 text-tree-600" />
+                                            ツリー通信 担当スタッフ
+                                        </span>
+                                        {dailyTable[statusMenuChild.child.id]?.assignedStaff && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    updateDailyTable(statusMenuChild.child.id, { assignedStaff: '' });
+                                                    showToast(`${statusMenuChild.child.lastName || statusMenuChild.child.name}の担当を解除しました`);
+                                                }}
+                                                className="text-[10px] font-bold text-rose-500 hover:text-rose-700 underline cursor-pointer"
+                                            >
+                                                解除
+                                            </button>
+                                        )}
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar p-1">
+                                        {filteredStaffList.map(staff => {
+                                            const isAssigned = dailyTable[statusMenuChild.child.id]?.assignedStaff === staff.name;
+                                            const staffColor = staff.iconColor || getStaffColor(staff.name);
+                                            return (
+                                                <button
+                                                    key={staff.id}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        updateDailyTable(statusMenuChild.child.id, { assignedStaff: staff.name });
+                                                        showToast(`${statusMenuChild.child.lastName || statusMenuChild.child.name}の担当を【${staff.name}】に設定しました`);
+                                                        setStatusMenuChild(null);
+                                                    }}
+                                                    className={`flex items-center gap-1.5 p-2 rounded-xl text-xs font-bold transition-all border text-left cursor-pointer active:scale-95 ${
+                                                        isAssigned
+                                                            ? 'bg-tree-50 border-tree-500 text-tree-900 shadow-sm'
+                                                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                                                    }`}
+                                                >
+                                                    <span 
+                                                        className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-black flex-shrink-0 shadow-xs"
+                                                        style={{ backgroundColor: staffColor }}
+                                                    >
+                                                        {staff.name.charAt(0)}
+                                                    </span>
+                                                    <span className="truncate flex-1 text-[11px]">{staff.name}</span>
+                                                    {isAssigned && <Check className="w-3.5 h-3.5 text-tree-600 flex-shrink-0" />}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         {/* Footer */}
@@ -3468,6 +3606,7 @@ export default function App() {
                 <SettingsModal
                     onClose={() => setShowSettingsModal(false)}
                     tags={tags}
+                    tagInsertTexts={tagInsertTexts}
                     onSaveTags={handleUpdateTags}
                     okWords={okWords}
                     onSaveOkWords={handleSaveOkWords}
@@ -3504,6 +3643,9 @@ export default function App() {
                 selectedOffice={selectedOffice}
                 selectedDate={selectedDate}
                 cs={cs}
+                user={user}
+                currentStaffName={getCurrentStaffName()}
+                firestore={firestore}
                 onRefresh={() => fetchDailyData(selectedDate, selectedOffice?.id)}
                 onImportSandbox={(date, officeId, sandboxReport) => {
                     if (date === selectedDate && officeId === selectedOffice?.id) {
@@ -3706,6 +3848,24 @@ export default function App() {
                     <button onClick={() => setToast(null)} className="p-1.5 ml-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors flex-shrink-0">
                         <X className="w-4 h-4" />
                     </button>
+                </div>
+            )}
+
+            {/* Global Import Lock Overlay (Other terminals blocked during CSV import) */}
+            {globalImportLock && (
+                <div className="fixed inset-0 z-[99999] bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-white text-center select-none animate-in fade-in duration-300">
+                    <div className="p-5 bg-amber-500/20 text-amber-400 rounded-3xl mb-4 border border-amber-500/30 animate-pulse">
+                        <Lock className="w-12 h-12" />
+                    </div>
+                    <h2 className="text-xl md:text-2xl font-black mb-2 tracking-wide">CSVデータ一括取込を実行中です</h2>
+                    <p className="text-xs md:text-sm font-bold text-slate-300 max-w-lg leading-relaxed mb-6">
+                        現在、<span className="text-amber-400 font-black underline underline-offset-4">【{globalImportLock.userName || '他スタッフ'}】</span>がCSVデータの一括インポート処理を行っています。<br />
+                        データの重複や不整合を防ぐため、処理が完了するまで画面操作を一時停止しています。
+                    </p>
+                    <div className="flex items-center gap-2.5 px-4 py-2 bg-white/10 rounded-full border border-white/10 text-xs font-bold text-slate-300 shadow-inner">
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                        <span>取込完了後に自動で操作が再開されます...</span>
+                    </div>
                 </div>
             )}
         </div>

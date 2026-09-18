@@ -1,0 +1,13 @@
+import fs from 'fs';
+let c = fs.readFileSync('src/App.jsx', 'utf8');
+c = c.replace(/\n\s*\{\/\* Swiped Underlay Action Buttons \*\/\}(.|\n)*?\{\/\* Swipable Child Content block \*\/\}/g, '\n                                                    {/* Swipable Child Content block */}');
+c = c.replace(/\n\s*\{swipeChildId === child\.id && \((.|\n)*?\{\/\* Swipable Child Content block \*\/\}/g, '\n                                        {/* Swipable Child Content block */}');
+c = c.replace(/\s*style=\{\{ transform: swipeChildId === child\.id \? [^\}]+\}\}\}/g, '');
+c = c.replace(/\s*onTouchStart=\{[^\}]+\}/g, '');
+c = c.replace(/\s*onTouchMove=\{[^\}]+\}/g, '');
+c = c.replace(/\s*onTouchEnd=\{[^\}]+\}/g, '');
+c = c.replace(/\s*onMouseDown=\{[^\}]*handleSwipeStart[^\}]+\}/g, '');
+c = c.replace(/\s*onMouseUp=\{[^\}]*handleSwipeEnd[^\}]+\}/g, '');
+c = c.replace(/\s*onMouseLeave=\{[^\}]*handleSwipeEnd[^\}]+\}/g, '');
+c = c.replace(/\s*onMouseMove=\{[^\}]*handleSwipeMove[^\}]+\}/g, '');
+fs.writeFileSync('src/App.jsx', c);

@@ -77,7 +77,8 @@ export default function MemoPanel({
     onSaveTemplate,
     okWords = [],
     onAddOkWord,
-    programs = []
+    programs = [],
+    tagInsertTexts = {}
 }) {
     const treeTextareaRef = useRef(null);
     const highlightDivRef = useRef(null);
@@ -116,25 +117,87 @@ export default function MemoPanel({
         const [chatText, setChatText] = useState('');
         const [editingChatId, setEditingChatId] = useState(null);
         const [editChatContent, setEditChatContent] = useState('');
+        const [editChatTags, setEditChatTags] = useState([]); // 編集中メッセージのタグ
         const [showHelpChat, setShowHelpChat] = useState(false);
-        const [selectedTag, setSelectedTag] = useState(null);
+        const [selectedTags, setSelectedTags] = useState([]); // 複数タグ対応
+
+        const handleStartEdit = (m) => {
+            setEditingChatId(m.id);
+            setEditChatContent(m.text || '');
+            const existingTags = m.tag ? (Array.isArray(m.tag) ? m.tag : String(m.tag).split(/\s+/).filter(Boolean)) : [];
+            setEditChatTags(existingTags);
+        };
+
+        const handleCancelEdit = () => {
+            setEditingChatId(null);
+            setEditChatContent('');
+            setEditChatTags([]);
+        };
+
+        const toggleEditTag = (tag) => {
+            setEditChatTags(prev => 
+                prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+            );
+        };
 
         const handleChatSend = () => {
             if (!chatText.trim()) return;
-            onSave(child.id, chatText, selectedTag);
+            const tagString = selectedTags.length > 0 ? selectedTags.join(' ') : null;
+            onSave(child.id, chatText, tagString);
             setChatText('');
-            setSelectedTag(null);
+            setSelectedTags([]);
         };
 
         const handleChatEditSave = (msgId) => {
             if (!editChatContent.trim()) return;
-            onUpdate(child.id, msgId, editChatContent);
+            const tagString = editChatTags.length > 0 ? editChatTags.join(' ') : null;
+            onUpdate(child.id, msgId, editChatContent, tagString);
             setEditingChatId(null);
             setEditChatContent('');
+            setEditChatTags([]);
         };
 
         const toggleTag = (tag) => {
-            setSelectedTag(prev => prev === tag ? null : tag);
+            setSelectedTags(prev => {
+                const isAlreadySelected = prev.includes(tag);
+                const nextTags = isAlreadySelected ? prev.filter(t => t !== tag) : [...prev, tag];
+
+                // 新たにタグが付与されたときの冒頭自動挿入
+                if (!isAlreadySelected) {
+                    let template = tagInsertTexts ? tagInsertTexts[tag] : undefined;
+                    // 後方互換フォールバック（未設定の場合）
+                    if (template === undefined) {
+                        if (tag.includes('プログラム')) {
+                            template = '{プログラム内容}';
+                        } else if (tag.includes('ツリー式学習')) {
+                            template = 'ツリー式学習';
+                        } else {
+                            template = '';
+                        }
+                    }
+
+                    if (template) {
+                        let textToInsert = template;
+                        if (textToInsert.includes('{プログラム内容}') || textToInsert.includes('{program}')) {
+                            const progSummary = (programs && programs[0]?.summary) || programSummary || '';
+                            textToInsert = textToInsert
+                                .replace(/\{プログラム内容\}/g, progSummary)
+                                .replace(/\{program\}/g, progSummary);
+                        }
+
+                        if (textToInsert.trim()) {
+                            setChatText(current => textToInsert + (current ? '\n' + current : ''));
+                        }
+                    }
+                }
+
+                return nextTags;
+            });
+        };
+
+        const handleClearChatText = () => {
+            setChatText('');
+            setSelectedTags([]);
         };
 
 
@@ -146,7 +209,11 @@ export default function MemoPanel({
     const [isEditingTemplate, setIsEditingTemplate] = useState(false);
     const [templateDraft, setTemplateDraft] = useState('');
     const [isFocused, setIsFocused] = useState(false);
-    const [activeToolbarMenu, setActiveToolbarMenu] = useState(null); // 'memo' | 'program' | null
+    const [activeToolbarMenu, setActiveToolbarMenu] = useState(null); // 'memo' | 'program' | 'template' | null
+
+    // 挨拶テンプレの長押しタイマー管理
+    const templateLongPressTimerRef = useRef(null);
+    const isTemplateLongPressRef = useRef(false);
 
     // Conflict detection states
     const [hasConflict, setHasConflict] = useState(false);
@@ -162,25 +229,24 @@ export default function MemoPanel({
         }
     };
 
-    const insertTextAtCursor = (textToInsert) => {
+    // 常に一番下（末尾）に挿入する
+    const appendTextToEnd = (textToInsert) => {
         if (!textToInsert) return;
-        const textarea = treeTextareaRef.current;
-        if (textarea) {
-            const start = textarea.selectionStart;
-            const end = textarea.selectionEnd;
-            const before = treeContent.substring(0, start);
-            const after = treeContent.substring(end);
-            const newContent = before + textToInsert + after;
-            setTreeContent(newContent);
-            
-            setTimeout(() => {
+        setTreeContent(prev => {
+            if (!prev || !prev.trim()) {
+                return textToInsert;
+            }
+            return prev.trimEnd() + '\n' + textToInsert;
+        });
+        setTimeout(() => {
+            const textarea = treeTextareaRef.current;
+            if (textarea) {
                 textarea.focus();
-                const newCursorPos = start + textToInsert.length;
-                textarea.setSelectionRange(newCursorPos, newCursorPos);
-            }, 50);
-        } else {
-            setTreeContent(prev => prev ? prev + '\n' + textToInsert : textToInsert);
-        }
+                const len = textarea.value.length;
+                textarea.setSelectionRange(len, len);
+                textarea.scrollTop = textarea.scrollHeight;
+            }
+        }, 50);
     };
 
     const handleInsertTemplate = () => {
@@ -190,10 +256,43 @@ export default function MemoPanel({
             if (confirmRegister) {
                 setTemplateDraft('');
                 setIsEditingTemplate(true);
+                setActiveToolbarMenu('template');
             }
             return;
         }
-        insertTextAtCursor(template);
+        appendTextToEnd(template);
+    };
+
+    // 挨拶テンプレボタンの長押し / タップ制御
+    const handleTemplatePointerDown = (e) => {
+        isTemplateLongPressRef.current = false;
+        templateLongPressTimerRef.current = setTimeout(() => {
+            isTemplateLongPressRef.current = true;
+            const t = greetingTemplates[currentStaffName] || '';
+            setTemplateDraft(t);
+            setIsEditingTemplate(true);
+            setActiveToolbarMenu('template');
+        }, 550); // 550ms で長押しと判定
+    };
+
+    const handleTemplatePointerUp = (e) => {
+        if (templateLongPressTimerRef.current) {
+            clearTimeout(templateLongPressTimerRef.current);
+            templateLongPressTimerRef.current = null;
+        }
+        if (!isTemplateLongPressRef.current) {
+            // 短いタップの場合は一番下に挿入
+            handleInsertTemplate();
+        }
+        isTemplateLongPressRef.current = false;
+    };
+
+    const handleTemplatePointerLeave = () => {
+        if (templateLongPressTimerRef.current) {
+            clearTimeout(templateLongPressTimerRef.current);
+            templateLongPressTimerRef.current = null;
+        }
+        isTemplateLongPressRef.current = false;
     };
 
     const handleStartEditTemplate = () => {
@@ -437,107 +536,118 @@ export default function MemoPanel({
                 // ============================
                 <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col">
                     
-                    {/* Chat Memo Reference Section (Collapsible) */}
-                    <div className="border-b border-slate-200 bg-white">
-                        <button 
-                            onClick={() => setIsMemoExpanded(!isMemoExpanded)}
-                            className="w-full px-4 py-2 flex items-center justify-between text-slate-500 hover:bg-slate-50/80 transition-all font-black text-[9px] uppercase tracking-widest"
-                        >
-                            <div className="flex items-center gap-2">
-                                <MessageSquare className="w-3.5 h-3.5 text-red-500" />
-                                <span>チャットメモの内容を参照</span>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                                <span className="text-[8px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded-full">{messages.length} 件</span>
-                                {isMemoExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                            </div>
-                        </button>
-                        
-                        <div className={`overflow-hidden transition-all duration-300 ${isMemoExpanded ? 'max-h-[160px] border-t border-slate-100 bg-slate-50/50' : 'max-h-0'}`}>
-                            <div className="p-3 space-y-2 overflow-y-auto max-h-[150px] custom-scrollbar">
+                    {/* === 3-Button Toolbar === */}
+                    <div className="border-b border-slate-200 bg-white flex-shrink-0">
+                        {/* Popover: チャットメモ */}
+                        {activeToolbarMenu === 'memo' && (
+                            <div className="max-h-[200px] overflow-y-auto bg-white p-2 border-b border-slate-200 flex flex-col gap-1.5 custom-scrollbar animate-in slide-in-from-top-2 duration-200">
+                                <div className="flex justify-between items-center px-2 py-1 text-[9px] font-black text-slate-400 uppercase">
+                                    <span>挿入するチャットメモを選択</span>
+                                    <button onClick={() => setActiveToolbarMenu(null)} className="text-slate-500 hover:text-slate-800">閉じる</button>
+                                </div>
                                 {messages.length === 0 ? (
-                                    <p className="text-center py-4 text-[9px] font-bold text-slate-300 uppercase tracking-widest">メッセージなし</p>
+                                    <p className="text-center py-4 text-xs text-slate-400">チャットメモがありません</p>
                                 ) : (
-                                    messages.map((m, i) => (
-                                        <div 
-                                            key={m.id || i} 
-                                            className="bg-white p-2.5 rounded-xl shadow-sm border border-slate-100 flex items-start justify-between gap-2"
-                                            style={m.tag === '【備考】' ? { border: '2px solid #8B4513' } : {}}
-                                        >
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-1.5 mb-0.5 opacity-40 justify-between w-full">
-                                                    <div className="flex items-center gap-1">
-                                                        <Clock className="w-2.5 h-2.5 text-red-500" />
-                                                        <span className="text-[8px] font-black">{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                    </div>
-                                                    <div className="flex items-center gap-1">
-                                                        {m.tag && (
-                                                            <span className="text-[8px] font-black text-red-600 bg-red-50 px-1.5 py-0.5 rounded border border-red-100">{m.tag}</span>
-                                                        )}
-                                                        {m.staffName && (
-                                                            <span className="text-[8px] font-black text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">{m.staffName}</span>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                                <p className="text-xs font-bold text-slate-700 leading-relaxed break-words">{m.text}</p>
-                                            </div>
+                                    messages.map((m, idx) => {
+                                        let cleanedText = m.text.trim();
+                                        for (const tag of tags) {
+                                            if (cleanedText.startsWith(tag)) {
+                                                cleanedText = cleanedText.substring(tag.length).trim();
+                                                break;
+                                            }
+                                        }
+                                        cleanedText = cleanedText.replace(/^(?:【[^】]+】|\[[^\]]+\])\s*/, '');
+                                        return (
                                             <button
-                                                type="button"
-                                                onClick={() => {
-                                                    let cleanedText = m.text.trim();
-                                                    // Remove exact tag prefix from tags list
-                                                    for (const tag of tags) {
-                                                        if (cleanedText.startsWith(tag)) {
-                                                            cleanedText = cleanedText.substring(tag.length).trim();
-                                                            break;
-                                                        }
-                                                    }
-                                                    // Fallback regex to strip leading 【...】 or [...] brackets
-                                                    cleanedText = cleanedText.replace(/^(?:【[^】]+】|\[[^\]]+\])\s*/, '');
-
-                                                    const isTreeActive = activeTab === 'tree';
-                                                    if (isTreeActive) {
-                                                        const textarea = treeTextareaRef.current;
-                                                        if (textarea) {
-                                                            const start = textarea.selectionStart;
-                                                            const end = textarea.selectionEnd;
-                                                            const before = treeContent.substring(0, start);
-                                                            const after = treeContent.substring(end);
-                                                            const newContent = before + cleanedText + after;
-                                                            setTreeContent(newContent);
-                                                            
-                                                            setTimeout(() => {
-                                                                textarea.focus();
-                                                                const newCursorPos = start + cleanedText.length;
-                                                                textarea.setSelectionRange(newCursorPos, newCursorPos);
-                                                            }, 0);
-                                                        } else {
-                                                            setTreeContent(prev => {
-                                                                if (!prev.trim()) return cleanedText;
-                                                                return prev + '\n' + cleanedText;
-                                                            });
-                                                        }
-                                                    } else {
-                                                        setFuturePlanContent(prev => {
-                                                            if (!prev.trim()) return cleanedText;
-                                                            return prev + '\n' + cleanedText;
-                                                        });
-                                                    }
-                                                }}
-                                                className={`px-2 py-1 rounded-lg text-[9px] font-black tracking-wider transition-colors flex-shrink-0 flex items-center gap-1 border ${
-                                                    activeTab === 'tree' 
-                                                        ? 'bg-tree-50 hover:bg-tree-100 text-tree-700 hover:text-tree-800 border-tree-200' 
-                                                        : 'bg-wood-50 hover:bg-wood-100 text-wood-700 hover:text-wood-800 border-wood-200'
-                                                }`}
-                                                title={activeTab === 'tree' ? "ツリーに反映" : "今後の予定に反映"}
+                                                key={m.id || idx}
+                                                onClick={() => { appendTextToEnd(cleanedText); setActiveToolbarMenu(null); }}
+                                                className="text-left p-2 hover:bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-700 truncate active:scale-95 transition-all"
                                             >
-                                                <Copy className="w-3 h-3" />
-                                                <span>反映</span>
+                                                {m.tag && <span className="text-[9px] bg-red-50 text-red-600 px-1 rounded mr-1">{m.tag}</span>}
+                                                {cleanedText}
                                             </button>
-                                        </div>
-                                    ))
+                                        );
+                                    })
                                 )}
                             </div>
+                        )}
+
+                        {/* Popover: プログラム */}
+                        {activeToolbarMenu === 'program' && (
+                            <div className="max-h-[200px] overflow-y-auto bg-white p-2 border-b border-slate-200 flex flex-col gap-1.5 custom-scrollbar animate-in slide-in-from-top-2 duration-200">
+                                <div className="flex justify-between items-center px-2 py-1 text-[9px] font-black text-slate-400 uppercase">
+                                    <span>挿入するプログラム内容を選択</span>
+                                    <button onClick={() => setActiveToolbarMenu(null)} className="text-slate-500 hover:text-slate-800">閉じる</button>
+                                </div>
+                                {(() => {
+                                    const programsList = (programs && programs.length > 0)
+                                        ? programs
+                                        : (programTitle || programSummary ? [{ title: programTitle, summary: programSummary }] : []);
+                                    const validProgs = programsList.filter(p => p.title || p.summary);
+                                    return validProgs.length === 0 ? (
+                                        <p className="text-center py-4 text-xs text-slate-400">プログラムが登録されていません</p>
+                                    ) : validProgs.map((prog, idx) => (
+                                        <button
+                                            key={idx}
+                                            onClick={() => {
+                                                // タイトルは不要、内容（summary）のみ末尾に反映
+                                                const textToInsert = prog.summary || prog.title || '';
+                                                appendTextToEnd(textToInsert);
+                                                setActiveToolbarMenu(null);
+                                            }}
+                                            className="text-left p-2 hover:bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-700 active:scale-95 transition-all"
+                                        >
+                                            {prog.title && <span className="font-black text-wood-700 block text-[11px] mb-0.5">{prog.title}</span>}
+                                            <span className="text-slate-600 text-xs">{prog.summary || '（内容未入力）'}</span>
+                                        </button>
+                                    ));
+                                })()}
+                            </div>
+                        )}
+
+                        {/* Popover: 挨拶テンプレ設定・編集（長押しで開く） */}
+                        {activeToolbarMenu === 'template' && (
+                            <div className="bg-white p-2.5 border-b border-slate-200 flex flex-col gap-2 animate-in slide-in-from-top-2 duration-200">
+                                <div className="flex justify-between items-center px-1 text-[9px] font-black text-slate-400 uppercase">
+                                    <span>{currentStaffName} の挨拶テンプレ設定 (長押しで表示)</span>
+                                    <button onClick={() => setActiveToolbarMenu(null)} className="text-slate-500 hover:text-slate-800">閉じる</button>
+                                </div>
+                                <textarea
+                                    value={templateDraft}
+                                    onChange={(e) => setTemplateDraft(e.target.value)}
+                                    placeholder="お疲れ様です。ツリーキッズの〇〇です。等..."
+                                    rows={3}
+                                    className="w-full p-2 text-xs bg-white border border-slate-200 rounded-lg focus:border-tree-400 outline-none leading-normal font-medium text-slate-700 resize-y"
+                                />
+                                <div className="flex justify-end gap-1.5">
+                                    <button type="button" onClick={() => setActiveToolbarMenu(null)} className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-[9px] font-black transition-all active:scale-95">閉じる</button>
+                                    <button type="button" onClick={() => { handleSaveTemplateClick(); setActiveToolbarMenu(null); }} className="px-3 py-1 bg-tree-600 hover:bg-tree-700 text-white rounded-lg text-[9px] font-black transition-all active:scale-95 shadow-sm">保存</button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Main 3 Buttons */}
+                        <div className="flex items-center p-2 gap-2">
+                            <button type="button" onClick={() => setActiveToolbarMenu(prev => prev === 'memo' ? null : 'memo')} className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer ${activeToolbarMenu === 'memo' ? 'bg-red-500 text-white border-red-600' : 'bg-white text-red-600 border-red-200'}`}>
+                                <MessageSquare className="w-3.5 h-3.5" /><span>チャットメモ</span>
+                            </button>
+                            <button type="button" onClick={() => setActiveToolbarMenu(prev => prev === 'program' ? null : 'program')} className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer ${activeToolbarMenu === 'program' ? 'bg-wood-500 text-white border-wood-600' : 'bg-white text-wood-700 border-wood-200'}`}>
+                                <FileText className="w-3.5 h-3.5" /><span>プログラム</span>
+                            </button>
+
+                            {/* 挨拶テンプレ: タップで末尾即座挿入 / 長押しで設定・編集 */}
+                            <button 
+                                type="button" 
+                                onPointerDown={handleTemplatePointerDown}
+                                onPointerUp={handleTemplatePointerUp}
+                                onPointerLeave={handleTemplatePointerLeave}
+                                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                className="flex-1 py-2 bg-tree-600 hover:bg-tree-700 text-white rounded-xl text-xs font-black shadow-sm border border-tree-700 transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer select-none"
+                                title="タップ: 末尾に即座挿入 / 長押し: テンプレ設定・編集"
+                            >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>挨拶テンプレ</span>
+                            </button>
                         </div>
                     </div>
 
@@ -545,125 +655,19 @@ export default function MemoPanel({
                     <div className="p-3 md:p-4 flex-1 flex flex-col gap-2 justify-between">
                         <div className="space-y-2 flex-1 flex flex-col">
                             <div className="space-y-1 flex-1 flex flex-col">
-                                <div className="flex flex-col gap-2 mb-1">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-1.5">
-                                            <button
-                                                type="button"
-                                                onClick={handleInsertTemplate}
-                                                className="px-2.5 py-1 bg-tree-600 hover:bg-tree-700 text-white rounded-lg text-[9px] font-black tracking-wider transition-all active:scale-95 flex items-center gap-1 shadow-sm"
-                                            >
-                                                <Sparkles className="w-3 h-3" />
-                                                <span>挨拶テンプレを挿入</span>
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={handleStartEditTemplate}
-                                                className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-lg transition-colors flex items-center justify-center"
-                                                title="挨拶テンプレを編集"
-                                            >
-                                                <Settings className="w-3.5 h-3.5" />
-                                            </button>
-                                        </div>
-                                        <div className="flex items-center gap-1.5">
-                                            {currentStaffName && (
-                                                <span className="text-[9px] font-black text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200/50">
-                                                    編集者: {currentStaffName}
-                                                </span>
-                                            )}
-                                            {result?.staffName && (
-                                                <span className="text-[9px] font-black text-tree-600 bg-tree-50 px-2 py-0.5 rounded-full border border-tree-100/50 shadow-sm">
-                                                    最終編集: {result.staffName}
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                    {isEditingTemplate && (
-                                        <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl flex flex-col gap-2 animate-in slide-in-from-top-2">
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">
-                                                    {currentStaffName} の挨拶テンプレ編集
-                                                </span>
-                                            </div>
-                                            <textarea
-                                                value={templateDraft}
-                                                onChange={(e) => setTemplateDraft(e.target.value)}
-                                                placeholder="お疲れ様です。ツリーキッズの〇〇です。等..."
-                                                rows={2}
-                                                className="w-full p-2 text-xs bg-white border border-slate-200 rounded-lg focus:border-tree-400 outline-none leading-normal font-medium text-slate-700 resize-y"
-                                            />
-                                            <div className="flex justify-end gap-1.5">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setIsEditingTemplate(false)}
-                                                    className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-[9px] font-black tracking-wider transition-all active:scale-95"
-                                                >
-                                                    キャンセル
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={handleSaveTemplateClick}
-                                                    className="px-2.5 py-1 bg-tree-600 hover:bg-tree-700 text-white rounded-lg text-[9px] font-black tracking-wider transition-all active:scale-95 shadow-sm"
-                                                >
-                                                    保存
-                                                </button>
-                                            </div>
-                                        </div>
+                                <div className="flex items-center justify-end gap-1.5 mb-1">
+                                    {currentStaffName && (
+                                        <span className="text-[9px] font-black text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200/50">
+                                            編集者: {currentStaffName}
+                                        </span>
+                                    )}
+                                    {result?.staffName && (
+                                        <span className="text-[9px] font-black text-tree-600 bg-tree-50 px-2 py-0.5 rounded-full border border-tree-100/50 shadow-sm">
+                                            最終編集: {result.staffName}
+                                        </span>
                                     )}
                                 </div>
-                                {(() => {
-                                    const programsList = (programs && programs.length > 0)
-                                        ? programs
-                                        : (programTitle || programSummary ? [{ title: programTitle, summary: programSummary }] : []);
-                                        
-                                    return programsList.filter(p => p.title || p.summary).map((prog, idx) => (
-                                        <div key={idx} className="bg-wood-50/50 border border-wood-100 p-2.5 rounded-xl flex items-center justify-between gap-3 text-[11px] mb-1 animate-in slide-in-from-top-2">
-                                            <div className="min-w-0 flex-1">
-                                                <span className="font-black text-wood-700 block truncate text-[10px]">
-                                                    本日のプログラム: {prog.title || '登録あり'}
-                                                </span>
-                                                <span className="font-medium text-slate-500 block truncate text-[9px]">
-                                                    {prog.summary}
-                                                </span>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const textToInsert = (prog.title && prog.summary)
-                                                        ? `${prog.title}：${prog.summary}`
-                                                        : prog.title 
-                                                            ? prog.title 
-                                                            : prog.summary 
-                                                                ? prog.summary 
-                                                                : '';
-                                                    if (!textToInsert) return;
-
-                                                    const textarea = treeTextareaRef.current;
-                                                    if (textarea) {
-                                                        const start = textarea.selectionStart;
-                                                        const end = textarea.selectionEnd;
-                                                        const before = treeContent.substring(0, start);
-                                                        const after = treeContent.substring(end);
-                                                        const newContent = before + textToInsert + after;
-                                                        setTreeContent(newContent);
-                                                        setTimeout(() => {
-                                                            textarea.focus();
-                                                            const newCursorPos = start + textToInsert.length;
-                                                            textarea.setSelectionRange(newCursorPos, newCursorPos);
-                                                        }, 0);
-                                                    } else {
-                                                        setTreeContent(prev => prev ? prev + '\n' + textToInsert : textToInsert);
-                                                    }
-                                                }}
-                                                className="px-2.5 py-1.5 bg-wood-500 hover:bg-wood-600 text-white rounded-lg text-[9px] font-black tracking-wider transition-all active:scale-95 flex items-center gap-1 flex-shrink-0 shadow-sm"
-                                            >
-                                                <Copy className="w-3.5 h-3.5 text-white" />
-                                                <span>概要を反映</span>
-                                            </button>
-                                        </div>
-                                    ));
-                                })()}
-                                                                {hasConflict && (
+                                                                                                {hasConflict && (
                                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex flex-col gap-1.5 text-amber-800 animate-in fade-in duration-300 mb-2">
                                         <div className="flex items-center gap-1.5 text-[9px] font-black tracking-wider uppercase">
                                             <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
@@ -709,7 +713,7 @@ export default function MemoPanel({
                                     </div>
                                 )}
                                 <div className="relative w-full min-h-[120px] flex-1 flex flex-col bg-white border-2 border-slate-100 rounded-2xl focus-within:border-tree-400 focus-within:ring-4 focus-within:ring-tree-50 transition-all shadow-inner overflow-hidden">
-                                    {/* Highlights Overlay Layer */}
+                                                                        {/* Highlights Overlay Layer */}
                                     <div
                                         ref={highlightDivRef}
                                         className="absolute inset-0 p-3 text-xs md:text-sm leading-relaxed whitespace-pre-wrap break-all select-none pointer-events-none font-medium text-transparent overflow-y-auto"
@@ -723,7 +727,7 @@ export default function MemoPanel({
                                         onChange={(e) => setTreeContent(e.target.value)}
                                         onScroll={handleTextareaScroll}
                                         onFocus={() => setIsFocused(true)}
-                                        onBlur={() => setTimeout(() => setIsFocused(false), 200)}
+                                        onBlur={() => setTimeout(() => setIsFocused(false), 500)}
                                         placeholder="ご家庭向けのツリー通信をリアルタイム自動保存します..."
                                         className="w-full h-full p-3 text-xs md:text-sm bg-transparent border-0 outline-none transition-all leading-relaxed resize-none font-medium text-slate-700 overflow-y-auto block flex-1 relative z-10"
                                     />
@@ -923,17 +927,63 @@ export default function MemoPanel({
                             messages.map((m, i) => (
                                 <div key={m.id || i} className={`group flex flex-col ${m.staffName && currentStaffName ? (m.staffName === currentStaffName ? 'items-end' : 'items-start') : (m.included ? 'items-end' : 'items-start opacity-70')}`}>
                                     {editingChatId === m.id ? (
-                                        <div className="w-full max-w-[90%] bg-white p-4 rounded-3xl border-2 border-red-400 shadow-xl space-y-3">
+                                        <div className="w-full max-w-[95%] bg-white p-4 rounded-3xl border-2 border-red-400 shadow-xl space-y-3">
+                                            {/* タグ選択チップ一覧 */}
+                                            <div className="space-y-1">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-[10px] font-black text-slate-400">タグを変更:</span>
+                                                    {editChatTags.length > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setEditChatTags([])}
+                                                            className="text-[10px] font-bold text-slate-400 hover:text-red-500 underline cursor-pointer"
+                                                        >
+                                                            タグ解除
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar p-0.5">
+                                                    {tags.map(t => {
+                                                        const isSelected = editChatTags.includes(t);
+                                                        return (
+                                                            <button
+                                                                key={t}
+                                                                type="button"
+                                                                onClick={() => toggleEditTag(t)}
+                                                                className={`px-2.5 py-1 rounded-full text-[10px] font-black transition-all border cursor-pointer active:scale-95 ${
+                                                                    isSelected
+                                                                        ? 'bg-red-500 text-white border-red-600 shadow-xs'
+                                                                        : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                                                                }`}
+                                                            >
+                                                                {t}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+
                                             <textarea
                                                 value={editChatContent}
                                                 onChange={(e) => setEditChatContent(e.target.value)}
-                                                className="w-full text-sm font-medium text-slate-800 rounded-xl p-2 bg-slate-50 outline-none focus:bg-white transition-all resize-none"
+                                                className="w-full text-sm font-medium text-slate-800 rounded-xl p-2.5 bg-slate-50 border border-slate-200 outline-none focus:bg-white focus:border-red-400 transition-all resize-none shadow-inner"
                                                 rows={3}
+                                                placeholder="メッセージ内容を入力..."
                                             />
                                             <div className="flex justify-end gap-2">
-                                                <button onClick={() => setEditingChatId(null)} className="px-4 py-2 text-[10px] font-black text-slate-400 hover:text-slate-600 uppercase">キャンセル</button>
-                                                <button onClick={() => handleChatEditSave(m.id)} className="px-4 py-2 bg-red-600 text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-2">
-                                                    <Check className="w-3 h-3" /> 保存
+                                                <button 
+                                                    type="button" 
+                                                    onClick={handleCancelEdit} 
+                                                    className="px-4 py-2 text-[10px] font-black text-slate-400 hover:text-slate-600 uppercase cursor-pointer"
+                                                >
+                                                    キャンセル
+                                                </button>
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => handleChatEditSave(m.id)} 
+                                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 shadow-md shadow-red-100 transition-all active:scale-95 cursor-pointer"
+                                                >
+                                                    <Check className="w-3.5 h-3.5" /> 保存
                                                 </button>
                                             </div>
                                         </div>
@@ -943,7 +993,7 @@ export default function MemoPanel({
                                                 <div className="flex items-center gap-1.5 mb-1 px-3">
                                                     {m.staffName && (
                                                         <span className="text-[10px] font-black text-slate-400">
-                                                            {m.staffName}
+                                                             {m.staffName}
                                                         </span>
                                                     )}
                                                     {m.tag && (
@@ -963,7 +1013,7 @@ export default function MemoPanel({
                                                 {/* Hover Actions */}
                                                 <div className={`absolute -bottom-2 ${m.staffName && currentStaffName ? (m.staffName === currentStaffName ? '-left-8' : '-right-8') : (m.included ? '-left-8' : '-right-8')} flex flex-col gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity`}>
                                                     <button 
-                                                        onClick={() => { setEditingChatId(m.id); setEditChatContent(m.text); }}
+                                                        onClick={() => handleStartEdit(m)}
                                                         className="p-1.5 bg-white text-slate-400 hover:text-red-600 rounded-full shadow-md border border-slate-100 transition-colors"
                                                     >
                                                         <Edit2 className="w-3 h-3" />
@@ -991,24 +1041,38 @@ export default function MemoPanel({
 
                     {/* Chat Input Area */}
                     <div className="p-5 bg-white border-t border-slate-100 space-y-4 shadow-[0_-20px_50px_rgba(0,0,0,0.02)]">
-                        {/* Tag selectors */}
-                        <div className="flex flex-wrap gap-1.5">
-                            {tags.map(t => {
-                                const isSelected = selectedTag === t;
-                                return (
-                                    <button
-                                        key={t}
-                                        onClick={() => toggleTag(t)}
-                                        className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-tight border transition-all active:scale-95 shadow-sm ${
-                                            isSelected 
-                                                ? 'bg-red-600 border-red-600 text-white' 
-                                                : 'bg-red-50 hover:bg-red-100 border-red-100 text-red-600'
-                                        }`}
-                                    >
-                                        {t}
-                                    </button>
-                                );
-                            })}
+                        {/* Tag selectors & Clear button */}
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex flex-wrap gap-1.5 flex-1">
+                                {tags.map(t => {
+                                    const isSelected = selectedTags.includes(t);
+                                    return (
+                                        <button
+                                            key={t}
+                                            onClick={() => toggleTag(t)}
+                                            className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-tight border transition-all active:scale-95 shadow-sm cursor-pointer ${
+                                                isSelected 
+                                                    ? 'bg-red-600 border-red-600 text-white' 
+                                                    : 'bg-red-50 hover:bg-red-100 border-red-100 text-red-600'
+                                            }`}
+                                        >
+                                            {t}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {/* 文字削除ボタン（全部消す） */}
+                            {(chatText || selectedTags.length > 0) && (
+                                <button
+                                    type="button"
+                                    onClick={handleClearChatText}
+                                    className="px-2.5 py-1 text-[10px] font-bold text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg border border-slate-200 transition-all active:scale-95 flex items-center gap-1 cursor-pointer flex-shrink-0"
+                                    title="入力内容と選択タグをすべて削除"
+                                >
+                                    <Trash2 className="w-3 h-3" />
+                                    <span>文字削除</span>
+                                </button>
+                            )}
                         </div>
 
                         <div className="flex items-end gap-2.5 w-full">
@@ -1025,121 +1089,12 @@ export default function MemoPanel({
                             <button 
                                 onClick={handleChatSend}
                                 disabled={!chatText.trim()}
-                                className="h-12 w-12 bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-lg transition-all active:scale-90 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none flex items-center justify-center flex-shrink-0"
+                                className="h-12 w-12 bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-lg transition-all active:scale-90 disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none flex items-center justify-center flex-shrink-0 cursor-pointer"
                                 type="button"
                             >
                                 <Send className="w-5 h-5" />
                             </button>
                         </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Mobile Keyboard Toolbar */}
-            {isTree && isFocused && (
-                <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-100 border-t border-slate-200 shadow-lg flex flex-col">
-                    {/* Popovers for quick insertions */}
-                    {activeToolbarMenu === 'memo' && (
-                        <div className="max-h-[200px] overflow-y-auto bg-white p-2 border-b border-slate-200 flex flex-col gap-1.5 custom-scrollbar">
-                            <div className="flex justify-between items-center px-2 py-1 text-[9px] font-black text-slate-400 uppercase">
-                                <span>挿入するチャットメモを選択</span>
-                                <button onMouseDown={(e) => { e.preventDefault(); setActiveToolbarMenu(null); }} className="text-slate-500 hover:text-slate-800">閉じる</button>
-                            </div>
-                            {messages.length === 0 ? (
-                                <p className="text-center py-4 text-xs text-slate-400">チャットメモがありません</p>
-                            ) : (
-                                messages.map((m, idx) => {
-                                    let cleanedText = m.text.trim();
-                                    for (const tag of tags) {
-                                        if (cleanedText.startsWith(tag)) {
-                                            cleanedText = cleanedText.substring(tag.length).trim();
-                                            break;
-                                        }
-                                    }
-                                    cleanedText = cleanedText.replace(/^(?:【[^】]+】|\[[^\]]+\])\s*/, '');
-                                    return (
-                                        <button
-                                            key={m.id || idx}
-                                            onMouseDown={(e) => {
-                                                e.preventDefault();
-                                                insertTextAtCursor(cleanedText);
-                                                setActiveToolbarMenu(null);
-                                            }}
-                                            className="text-left p-2 hover:bg-slate-50 border border-slate-150 rounded-xl text-xs font-bold text-slate-700 truncate"
-                                        >
-                                            {m.tag && <span className="text-[9px] bg-red-50 text-red-600 px-1 rounded mr-1">{m.tag}</span>}
-                                            {cleanedText}
-                                        </button>
-                                    );
-                                })
-                            )}
-                        </div>
-                    )}
-
-                    {activeToolbarMenu === 'program' && (
-                        <div className="max-h-[200px] overflow-y-auto bg-white p-2 border-b border-slate-200 flex flex-col gap-1.5 custom-scrollbar">
-                            <div className="flex justify-between items-center px-2 py-1 text-[9px] font-black text-slate-400 uppercase">
-                                <span>挿入するプログラムを選択</span>
-                                <button onMouseDown={(e) => { e.preventDefault(); setActiveToolbarMenu(null); }} className="text-slate-500 hover:text-slate-800">閉じる</button>
-                            </div>
-                            {(() => {
-                                const programsList = (programs && programs.length > 0)
-                                    ? programs
-                                    : (programTitle || programSummary ? [{ title: programTitle, summary: programSummary }] : []);
-                                const validProgs = programsList.filter(p => p.title || p.summary);
-                                return validProgs.length === 0 ? (
-                                    <p className="text-center py-4 text-xs text-slate-400">プログラムが登録されていません</p>
-                                ) : (
-                                    validProgs.map((prog, idx) => (
-                                        <button
-                                            key={idx}
-                                            onMouseDown={(e) => {
-                                                e.preventDefault();
-                                                const textToInsert = (prog.title && prog.summary)
-                                                    ? `${prog.title}：${prog.summary}`
-                                                    : prog.title || prog.summary || '';
-                                                insertTextAtCursor(textToInsert);
-                                                setActiveToolbarMenu(null);
-                                            }}
-                                            className="text-left p-2 hover:bg-slate-50 border border-slate-150 rounded-xl text-xs font-bold text-slate-700 truncate"
-                                        >
-                                            {prog.title}
-                                        </button>
-                                    ))
-                                );
-                            })()}
-                        </div>
-                    )}
-
-                    {/* Main Toolbar Buttons */}
-                    <div className="flex justify-around items-center p-2 gap-2 h-12">
-                        <button
-                            type="button"
-                            onMouseDown={(e) => { e.preventDefault(); setActiveToolbarMenu(prev => prev === 'memo' ? null : 'memo'); }}
-                            className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 text-center flex items-center justify-center gap-1 ${activeToolbarMenu === 'memo' ? 'bg-red-500 text-white border-red-600' : 'bg-white text-red-600 border-red-200'}`}
-                        >
-                            <MessageSquare className="w-3.5 h-3.5" />
-                            <span>チャットメモ</span>
-                        </button>
-                        <button
-                            type="button"
-                            onMouseDown={(e) => { e.preventDefault(); setActiveToolbarMenu(prev => prev === 'program' ? null : 'program'); }}
-                            className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 text-center flex items-center justify-center gap-1 ${activeToolbarMenu === 'program' ? 'bg-wood-500 text-white border-wood-600' : 'bg-white text-wood-700 border-wood-200'}`}
-                        >
-                            <FileText className="w-3.5 h-3.5" />
-                            <span>プログラム</span>
-                        </button>
-                        <button
-                            type="button"
-                            onMouseDown={(e) => {
-                                e.preventDefault();
-                                handleInsertTemplate();
-                            }}
-                            className="flex-1 py-2 bg-tree-600 hover:bg-tree-700 text-white rounded-xl text-xs font-black shadow-sm border border-tree-700 transition-all active:scale-95 text-center flex items-center justify-center gap-1"
-                        >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>挨拶テンプレ</span>
-                        </button>
                     </div>
                 </div>
             )}
