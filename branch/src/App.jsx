@@ -5,7 +5,7 @@ import {
     Trash2, Clock, CheckCircle2, AlertCircle, Loader2,
     ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileText, LayoutPanelLeft, UserCheck,
     FileEdit, X, Calendar as CalendarIcon, Settings, LogOut, HelpCircle, Menu,
-    Copy, Check, ClipboardList, ClipboardCheck, History, Plus, Lock
+    Copy, Check, ClipboardList, ClipboardCheck, History, Plus, Lock, Sparkles
 } from 'lucide-react';
 import MemoPanel from './components/MemoPanel';
 import DocViewer from './components/DocViewer';
@@ -20,6 +20,8 @@ import { defaultPrompts } from './constants/defaultPrompts';
 import { CopyButton, ErrorBoundary } from './components/Shared';
 import CalendarModal from './components/CalendarModal';
 import SettingsModal from './components/SettingsModal';
+import UpdateModal from './components/UpdateModal';
+import UpdateTour from './components/UpdateTour';
 import ExportModal from './components/ExportModal';
 import AddChildModal from './components/AddChildModal';
 import AttendanceModal from './components/AttendanceModal';
@@ -115,6 +117,28 @@ export default function App() {
     const [isSyncing, setIsSyncing] = useState(false);
     const [showCalendarModal, setShowCalendarModal] = useState(false);
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+    const [showUpdateModal, setShowUpdateModal] = useState(() => {
+        try {
+            return localStorage.getItem('care_pro_last_seen_version') !== APP_VERSION;
+        } catch {
+            return false;
+        }
+    });
+    const handleAcknowledgeUpdate = () => {
+        try {
+            localStorage.setItem('care_pro_last_seen_version', APP_VERSION);
+        } catch (e) {
+            console.error('Failed to save last seen version', e);
+        }
+    };
+    const [showUpdateTour, setShowUpdateTour] = useState(false);
+    const [updateTourStepId, setUpdateTourStepId] = useState(null);
+    const handleStartUpdateTour = (stepId = null) => {
+        setUpdateTourStepId(stepId);
+        setShowUpdateModal(false);
+        setShowSettingsModal(false);
+        setShowUpdateTour(true);
+    };
     const [showExportModal, setShowExportModal] = useState(false);
     const [showAddChildModal, setShowAddChildModal] = useState(false);
     const [showAttendanceModal, setShowAttendanceModal] = useState(false);
@@ -1395,12 +1419,13 @@ export default function App() {
     };
 
     const updateGlobalPrograms = async (updatedPrograms) => {
-        const firstProg = updatedPrograms[0] || { title: '', summary: '' };
+        const firstProg = updatedPrograms[0] || { title: '', summary: '', staff: '' };
         const newLog = { 
             ...globalLog, 
             programs: updatedPrograms,
             programTitle: firstProg.title || '',
-            programSummary: firstProg.summary || ''
+            programSummary: firstProg.summary || '',
+            programStaff: firstProg.staff || ''
         };
         setGlobalLog(newLog);
         await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, dailyTable, newLog);
@@ -2156,9 +2181,14 @@ export default function App() {
                             ) : (
                                 <span className="text-[10px] font-bold text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-full select-none">未選択</span>
                             )}
-                            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full select-none">
-                                v{APP_VERSION}
-                            </span>
+                            <button
+                                onClick={() => setShowUpdateModal(true)}
+                                title="アップデート内容を確認"
+                                className="text-[10px] font-bold text-slate-500 hover:text-tree-700 bg-slate-100 hover:bg-tree-100 border border-slate-200 hover:border-tree-300 px-2 py-0.5 rounded-full select-none transition-all flex items-center gap-1 cursor-pointer active:scale-95 shadow-sm"
+                            >
+                                <span>v{APP_VERSION}</span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-tree-500 animate-pulse" />
+                            </button>
                         </h1>
                     </div>
 
@@ -2253,6 +2283,7 @@ export default function App() {
 
                             <div className="relative">
                                 <button
+                                    id="guide-import"
                                     onClick={() => { setShowImportMenu(!showImportMenu); setShowExportMenu(false); }}
                                     className="px-2.5 py-1.5 text-slate-500 hover:text-indigo-700 hover:bg-indigo-50/50 rounded-full border border-slate-200/60 hover:border-indigo-200 shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
                                     title="インポート"
@@ -2543,6 +2574,12 @@ export default function App() {
                             {isProgramCollapsed && globalLog.programs && globalLog.programs.some(p => p.title || p.summary) && (
                                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="入力済み" />
                             )}
+                            {globalLog.programs && globalLog.programs.some(p => p.staff) && (
+                                <span className="text-[10px] bg-purple-200/70 text-purple-900 font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <span>担当:</span>
+                                    <span>{globalLog.programs.filter(p => p.staff).map(p => p.staff).join(', ')}</span>
+                                </span>
+                            )}
                         </div>
                         <button
                             onClick={(e) => { e.stopPropagation(); setIsProgramCollapsed(!isProgramCollapsed); }}
@@ -2560,12 +2597,12 @@ export default function App() {
                         <div className="p-3 flex-1 flex flex-col gap-3 min-h-0">
                             {(() => {
                                 const currentPrograms = globalLog.programs || (globalLog.programTitle || globalLog.programSummary 
-                                    ? [{ title: globalLog.programTitle || '', summary: globalLog.programSummary || '' }]
-                                    : [{ title: '', summary: '' }]);
+                                    ? [{ title: globalLog.programTitle || '', summary: globalLog.programSummary || '', staff: globalLog.programStaff || '' }]
+                                    : [{ title: '', summary: '', staff: '' }]);
                                 
                                 // Ensure active tab index is in bounds
                                 const activeIdx = Math.max(0, Math.min(activeProgramTab, currentPrograms.length - 1));
-                                const activeProg = currentPrograms[activeIdx] || { title: '', summary: '' };
+                                const activeProg = currentPrograms[activeIdx] || { title: '', summary: '', staff: '' };
 
                                 return (
                                     <>
@@ -2578,13 +2615,20 @@ export default function App() {
                                                         <button
                                                             type="button"
                                                             onClick={() => setActiveProgramTab(idx)}
-                                                            className={`px-2.5 py-1 text-[11px] font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer border ${
+                                                            className={`px-2.5 py-1 text-[11px] font-black rounded-lg transition-all flex items-center gap-1.5 cursor-pointer border ${
                                                                 isActive 
                                                                     ? 'bg-purple-600 text-white border-purple-600 shadow-sm font-bold' 
                                                                     : 'bg-white text-purple-700 border-purple-200 hover:bg-purple-50/50'
                                                             }`}
                                                         >
                                                             <span>{prog.title ? (prog.title.length > 5 ? prog.title.substring(0, 5) + '..' : prog.title) : `${idx + 1}`}</span>
+                                                            {prog.staff && (
+                                                                <span className={`text-[9px] px-1 py-0.2 rounded-full font-black ${
+                                                                    isActive ? 'bg-purple-900/60 text-purple-100' : 'bg-purple-100 text-purple-800'
+                                                                }`}>
+                                                                    {prog.staff}
+                                                                </span>
+                                                            )}
                                                         </button>
                                                         {currentPrograms.length > 1 && (
                                                             <button
@@ -2616,7 +2660,7 @@ export default function App() {
                                             <button
                                                 type="button"
                                                 onClick={() => {
-                                                    const updated = [...currentPrograms, { title: '', summary: '' }];
+                                                    const updated = [...currentPrograms, { title: '', summary: '', staff: '' }];
                                                     updateGlobalPrograms(updated);
                                                     setActiveProgramTab(updated.length - 1);
                                                 }}
@@ -2630,22 +2674,56 @@ export default function App() {
 
                                         {/* Active Tab Panel */}
                                         <div className="flex-1 flex flex-col gap-2 bg-slate-50/30 p-2 rounded-xl border border-slate-100/50 mt-1 animate-in fade-in duration-200">
-                                            {/* Title */}
-                                            <div className="space-y-1">
-                                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
-                                                    プログラム名
-                                                </label>
-                                                <input
-                                                    type="text"
-                                                    placeholder="例: ダンス、工作、レクリエーション"
-                                                    value={activeProg.title || ''}
-                                                    onChange={(e) => {
-                                                        const updated = [...currentPrograms];
-                                                        updated[activeIdx] = { ...updated[activeIdx], title: e.target.value };
-                                                        updateGlobalPrograms(updated);
-                                                    }}
-                                                    className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-750 focus:outline-none focus:border-purple-400 transition-all shadow-sm"
-                                                />
+                                            {/* Program Title & Assigned Staff */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                {/* Title */}
+                                                <div className="space-y-1">
+                                                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">
+                                                        プログラム名
+                                                    </label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="例: ダンス、工作、レクリエーション"
+                                                        value={activeProg.title || ''}
+                                                        onChange={(e) => {
+                                                            const updated = [...currentPrograms];
+                                                            updated[activeIdx] = { ...updated[activeIdx], title: e.target.value };
+                                                            updateGlobalPrograms(updated);
+                                                        }}
+                                                        className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-750 focus:outline-none focus:border-purple-400 transition-all shadow-sm"
+                                                    />
+                                                </div>
+
+                                                {/* Assigned Staff */}
+                                                <div id="guide-program-staff" className="space-y-1">
+                                                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                                                        <span>担当スタッフ</span>
+                                                        {activeProg.staff && (
+                                                            <span className="text-[9px] font-black text-purple-600">
+                                                                {activeProg.staff}
+                                                            </span>
+                                                        )}
+                                                    </label>
+                                                    <div className="relative">
+                                                        <select
+                                                            value={activeProg.staff || ''}
+                                                            onChange={(e) => {
+                                                                const updated = [...currentPrograms];
+                                                                updated[activeIdx] = { ...updated[activeIdx], staff: e.target.value };
+                                                                updateGlobalPrograms(updated);
+                                                            }}
+                                                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-750 focus:outline-none focus:border-purple-400 transition-all shadow-sm appearance-none pr-6 cursor-pointer"
+                                                        >
+                                                            <option value="">（未選択）</option>
+                                                            {filteredStaffList.map(s => (
+                                                                <option key={s.id || s.name} value={s.name}>
+                                                                    {s.name}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                        <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                                    </div>
+                                                </div>
                                             </div>
                                             
                                             {/* Description / Summary */}
@@ -2921,7 +2999,16 @@ export default function App() {
                                         </th>
 
                                         <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'learning' ? 'table-cell' : 'hidden'} lg:table-cell`}>学習</th>
-                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'program' ? 'table-cell' : 'hidden'} lg:table-cell`}>プログラム</th>
+                                        <th className={`p-2 text-[10px] font-black text-slate-400 w-[70%] lg:w-[14%] min-w-[120px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'program' ? 'table-cell' : 'hidden'} lg:table-cell`}>
+                                            <div className="flex flex-col items-center gap-0.5">
+                                                <span>プログラム</span>
+                                                {globalLog.programs && globalLog.programs.some(p => p.staff) && (
+                                                    <span className="text-[9px] text-purple-600 font-bold tracking-tight">
+                                                        ({globalLog.programs.filter(p => p.staff).map(p => p.staff).join(', ')})
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </th>
                                         <th className={`p-2 text-[10px] font-black text-slate-400 w-[23%] lg:w-[6%] min-w-[60px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>送迎</th>
                                         <th className={`p-2 text-[10px] font-black text-slate-400 w-[23%] lg:w-[6%] min-w-[60px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>終了</th>
                                         <th className={`p-2 text-[10px] font-black text-slate-400 w-[24%] lg:w-[8%] min-w-[75px] border-r border-slate-100 bg-slate-50/10 text-center ${activeTableTab === 'transport' ? 'table-cell' : 'hidden'} lg:table-cell`}>迎え場所</th>
@@ -3610,6 +3697,32 @@ export default function App() {
                     onSaveTags={handleUpdateTags}
                     okWords={okWords}
                     onSaveOkWords={handleSaveOkWords}
+                    onOpenUpdateModal={() => {
+                        setShowSettingsModal(false);
+                        setShowUpdateModal(true);
+                    }}
+                    onStartTour={handleStartUpdateTour}
+                />
+            )}
+            <UpdateModal
+                show={showUpdateModal}
+                onClose={() => setShowUpdateModal(false)}
+                onAcknowledge={handleAcknowledgeUpdate}
+                onStartTour={handleStartUpdateTour}
+            />
+            {showUpdateTour && (
+                <UpdateTour
+                    onClose={() => {
+                        setShowUpdateTour(false);
+                        setSelectedChildId(null);
+                    }}
+                    startStepId={updateTourStepId}
+                    firstChildId={selectedChildId || children[0]?.id || null}
+                    selectedChildId={selectedChildId}
+                    setSelectedChildId={setSelectedChildId}
+                    setMemoActiveTab={setMemoActiveTab}
+                    setIsMobileMenuOpen={setIsMobileMenuOpen}
+                    setIsProgramCollapsed={setIsProgramCollapsed}
                 />
             )}
             <ExportModal 
@@ -3740,6 +3853,7 @@ export default function App() {
 
                         {/* インポート（タップで開く小メニュー） */}
                         <button
+                            id="guide-import-mobile-btn"
                             onClick={() => { setMobileImportOpen(!mobileImportOpen); setMobileExportOpen(false); }}
                             className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
                         >
@@ -3773,6 +3887,18 @@ export default function App() {
                         </button>
 
                         <button
+                            onClick={() => { setShowUpdateModal(true); setIsMobileMenuOpen(false); }}
+                            className="w-full px-4 py-2.5 hover:bg-tree-50 text-slate-600 hover:text-tree-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
+                        >
+                            <Sparkles className="w-4 h-4 text-tree-500" />
+                            <div className="flex items-center gap-2 flex-1 text-left">
+                                <span>アップデート情報</span>
+                                <span className="text-[10px] bg-tree-100 text-tree-700 px-1.5 py-0.5 rounded-full font-bold">v{APP_VERSION}</span>
+                            </div>
+                        </button>
+
+                        <button
+                            id="guide-settings-mobile-btn"
                             onClick={() => { setShowSettingsModal(true); setIsMobileMenuOpen(false); }}
                             className="w-full px-4 py-2.5 hover:bg-slate-50 text-slate-600 hover:text-slate-800 rounded-xl font-bold text-xs transition-all flex items-center gap-3"
                         >

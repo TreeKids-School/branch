@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Settings, Tag, Plus, Trash2, CheckCircle2 } from 'lucide-react';
+import { X, Save, Settings, Tag, Plus, Trash2, CheckCircle2, Sparkles, MapPin, MousePointerClick, Calendar, History, ExternalLink } from 'lucide-react';
+import { UPDATE_HISTORY, APP_VERSION } from '../app_constants';
 
-export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSaveTags, okWords = [], onSaveOkWords }) {
+export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSaveTags, okWords = [], onSaveOkWords, onOpenUpdateModal, onStartTour, initialTab = 'tags' }) {
     const [localTags, setLocalTags] = useState(tags);
     const [localTagInsertTexts, setLocalTagInsertTexts] = useState(tagInsertTexts);
     const [newTag, setNewTag] = useState('');
@@ -10,7 +11,7 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
     const [localOkWords, setLocalOkWords] = useState(okWords);
     const [newOkWord, setNewOkWord] = useState('');
 
-    const [activeTab, setActiveTab] = useState('tags'); // 'tags' or 'okWords'
+    const [activeTab, setActiveTab] = useState(initialTab); // 'tags', 'okWords', or 'updates'
 
     useEffect(() => {
         setLocalTags(tags);
@@ -137,6 +138,17 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
                         <CheckCircle2 className="w-4 h-4" />
                         <span>OKワード管理</span>
                     </button>
+                    <button
+                        onClick={() => setActiveTab('updates')}
+                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all ${
+                            activeTab === 'updates'
+                                ? 'border-apple-600 text-apple-600'
+                                : 'border-transparent text-slate-400 hover:text-slate-600'
+                        }`}
+                    >
+                        <Sparkles className="w-4 h-4 text-amber-500" />
+                        <span>アップデート履歴</span>
+                    </button>
                 </div>
 
                 {/* Tab Contents */}
@@ -262,7 +274,7 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
                                 </div>
                             </div>
                         </div>
-                    ) : (
+                    ) : activeTab === 'okWords' ? (
                         /* OK Words Management Section */
                         <div className="space-y-6 animate-in fade-in duration-300">
                             <div className="flex items-center gap-3 px-2">
@@ -302,6 +314,127 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
                                         <Plus className="w-6 h-6" />
                                     </button>
                                 </div>
+                            </div>
+                        </div>
+                    ) : (
+                        /* Update History Section */
+                        <div className="space-y-6 animate-in fade-in duration-300">
+                            <div className="flex items-center justify-between px-2">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-2 h-2 rounded-full bg-amber-500 shadow-md" />
+                                    <h4 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.25em]">アップデート履歴・操作ガイド</h4>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    {onStartTour && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                onClose();
+                                                onStartTour();
+                                            }}
+                                            className="px-3 py-1.5 bg-tree-600 hover:bg-tree-700 text-white rounded-xl text-xs font-black shadow-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                                        >
+                                            <Sparkles className="w-3.5 h-3.5 text-yellow-300 animate-pulse" />
+                                            <span>画面で操作ツアーを見る</span>
+                                        </button>
+                                    )}
+                                    {onOpenUpdateModal && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                onClose();
+                                                onOpenUpdateModal();
+                                            }}
+                                            className="text-xs font-black text-tree-600 hover:text-tree-700 flex items-center gap-1 hover:underline cursor-pointer"
+                                        >
+                                            <ExternalLink className="w-3.5 h-3.5" />
+                                            <span>案内ポップアップで開く</span>
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="space-y-6">
+                                {UPDATE_HISTORY.map((u, vIdx) => (
+                                    <div key={u.version} className="glass-card p-6 md:p-8 rounded-[2.5rem] border border-white shadow-premium space-y-5">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
+                                            <div className="flex items-center gap-2.5">
+                                                <span className="px-3 py-1 bg-tree-600 text-white rounded-full text-xs font-black tracking-wider shadow-xs">
+                                                    v{u.version}
+                                                </span>
+                                                {vIdx === 0 && (
+                                                    <span className="px-2 py-0.5 bg-yellow-400 text-tree-950 rounded-full text-[10px] font-black uppercase">
+                                                        最新版
+                                                    </span>
+                                                )}
+                                                <h5 className="font-black text-slate-800 text-sm md:text-base">
+                                                    {u.title}
+                                                </h5>
+                                            </div>
+                                            <span className="text-xs font-bold text-slate-400">
+                                                {u.date}
+                                            </span>
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            {u.items.map((item, iIdx) => {
+                                                const isNew = item.badge === 'new';
+                                                return (
+                                                    <div key={iIdx} className="bg-slate-50/90 rounded-2xl p-4 border border-slate-200/70 space-y-2.5 shadow-2xs">
+                                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                                                    isNew 
+                                                                        ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                                                                        : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                                                                }`}>
+                                                                    {isNew ? '✨ 新機能' : '⚡ 改善'}
+                                                                </span>
+                                                                <h6 className="font-black text-slate-800 text-xs md:text-sm">
+                                                                    {item.title}
+                                                                </h6>
+                                                            </div>
+                                                            {item.id && onStartTour && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        onClose();
+                                                                        onStartTour(item.id);
+                                                                    }}
+                                                                    className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                                                                    title="画面上でどこを押してどうなるかを確認"
+                                                                >
+                                                                    <MousePointerClick className="w-3 h-3 text-amber-600" />
+                                                                    <span>画面で確認</span>
+                                                                </button>
+                                                            )}
+                                                        </div>
+
+                                                        {/* Guide: どこで & 操作 */}
+                                                        <div className="bg-white p-3 rounded-xl border border-slate-200/60 space-y-1.5 text-xs">
+                                                            <div className="flex items-start gap-2">
+                                                                <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 font-black rounded text-[10px] flex-shrink-0">
+                                                                    どこで
+                                                                </span>
+                                                                <span className="font-bold text-slate-800">{item.location}</span>
+                                                            </div>
+                                                            <div className="flex items-start gap-2">
+                                                                <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 font-black rounded text-[10px] flex-shrink-0">
+                                                                    操作手順
+                                                                </span>
+                                                                <span className="font-black text-indigo-900">{item.action}</span>
+                                                            </div>
+                                                        </div>
+
+                                                        <p className="text-xs text-slate-600 font-bold leading-relaxed px-1">
+                                                            {item.description}
+                                                        </p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     )}
