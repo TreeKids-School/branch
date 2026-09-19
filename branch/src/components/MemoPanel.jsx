@@ -1164,41 +1164,44 @@ export default function MemoPanel({
                             </div>
                         )}
 
-                        {/* Tag selectors & Clear button */}
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex flex-wrap gap-1.5 flex-1">
-                                {tags.map(t => {
-                                    const isSelected = selectedTags.includes(t);
-                                    return (
-                                        <button
-                                            key={t}
-                                            onClick={() => toggleTag(t)}
-                                            className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-tight border transition-all active:scale-95 shadow-sm cursor-pointer ${
-                                                isSelected 
-                                                    ? 'bg-red-600 border-red-600 text-white' 
-                                                    : 'bg-red-50 hover:bg-red-100 border-red-100 text-red-600'
-                                            }`}
-                                        >
-                                            {t}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            {/* 文字削除ボタン（全部消す） */}
-                            {(chatText || selectedTags.length > 0) && (
-                                <button
-                                    type="button"
-                                    onClick={handleClearChatText}
-                                    className="px-2.5 py-1 text-[10px] font-bold text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg border border-slate-200 transition-all active:scale-95 flex items-center gap-1 cursor-pointer flex-shrink-0"
-                                    title="入力内容と選択タグをすべて削除"
-                                >
-                                    <Trash2 className="w-3 h-3" />
-                                    <span>文字削除</span>
-                                </button>
-                            )}
+                        {/* Tag selectors */}
+                        <div className="flex flex-wrap gap-1.5 w-full">
+                            {tags.map(t => {
+                                const isSelected = selectedTags.includes(t);
+                                return (
+                                    <button
+                                        key={t}
+                                        onClick={() => toggleTag(t)}
+                                        className={`px-3 py-1.5 rounded-full text-[10px] font-black tracking-tight border transition-all active:scale-95 shadow-sm cursor-pointer ${
+                                            isSelected 
+                                                ? 'bg-red-600 border-red-600 text-white' 
+                                                : 'bg-red-50 hover:bg-red-100 border-red-100 text-red-600'
+                                        }`}
+                                    >
+                                        {t}
+                                    </button>
+                                );
+                            })}
                         </div>
 
-                        <div className="flex items-end gap-2.5 w-full">
+                        {/* Input Area: [削除ボタン] [textarea] [送信ボタン] */}
+                        <div className="flex items-end gap-2 w-full">
+                            {/* 削除ボタン（文字入力欄の左に常設） */}
+                            <button
+                                type="button"
+                                onClick={handleClearChatText}
+                                disabled={!chatText && selectedTags.length === 0}
+                                className={`h-12 w-11 rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-all flex-shrink-0 cursor-pointer ${
+                                    chatText || selectedTags.length > 0
+                                        ? 'bg-white border-slate-200 text-slate-500 hover:text-red-500 hover:bg-red-50 hover:border-red-200 active:scale-90 shadow-sm'
+                                        : 'bg-slate-50/50 border-slate-100 text-slate-300 opacity-40 cursor-not-allowed'
+                                }`}
+                                title="入力文字と選択タグをすべて削除"
+                            >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span className="text-[8px] font-black leading-none">削除</span>
+                            </button>
+
                             <div className="flex-1">
                                 <textarea
                                     id="guide-chat-textarea"
