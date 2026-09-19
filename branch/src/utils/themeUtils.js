@@ -1,26 +1,102 @@
 // ── Dynamic Office Theme Utilities ──────────────────────────────────────────
 
-/**
- * Parses any hex color (e.g. #28A745, #28a745, #28a) into [r, g, b].
- */
-export function hexToRgb(hex) {
-    if (!hex || typeof hex !== 'string') return null;
-    let cleanHex = hex.trim().replace(/^#/, '');
+const COLOR_NAME_MAP = {
+    // English names
+    'blue': '#2563eb',
+    'sky': '#0284c7',
+    'cyan': '#0891b2',
+    'teal': '#0d9488',
+    'emerald': '#059669',
+    'green': '#16a34a',
+    'lime': '#65a30d',
+    'yellow': '#ca8a04',
+    'amber': '#d97706',
+    'orange': '#ea580c',
+    'red': '#dc2626',
+    'rose': '#e11d48',
+    'pink': '#db2777',
+    'purple': '#9333ea',
+    'violet': '#7c3aed',
+    'indigo': '#4f46e5',
+    'slate': '#475569',
+    'gray': '#4b5563',
+    'brown': '#8B5E3C',
+    // Japanese names
+    '青': '#2563eb',
+    '水色': '#0284c7',
+    '緑': '#16a34a',
+    '黄緑': '#65a30d',
+    '黄': '#ca8a04',
+    '黄色': '#ca8a04',
+    '橙': '#ea580c',
+    'オレンジ': '#ea580c',
+    '赤': '#dc2626',
+    'ピンク': '#db2777',
+    '紫': '#9333ea',
+    '茶': '#8B5E3C',
+    '茶色': '#8B5E3C',
+    '紺': '#1e3a8a',
+    '黒': '#1e293b'
+};
 
+const DEFAULT_BASE_HEX = '#28A745';
+
+/**
+ * Robust color parser accepting HEX, RGB, RGBA, color names (EN/JA), or color objects.
+ * Returns [r, g, b] or null.
+ */
+export function parseAnyColor(input) {
+    if (!input) return null;
+
+    // 1. If input is an object
+    if (typeof input === 'object') {
+        const val = input.hex || input.color || input.value || input.rgb || input.code;
+        if (val && typeof val !== 'object') return parseAnyColor(val);
+    }
+
+    if (typeof input !== 'string') return null;
+    let str = input.trim().toLowerCase();
+
+    // 2. Check Color Name map
+    if (COLOR_NAME_MAP[str]) {
+        return parseAnyColor(COLOR_NAME_MAP[str]);
+    }
+
+    // 3. RGB / RGBA: rgb(r, g, b) or rgba(r, g, b, a)
+    const rgbMatch = str.match(/rgba?\s*\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/);
+    if (rgbMatch) {
+        return [
+            Math.min(255, parseInt(rgbMatch[1], 10)),
+            Math.min(255, parseInt(rgbMatch[2], 10)),
+            Math.min(255, parseInt(rgbMatch[3], 10))
+        ];
+    }
+
+    // 4. Pure "R, G, B" or "R G B"
+    const numMatch = str.match(/^(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})$/);
+    if (numMatch) {
+        return [
+            Math.min(255, parseInt(numMatch[1], 10)),
+            Math.min(255, parseInt(numMatch[2], 10)),
+            Math.min(255, parseInt(numMatch[3], 10))
+        ];
+    }
+
+    // 5. HEX format (#fff, #ffffff, fff, ffffff)
+    let cleanHex = str.replace(/^#/, '');
     if (cleanHex.length === 3) {
         cleanHex = cleanHex.split('').map(c => c + c).join('');
     }
+    if (cleanHex.length === 6 && /^[0-9a-f]{6}$/i.test(cleanHex)) {
+        const num = parseInt(cleanHex, 16);
+        return [
+            (num >> 16) & 255,
+            (num >> 8) & 255,
+            num & 255
+        ];
+    }
 
-    if (cleanHex.length !== 6) return null;
-
-    const num = parseInt(cleanHex, 16);
-    if (isNaN(num)) return null;
-
-    return [
-        (num >> 16) & 255,
-        (num >> 8) & 255,
-        num & 255
-    ];
+    return null;
 }
 
 /**
@@ -77,17 +153,14 @@ function hslToRgb(h, s, l) {
     ];
 }
 
-const DEFAULT_BASE_HEX = '#28A745';
-
 /**
- * Generates shades (50 to 900) for a given base HEX color.
+ * Generates shades (50 to 900) for a given color (HEX, RGB, or Name).
  * Returns an object with keys 50, 100, 200, 300, 400, 500, 600, 700, 800, 900 in "R, G, B" string format.
  */
-export function generateThemePalette(baseHex) {
-    const baseRgb = hexToRgb(baseHex) || hexToRgb(DEFAULT_BASE_HEX);
+export function generateThemePalette(colorInput) {
+    const baseRgb = parseAnyColor(colorInput) || parseAnyColor(DEFAULT_BASE_HEX);
     const [h, s, baseL] = rgbToHsl(...baseRgb);
 
-    // Lightness & Saturation adjustments for each shade
     const shades = {
         50: hslToRgb(h, Math.min(s * 0.7, 0.65), 0.97),
         100: hslToRgb(h, Math.min(s * 0.75, 0.65), 0.92),
@@ -110,18 +183,45 @@ export function generateThemePalette(baseHex) {
 }
 
 /**
- * Extracts color value from an office object.
+ * Searches for any color value in an office object deeply and intelligently.
  */
 export function getOfficeColor(office) {
     if (!office || typeof office !== 'object') return DEFAULT_BASE_HEX;
-    return (
-        office.color ||
-        office.themeColor ||
-        office.officeColor ||
-        office.mainColor ||
-        office.iconColor ||
-        DEFAULT_BASE_HEX
-    );
+
+    // 1. Direct standard property check
+    const candidates = [
+        office.color,
+        office.themeColor,
+        office.officeColor,
+        office.mainColor,
+        office.theme,
+        office.primaryColor,
+        office.brandColor,
+        office.iconColor,
+        office.badgeColor,
+        office.bgColor,
+        office.backgroundColor,
+        office.colorCode,
+        office.color_code,
+        office.style?.color,
+        office.settings?.color,
+        office.settings?.themeColor
+    ];
+
+    for (const c of candidates) {
+        if (c && parseAnyColor(c)) return c;
+    }
+
+    // 2. Scan any property in office object that looks like a color
+    for (const [key, val] of Object.entries(office)) {
+        if (typeof val === 'string' || typeof val === 'object') {
+            if (/color|theme|brand|accent/i.test(key)) {
+                if (parseAnyColor(val)) return val;
+            }
+        }
+    }
+
+    return DEFAULT_BASE_HEX;
 }
 
 /**
@@ -130,16 +230,21 @@ export function getOfficeColor(office) {
 export function applyOfficeTheme(office) {
     if (typeof document === 'undefined') return;
 
-    const baseHex = getOfficeColor(office);
-    const palette = generateThemePalette(baseHex);
+    const rawColor = getOfficeColor(office);
+    const palette = generateThemePalette(rawColor);
     const root = document.documentElement;
 
     Object.entries(palette).forEach(([shade, rgbStr]) => {
         root.style.setProperty(`--color-tree-${shade}-rgb`, rgbStr);
     });
 
-    // Also set standard hex/rgb on root for non-Tailwind consumers
-    const baseRgb = hexToRgb(baseHex) || hexToRgb(DEFAULT_BASE_HEX);
-    root.style.setProperty('--color-tree-main', `rgb(${baseRgb.join(', ')})`);
-    root.style.setProperty('--color-tree-main-hex', baseHex);
+    const rgb = parseAnyColor(rawColor) || parseAnyColor(DEFAULT_BASE_HEX);
+    root.style.setProperty('--color-tree-main', `rgb(${rgb.join(', ')})`);
+    
+    console.log(`[Theme] Applied office theme for "${office?.name || office?.id || 'default'}":`, {
+        rawColor,
+        mainRgb: rgb.join(', '),
+        palette
+    });
 }
+
