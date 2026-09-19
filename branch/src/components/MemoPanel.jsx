@@ -6,7 +6,7 @@ import {
 import { callStorage } from '../hooks/useStorage';
 import { getRoleFromPost } from '../app_constants';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 // Smart name detection helper (excluding common stop words)
 const scanForNames = (text, okWords = []) => {
@@ -120,6 +120,72 @@ export default function MemoPanel({
         const [editChatTags, setEditChatTags] = useState([]); // 編集中メッセージのタグ
         const [showHelpChat, setShowHelpChat] = useState(false);
         const [selectedTags, setSelectedTags] = useState([]); // 複数タグ対応
+        const [programSelectPopover, setProgramSelectPopover] = useState(null); // 複数プログラム選択ポップオーバー { tag }
+
+        // 有効なプログラムリストの取得（複数プログラム対応）
+        const validPrograms = useMemo(() => {
+            const list = (programs && programs.length > 0)
+                ? programs
+                : (programTitle || programSummary ? [{ title: programTitle, summary: programSummary }] : []);
+            return list.filter(p => p && ((p.title && p.title.trim()) || (p.summary && p.summary.trim())));
+        }, [programs, programTitle, programSummary]);
+
+        const isProgramTag = (t) => {
+            if (!t) return false;
+            if (t.includes('プログラム')) return true;
+            const tmpl = tagInsertTexts ? tagInsertTexts[t] : undefined;
+            return tmpl && (tmpl.includes('{プログラム内容}') || tmpl.includes('{program}'));
+        };
+
+        const insertTagTemplateWithProgram = (tag, selectedProgMode) => {
+            if (selectedProgMode === 'none') {
+                return;
+            }
+
+            let template = tagInsertTexts ? tagInsertTexts[tag] : undefined;
+            if (template === undefined) {
+                if (tag.includes('プログラム')) {
+                    template = '{プログラム内容}';
+                } else if (tag.includes('ツリー式学習')) {
+                    template = 'ツリー式学習';
+                } else {
+                    template = '';
+                }
+            }
+
+            if (!template) return;
+
+            let textToInsert = template;
+            if (textToInsert.includes('{プログラム内容}') || textToInsert.includes('{program}')) {
+                let progSummaryText = '';
+                if (selectedProgMode === 'all') {
+                    // 全プログラム連結
+                    const parts = validPrograms.map((p, idx) => {
+                        const titleStr = p.title ? `【${p.title}】` : `【プログラム${idx + 1}】`;
+                        const summaryStr = p.summary || '';
+                        return summaryStr ? `${titleStr}\n${summaryStr}` : titleStr;
+                    });
+                    progSummaryText = parts.filter(Boolean).join('\n\n');
+                } else if (typeof selectedProgMode === 'number') {
+                    const p = validPrograms[selectedProgMode];
+                    if (p) {
+                        progSummaryText = p.summary || p.title || '';
+                    }
+                } else {
+                    // フォールバック: 最初のプログラム
+                    const p = validPrograms[0];
+                    progSummaryText = (p && (p.summary || p.title)) || programSummary || '';
+                }
+
+                textToInsert = textToInsert
+                    .replace(/\{プログラム内容\}/g, progSummaryText)
+                    .replace(/\{program\}/g, progSummaryText);
+            }
+
+            if (textToInsert.trim()) {
+                setChatText(current => textToInsert + (current ? '\n' + current : ''));
+            }
+        };
 
         const handleStartEdit = (m) => {
             setEditingChatId(m.id);
@@ -146,6 +212,7 @@ export default function MemoPanel({
             onSave(child.id, chatText, tagString);
             setChatText('');
             setSelectedTags([]);
+            setProgramSelectPopover(null);
         };
 
         const handleChatEditSave = (msgId) => {
@@ -158,46 +225,33 @@ export default function MemoPanel({
         };
 
         const toggleTag = (tag) => {
-            setSelectedTags(prev => {
-                const isAlreadySelected = prev.includes(tag);
-                const nextTags = isAlreadySelected ? prev.filter(t => t !== tag) : [...prev, tag];
+            const isAlreadySelected = selectedTags.includes(tag);
 
-                // 新たにタグが付与されたときの冒頭自動挿入
-                if (!isAlreadySelected) {
-                    let template = tagInsertTexts ? tagInsertTexts[tag] : undefined;
-                    // 後方互換フォールバック（未設定の場合）
-                    if (template === undefined) {
-                        if (tag.includes('プログラム')) {
-                            template = '{プログラム内容}';
-                        } else if (tag.includes('ツリー式学習')) {
-                            template = 'ツリー式学習';
-                        } else {
-                            template = '';
-                        }
-                    }
-
-                    if (template) {
-                        let textToInsert = template;
-                        if (textToInsert.includes('{プログラム内容}') || textToInsert.includes('{program}')) {
-                            const progSummary = (programs && programs[0]?.summary) || programSummary || '';
-                            textToInsert = textToInsert
-                                .replace(/\{プログラム内容\}/g, progSummary)
-                                .replace(/\{program\}/g, progSummary);
-                        }
-
-                        if (textToInsert.trim()) {
-                            setChatText(current => textToInsert + (current ? '\n' + current : ''));
-                        }
-                    }
+            if (isAlreadySelected) {
+                // すでに選択中のタグを解除
+                setSelectedTags(prev => prev.filter(t => t !== tag));
+                if (programSelectPopover?.tag === tag) {
+                    setProgramSelectPopover(null);
                 }
+                return;
+            }
 
-                return nextTags;
-            });
+            // タグを新規追加
+            setSelectedTags(prev => [...prev, tag]);
+
+            // プログラム関連タグかつ複数プログラムがある場合は選択ポップオーバーを表示（案A）
+            if (isProgramTag(tag) && validPrograms.length > 1) {
+                setProgramSelectPopover({ tag });
+            } else {
+                // プログラムが1つ以下または通常タグは即座に挿入
+                insertTagTemplateWithProgram(tag, 0);
+            }
         };
 
         const handleClearChatText = () => {
             setChatText('');
             setSelectedTags([]);
+            setProgramSelectPopover(null);
         };
 
 
@@ -1040,7 +1094,76 @@ export default function MemoPanel({
                     </div>
 
                     {/* Chat Input Area */}
-                    <div className="p-5 bg-white border-t border-slate-100 space-y-4 shadow-[0_-20px_50px_rgba(0,0,0,0.02)]">
+                    <div className="p-5 bg-white border-t border-slate-100 space-y-3 shadow-[0_-20px_50px_rgba(0,0,0,0.02)]">
+                        {/* 複数プログラム選択ポップオーバー（案A） */}
+                        {programSelectPopover && (
+                            <div className="p-3 bg-purple-50/95 border border-purple-200 rounded-2xl shadow-md flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-black text-purple-900 flex items-center gap-1.5">
+                                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                                        挿入するプログラムを選択
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={() => setProgramSelectPopover(null)}
+                                        className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-purple-100/60 transition-colors cursor-pointer"
+                                        title="閉じる"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+                                    {validPrograms.map((p, idx) => (
+                                        <button
+                                            key={idx}
+                                            type="button"
+                                            onClick={() => {
+                                                insertTagTemplateWithProgram(programSelectPopover.tag, idx);
+                                                setProgramSelectPopover(null);
+                                            }}
+                                            className="p-2 bg-white hover:bg-purple-100/70 border border-purple-100 rounded-xl text-left transition-all active:scale-98 shadow-2xs flex flex-col gap-0.5 group cursor-pointer"
+                                        >
+                                            <div className="flex items-center justify-between gap-1">
+                                                <span className="text-[11px] font-black text-purple-900 group-hover:text-purple-700">
+                                                    {idx + 1}. {p.title || '（タイトル未設定）'}
+                                                </span>
+                                                {p.staff && (
+                                                    <span className="text-[9px] px-1.5 py-0.2 bg-purple-100 text-purple-800 rounded-full font-bold flex-shrink-0">
+                                                        {p.staff}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="text-[10.5px] text-slate-500 line-clamp-2 leading-relaxed">
+                                                {p.summary || '（内容なし）'}
+                                            </p>
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="flex items-center justify-between pt-1 border-t border-purple-100/80">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            insertTagTemplateWithProgram(programSelectPopover.tag, 'none');
+                                            setProgramSelectPopover(null);
+                                        }}
+                                        className="text-[10px] font-bold text-slate-400 hover:text-slate-600 px-1.5 py-0.5 transition-colors cursor-pointer"
+                                    >
+                                        文字挿入なし（タグのみ）
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            insertTagTemplateWithProgram(programSelectPopover.tag, 'all');
+                                            setProgramSelectPopover(null);
+                                        }}
+                                        className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-[10px] font-black transition-all active:scale-95 shadow-2xs flex items-center gap-1 cursor-pointer"
+                                    >
+                                        <span>すべて挿入</span>
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Tag selectors & Clear button */}
                         <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex flex-wrap gap-1.5 flex-1">
