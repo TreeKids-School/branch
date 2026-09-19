@@ -31,6 +31,7 @@ import BackupImportModal from './components/BackupImportModal';
 
 import { printAllDocuments, GROUP1_ITEMS, GROUP2_ITEMS } from './utils/print';
 import { toCSV } from './utils/csv';
+import { applyOfficeTheme } from './utils/themeUtils';
 
 
 
@@ -174,6 +175,11 @@ export default function App() {
         }
     });
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+    // 事業所変更時にテーマカラー（メインカラー）を動的に適用
+    useEffect(() => {
+        applyOfficeTheme(selectedOffice);
+    }, [selectedOffice]);
 
     // Filter staff list by selected office
     const filteredStaffList = staffList.filter(staff => {
@@ -625,7 +631,9 @@ export default function App() {
             if (list && list.length > 0) {
                 setSelectedOffice(prev => {
                     if (prev && list.some(o => o.id === prev.id)) {
-                        return prev;
+                        const latest = list.find(o => o.id === prev.id) || prev;
+                        localStorage.setItem('care_pro_selected_office', JSON.stringify(latest));
+                        return latest;
                     }
                     const defaultOffice = list[0];
                     localStorage.setItem('care_pro_selected_office', JSON.stringify(defaultOffice));

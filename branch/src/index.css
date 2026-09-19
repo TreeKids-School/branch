@@ -2,18 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* Default Tree Kids Green Theme */
+  --color-tree-50-rgb: 240, 249, 241;
+  --color-tree-100-rgb: 220, 240, 222;
+  --color-tree-200-rgb: 187, 225, 192;
+  --color-tree-300-rgb: 136, 207, 160;
+  --color-tree-400-rgb: 78, 183, 111;
+  --color-tree-500-rgb: 40, 167, 69;
+  --color-tree-600-rgb: 33, 145, 60;
+  --color-tree-700-rgb: 29, 122, 51;
+  --color-tree-800-rgb: 25, 99, 43;
+  --color-tree-900-rgb: 21, 82, 37;
+  --color-tree-main: rgb(40, 167, 69);
+  --color-tree-main-hex: #28A745;
+}
+
 @layer base {
   html {
     background-color: #fcfdfc;
   }
   body {
-    background-color: #fcfdfc; /* tree-50 like very faint green */
+    background-color: #fcfdfc;
     @apply text-slate-800 antialiased;
     background-image: 
-      radial-gradient(at 0% 0%, rgba(40, 167, 69, 0.1) 0px, transparent 50%),   /* tree-500 */
+      radial-gradient(at 0% 0%, rgba(var(--color-tree-500-rgb), 0.1) 0px, transparent 50%),
       radial-gradient(at 100% 0%, rgba(139, 94, 60, 0.08) 0px, transparent 50%), /* wood-500 */
       radial-gradient(at 100% 100%, rgba(220, 53, 69, 0.03) 0px, transparent 50%), /* apple-500 */
-      radial-gradient(at 0% 100%, rgba(40, 167, 69, 0.05) 0px, transparent 50%);
+      radial-gradient(at 0% 100%, rgba(var(--color-tree-500-rgb), 0.05) 0px, transparent 50%);
     background-attachment: scroll;
   }
   @media (min-width: 768px) {
@@ -29,7 +45,7 @@
     background-color: rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
-    box-shadow: 0 8px 32px 0 rgba(40, 167, 69, 0.04);
+    box-shadow: 0 8px 32px 0 rgba(var(--color-tree-500-rgb), 0.04);
     @apply border border-white/60;
   }
 
@@ -215,9 +231,9 @@
 
 /* Help Guide Animations */
 @keyframes guide-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4); }
-  70% { box-shadow: 0 0 0 15px rgba(40, 167, 69, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(var(--color-tree-500-rgb), 0.4); }
+  70% { box-shadow: 0 0 0 15px rgba(var(--color-tree-500-rgb), 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--color-tree-500-rgb), 0); }
 }
 
 .guide-highlight {

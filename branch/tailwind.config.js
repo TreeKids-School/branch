@@ -1,3 +1,12 @@
+function withOpacity(variableName) {
+  return ({ opacityValue }) => {
+    if (opacityValue !== undefined) {
+      return `rgba(var(${variableName}), ${opacityValue})`;
+    }
+    return `rgb(var(${variableName}))`;
+  };
+}
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -8,12 +17,16 @@ export default {
     extend: {
       colors: {
         tree: {
-          50: '#f0f9f1',
-          100: '#dcf0de',
-          200: '#bbe1c0',
-          500: '#28A745', // Tree Kids Green
-          600: '#21913c',
-          700: '#1d7a33',
+          50: withOpacity('--color-tree-50-rgb'),
+          100: withOpacity('--color-tree-100-rgb'),
+          200: withOpacity('--color-tree-200-rgb'),
+          300: withOpacity('--color-tree-300-rgb'),
+          400: withOpacity('--color-tree-400-rgb'),
+          500: withOpacity('--color-tree-500-rgb'),
+          600: withOpacity('--color-tree-600-rgb'),
+          700: withOpacity('--color-tree-700-rgb'),
+          800: withOpacity('--color-tree-800-rgb'),
+          900: withOpacity('--color-tree-900-rgb'),
         },
         wood: {
           50: '#f9f6f4',
