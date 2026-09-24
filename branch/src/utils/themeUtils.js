@@ -183,10 +183,47 @@ export function generateThemePalette(colorInput) {
 }
 
 /**
+ * Default color definitions mapped by Office ID or office name keyword.
+ * Home: Cyan / Sky Blue (#00a0e9) as specified by the user.
+ * Search: Natural Green (#28A745).
+ */
+export const DEFAULT_OFFICE_COLORS = {
+    // By ID
+    'nWioUcWXUskreYjmSL8p': '#00a0e9', // Tree Kids School Home (青 / スカイブルー)
+    'LNrWc8f6G703aUYRZ5e2': '#28A745', // Tree Kids School Search (緑)
+};
+
+/**
  * Searches for any color value in an office object deeply and intelligently.
+ * Falls back to DEFAULT_OFFICE_COLORS or office name matching (Home -> Blue, Search -> Green).
  */
 export function getOfficeColor(office) {
-    if (!office || typeof office !== 'object') return DEFAULT_BASE_HEX;
+    // If office is passed as string (ID, name, or color code)
+    if (typeof office === 'string') {
+        if (DEFAULT_OFFICE_COLORS[office]) return DEFAULT_OFFICE_COLORS[office];
+        const lower = office.toLowerCase();
+        if (lower.includes('home') || lower.includes('ホーム')) return '#00a0e9';
+        if (lower.includes('search') || lower.includes('サーチ')) return '#28A745';
+        if (parseAnyColor(office)) return office;
+    }
+
+    if (!office || typeof office !== 'object') {
+        // Attempt to check localStorage if available in browser context
+        if (typeof window !== 'undefined' && window.localStorage) {
+            try {
+                const cached = localStorage.getItem('care_pro_selected_office');
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (parsed && typeof parsed === 'object' && parsed !== office) {
+                        return getOfficeColor(parsed);
+                    }
+                }
+            } catch (e) {
+                // ignore
+            }
+        }
+        return DEFAULT_BASE_HEX;
+    }
 
     // 1. Direct standard property check
     const candidates = [
@@ -219,6 +256,18 @@ export function getOfficeColor(office) {
                 if (parseAnyColor(val)) return val;
             }
         }
+    }
+
+    // 3. Fallback matching office ID or Name keywords
+    if (office.id && DEFAULT_OFFICE_COLORS[office.id]) {
+        return DEFAULT_OFFICE_COLORS[office.id];
+    }
+    const nameLower = String(office.name || '').toLowerCase();
+    if (nameLower.includes('home') || nameLower.includes('ホーム')) {
+        return '#00a0e9'; // 青 (Tree Kids School Home)
+    }
+    if (nameLower.includes('search') || nameLower.includes('サーチ')) {
+        return '#28A745'; // 緑 (Tree Kids School Search)
     }
 
     return DEFAULT_BASE_HEX;
