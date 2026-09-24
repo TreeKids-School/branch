@@ -32,6 +32,7 @@ import BackupImportModal from './components/BackupImportModal';
 import { printAllDocuments, GROUP1_ITEMS, GROUP2_ITEMS } from './utils/print';
 import { toCSV } from './utils/csv';
 import { applyOfficeTheme } from './utils/themeUtils';
+import { findGreetingTemplateForStaff, checkHasGreeting } from './utils/greetingUtils';
 
 
 
@@ -1641,6 +1642,47 @@ export default function App() {
         const newTable = { ...dailyTable, [childId]: childRow };
         setDailyTable(newTable);
         await saveDailyDataGranular({ childId, tableRow: childRow });
+    };
+
+    const handleAssignStaff = async (childId, staffName) => {
+        const childRow = { ...(dailyTable[childId] || {}), assignedStaff: staffName };
+        const newTable = { ...dailyTable, [childId]: childRow };
+        setDailyTable(newTable);
+        await saveDailyDataGranular({ childId, tableRow: childRow });
+
+        if (!staffName) return;
+
+        // 担当スタッフの挨拶自動入力チェック
+        const currentResult = results[childId] || {};
+        const currentD = currentResult.D || '';
+
+        // すでに挨拶がある場合は入力しない
+        if (checkHasGreeting(currentD, greetingTemplates)) {
+            console.log(`[StaffAssign] Child ${childId} already has a greeting in ツリー通信. Skipping auto-insert.`);
+            return;
+        }
+
+        // スタッフの挨拶テンプレを特定
+        const staffObj = staffList.find(s => s.name === staffName || s.id === staffName) || { name: staffName };
+        const template = findGreetingTemplateForStaff(staffObj, greetingTemplates, staffList);
+
+        if (!template || !template.trim()) {
+            console.log(`[StaffAssign] No greeting template for staff ${staffName}.`);
+            return;
+        }
+
+        // ツリー通信に挨拶を自動入力（既存テキストがある場合は先頭に改行区切りで結合、空ならそのままセット）
+        const newD = currentD.trim() ? `${template.trim()}\n\n${currentD.trim()}` : template;
+        const updatedResults = {
+            ...results,
+            [childId]: {
+                ...currentResult,
+                D: newD,
+                staffName: staffName
+            }
+        };
+        await saveResults(updatedResults, summaryC, childId);
+        console.log(`[StaffAssign] Auto-inserted greeting template for ${staffName} into child ${childId}`);
     };
 
     const removeChild = async (id) => {
@@ -3272,7 +3314,7 @@ export default function App() {
                                                                 <select
                                                                     value={row.assignedStaff || ''}
                                                                     onChange={(e) => {
-                                                                        updateDailyTable(child.id, { assignedStaff: e.target.value });
+                                                                        handleAssignStaff(child.id, e.target.value);
                                                                     }}
                                                                     disabled={isLocked}
                                                                     className="text-[10px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 outline-none focus:border-tree-400 focus:ring-1 focus:ring-tree-200"
@@ -3636,7 +3678,7 @@ export default function App() {
                                             <button
                                                 type="button"
                                                 onClick={() => {
-                                                    updateDailyTable(statusMenuChild.child.id, { assignedStaff: '' });
+                                                    handleAssignStaff(statusMenuChild.child.id, '');
                                                     showToast(`${statusMenuChild.child.lastName || statusMenuChild.child.name}の担当を解除しました`);
                                                 }}
                                                 className="text-[10px] font-bold text-rose-500 hover:text-rose-700 underline cursor-pointer"
@@ -3655,7 +3697,7 @@ export default function App() {
                                                     key={staff.id}
                                                     type="button"
                                                     onClick={() => {
-                                                        updateDailyTable(statusMenuChild.child.id, { assignedStaff: staff.name });
+                                                        handleAssignStaff(statusMenuChild.child.id, staff.name);
                                                         showToast(`${statusMenuChild.child.lastName || statusMenuChild.child.name}の担当を【${staff.name}】に設定しました`);
                                                         setStatusMenuChild(null);
                                                     }}
