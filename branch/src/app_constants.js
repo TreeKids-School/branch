@@ -1,6 +1,6 @@
 ﻿// ── App Constants ─────────────────────────────────────────────────────────────
 
-export const APP_VERSION = '26.09.29.1';
+export const APP_VERSION = '26.09.29.5';
 
 export const DAILY_LIMIT = 20;
 
@@ -135,7 +135,7 @@ export const UPDATE_TOUR_STEPS = [
 
 export const UPDATE_HISTORY = [
     {
-        version: '26.09.29.1',
+        version: '26.09.29.5',
         date: '2026-09-29',
         title: '変更履歴（Change Log）の保存不具合の修正',
         items: [
