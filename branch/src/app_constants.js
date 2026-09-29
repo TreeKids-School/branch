@@ -1,6 +1,6 @@
-// ── App Constants ─────────────────────────────────────────────────────────────
+﻿// ── App Constants ─────────────────────────────────────────────────────────────
 
-export const APP_VERSION = '26.09.24.1';
+export const APP_VERSION = '26.09.29.1';
 
 export const DAILY_LIMIT = 20;
 
@@ -134,6 +134,21 @@ export const UPDATE_TOUR_STEPS = [
 ];
 
 export const UPDATE_HISTORY = [
+    {
+        version: '26.09.29.1',
+        date: '2026-09-29',
+        title: '変更履歴（Change Log）の保存不具合の修正',
+        items: [
+            {
+                id: 'fix-changelog-persistence',
+                title: '本日の変更履歴が消える問題を修正',
+                badge: 'fix',
+                location: '変更履歴モーダル / データベース',
+                action: 'タスクキルやリロード後の確認',
+                description: '変更履歴データを専用コレクションに保存する際のセキュリティルール設定が漏れていたため、リロード等を行うと保存されていたはずの履歴が消えてしまう不具合を修正しました。今後は確実に履歴が保存され、いつでも復元可能です。'
+            }
+        ]
+    },
     {
         version: '26.09.24.1',
         date: '2026-09-24',
