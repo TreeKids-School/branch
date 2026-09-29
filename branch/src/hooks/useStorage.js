@@ -166,8 +166,41 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
             case 'saveReport': {
                 const reportId = payload.officeId ? `${payload.officeId}_${date}` : date;
                 const docRef = doc(firestore, 'reports', reportId);
+                
+                // 既存ドキュメントを取得して、他スタッフが入力中のツリー通信 (results) や messages を保護マージ
+                const snap = await getDoc(docRef);
+                let finalData = { ...data };
+                if (snap.exists()) {
+                    const existingData = snap.data();
+                    if (existingData.results) {
+                        const mergedResults = { ...existingData.results };
+                        if (data.results) {
+                            Object.keys(data.results).forEach(cid => {
+                                const incomingRes = data.results[cid] || {};
+                                const existingRes = mergedResults[cid] || {};
+                                // incoming のツリー通信(D)が空で既存にテキストがある場合は既存を保護
+                                const safeD = (incomingRes.D !== undefined && incomingRes.D !== '') ? incomingRes.D : (existingRes.D || '');
+                                const safeFuture = incomingRes.futurePlan !== undefined ? incomingRes.futurePlan : (existingRes.futurePlan || '');
+                                const safeCompleted = incomingRes.isCompleted !== undefined ? incomingRes.isCompleted : !!existingRes.isCompleted;
+
+                                mergedResults[cid] = {
+                                    ...existingRes,
+                                    ...incomingRes,
+                                    D: safeD,
+                                    futurePlan: safeFuture,
+                                    isCompleted: safeCompleted
+                                };
+                            });
+                        }
+                        finalData.results = mergedResults;
+                    }
+                    if (existingData.messages) {
+                        finalData.messages = { ...existingData.messages, ...(data.messages || {}) };
+                    }
+                }
+
                 const fieldsToOverwrite = ['children', 'messages', 'results', 'summaryC', 'dailyTable', 'globalLog', 'changeLogs', 'updatedAt'];
-                await setDoc(docRef, data, { mergeFields: fieldsToOverwrite });
+                await setDoc(docRef, finalData, { mergeFields: fieldsToOverwrite });
                 
                 // Update index
                 const indexDocId = payload.officeId ? `reports_index_${payload.officeId}` : 'reports_index';

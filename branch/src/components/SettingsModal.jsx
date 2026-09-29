@@ -1,17 +1,59 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Settings, Tag, Plus, Trash2, CheckCircle2, Sparkles, MapPin, MousePointerClick, Calendar, History, ExternalLink } from 'lucide-react';
+import { X, Save, Settings, Tag, Plus, Trash2, CheckCircle2, Sparkles, MapPin, MousePointerClick, Calendar, History, ExternalLink, MessageSquare, Check } from 'lucide-react';
 import { UPDATE_HISTORY, APP_VERSION } from '../app_constants';
 
-export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSaveTags, okWords = [], onSaveOkWords, onOpenUpdateModal, onStartTour, initialTab = 'tags' }) {
+export default function SettingsModal({ 
+    onClose, 
+    tags, 
+    tagInsertTexts = {}, 
+    tagColumnMap = {},
+    onSaveTags, 
+    okWords = [], 
+    onSaveOkWords, 
+    onOpenUpdateModal, 
+    onStartTour, 
+    initialTab = 'greetings',
+    greetingTemplates = {},
+    onSaveGreetingTemplate,
+    currentStaffName = '',
+    staffList = []
+}) {
     const [localTags, setLocalTags] = useState(tags);
     const [localTagInsertTexts, setLocalTagInsertTexts] = useState(tagInsertTexts);
+    const [localTagColumnMap, setLocalTagColumnMap] = useState(tagColumnMap);
     const [newTag, setNewTag] = useState('');
     const [newTagInsertText, setNewTagInsertText] = useState('');
 
     const [localOkWords, setLocalOkWords] = useState(okWords);
     const [newOkWord, setNewOkWord] = useState('');
 
-    const [activeTab, setActiveTab] = useState(initialTab); // 'tags', 'okWords', or 'updates'
+    const [activeTab, setActiveTab] = useState(initialTab); // 'greetings', 'tags', 'okWords', or 'updates'
+
+    const [selectedStaffForGreeting, setSelectedStaffForGreeting] = useState(() => {
+        if (currentStaffName && staffList.some(s => s.name === currentStaffName)) return currentStaffName;
+        return staffList[0]?.name || currentStaffName || 'スタッフ';
+    });
+    const [localGreetings, setLocalGreetings] = useState(greetingTemplates);
+    const [greetingDraft, setGreetingDraft] = useState('');
+    const [greetingSavedSuccess, setGreetingSavedSuccess] = useState(false);
+
+    useEffect(() => {
+        setLocalGreetings(greetingTemplates);
+    }, [greetingTemplates]);
+
+    useEffect(() => {
+        setGreetingDraft(localGreetings[selectedStaffForGreeting] || '');
+        setGreetingSavedSuccess(false);
+    }, [selectedStaffForGreeting, localGreetings]);
+
+    const handleSaveSingleGreeting = () => {
+        if (onSaveGreetingTemplate && selectedStaffForGreeting) {
+            onSaveGreetingTemplate(selectedStaffForGreeting, greetingDraft);
+            setLocalGreetings(prev => ({ ...prev, [selectedStaffForGreeting]: greetingDraft }));
+            setGreetingSavedSuccess(true);
+            setTimeout(() => setGreetingSavedSuccess(false), 2500);
+        }
+    };
 
     useEffect(() => {
         setLocalTags(tags);
@@ -22,13 +64,17 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
     }, [tagInsertTexts]);
 
     useEffect(() => {
+        setLocalTagColumnMap(tagColumnMap);
+    }, [tagColumnMap]);
+
+    useEffect(() => {
         setLocalOkWords(okWords);
     }, [okWords]);
 
     const handleSave = () => {
         const cleanedTags = localTags.map(t => t.trim()).filter(Boolean);
         const uniqueTags = Array.from(new Set(cleanedTags));
-        onSaveTags(uniqueTags, localTagInsertTexts);
+        onSaveTags(uniqueTags, localTagInsertTexts, localTagColumnMap);
         if (onSaveOkWords) {
             onSaveOkWords(localOkWords);
         }
@@ -54,6 +100,11 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
             delete next[tag];
             return next;
         });
+        setLocalTagColumnMap(prev => {
+            const next = { ...prev };
+            delete next[tag];
+            return next;
+        });
     };
 
     const handleUpdateTagName = (index, newName) => {
@@ -65,6 +116,14 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
         });
         if (oldTag && oldTag !== newName) {
             setLocalTagInsertTexts(prev => {
+                const next = { ...prev };
+                if (oldTag in next) {
+                    next[newName] = next[oldTag];
+                    delete next[oldTag];
+                }
+                return next;
+            });
+            setLocalTagColumnMap(prev => {
                 const next = { ...prev };
                 if (oldTag in next) {
                     next[newName] = next[oldTag];
@@ -115,10 +174,21 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
                 </div>
 
                 {/* Tab Navigation */}
-                <div className="flex border-b border-slate-100 bg-slate-50/50 px-8 flex-shrink-0 z-10 shadow-sm">
+                <div className="flex border-b border-slate-100 bg-slate-50/50 px-8 flex-shrink-0 z-10 shadow-sm overflow-x-auto">
+                    <button
+                        onClick={() => setActiveTab('greetings')}
+                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all shrink-0 ${
+                            activeTab === 'greetings'
+                                ? 'border-apple-600 text-apple-600'
+                                : 'border-transparent text-slate-400 hover:text-slate-600'
+                        }`}
+                    >
+                        <MessageSquare className="w-4 h-4" />
+                        <span>挨拶設定</span>
+                    </button>
                     <button
                         onClick={() => setActiveTab('tags')}
-                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all ${
+                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all shrink-0 ${
                             activeTab === 'tags'
                                 ? 'border-apple-600 text-apple-600'
                                 : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -129,7 +199,7 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
                     </button>
                     <button
                         onClick={() => setActiveTab('okWords')}
-                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all ${
+                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all shrink-0 ${
                             activeTab === 'okWords'
                                 ? 'border-apple-600 text-apple-600'
                                 : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -140,7 +210,7 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
                     </button>
                     <button
                         onClick={() => setActiveTab('updates')}
-                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all ${
+                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all shrink-0 ${
                             activeTab === 'updates'
                                 ? 'border-apple-600 text-apple-600'
                                 : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -153,7 +223,81 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
 
                 {/* Tab Contents */}
                 <div className="flex-1 overflow-y-auto p-8 md:p-12 space-y-12 custom-scrollbar bg-slate-50/30">
-                    {activeTab === 'tags' ? (
+                    {activeTab === 'greetings' ? (
+                        /* Staff Greeting Template Management Section */
+                        <div className="space-y-6 animate-in fade-in duration-300">
+                            <div className="flex items-center gap-3 px-2">
+                                <div className="w-2 h-2 rounded-full bg-apple-500 shadow-md" />
+                                <h4 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.25em]">スタッフ別 挨拶テンプレ設定</h4>
+                            </div>
+                            <div className="glass-card p-6 md:p-8 rounded-[2.5rem] border border-white shadow-premium space-y-6">
+                                <p className="text-xs text-slate-500 font-bold leading-relaxed px-1">
+                                    児童の担当スタッフになった際や、ツリー通信作成時に自動挿入される定型挨拶を設定・変更できます。
+                                </p>
+
+                                <div className="space-y-2">
+                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block px-1">スタッフを選択</label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {staffList.map(s => {
+                                            const isSelected = selectedStaffForGreeting === s.name;
+                                            const hasTemplate = !!localGreetings[s.name]?.trim();
+                                            return (
+                                                <button
+                                                    key={s.id || s.name}
+                                                    type="button"
+                                                    onClick={() => setSelectedStaffForGreeting(s.name)}
+                                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 border cursor-pointer active:scale-95 ${
+                                                        isSelected 
+                                                            ? 'bg-apple-600 text-white border-apple-600 shadow-md shadow-apple-100 scale-105' 
+                                                            : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+                                                    }`}
+                                                >
+                                                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: s.iconColor || '#94a3b8' }} />
+                                                    <span>{s.name}</span>
+                                                    {hasTemplate && <span className={`text-[9px] px-1 rounded ${isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'}`}>済</span>}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2 pt-2 border-t border-slate-100">
+                                    <div className="flex items-center justify-between px-1">
+                                        <label className="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
+                                            <MessageSquare className="w-3.5 h-3.5 text-apple-600" />
+                                            <span>【{selectedStaffForGreeting}】 の挨拶文面</span>
+                                        </label>
+                                        {greetingSavedSuccess && (
+                                            <span className="text-[11px] font-black text-emerald-600 flex items-center gap-1 animate-in fade-in">
+                                                <Check className="w-3.5 h-3.5" /> 保存しました
+                                            </span>
+                                        )}
+                                    </div>
+                                    <textarea
+                                        rows={4}
+                                        value={greetingDraft}
+                                        onChange={e => setGreetingDraft(e.target.value)}
+                                        placeholder="例: こんにちは！アクアです。&#10;本日のツリー通信です。"
+                                        className="w-full p-4 bg-white border border-slate-200 rounded-2xl focus:border-apple-500 focus:ring-4 focus:ring-apple-50 outline-none text-xs font-bold text-slate-700 leading-relaxed shadow-inner"
+                                    />
+                                </div>
+
+                                <div className="flex items-center justify-between pt-2">
+                                    <span className="text-[10px] text-slate-400 font-bold">
+                                        ※改行も含めてそのままツリー通信に自動挿入されます。
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveSingleGreeting}
+                                        className="px-6 py-2.5 bg-apple-600 hover:bg-apple-700 text-white rounded-xl text-xs font-black shadow-lg shadow-apple-100 transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                                    >
+                                        <Save className="w-4 h-4" />
+                                        <span>この挨拶を保存</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : activeTab === 'tags' ? (
                         /* Tag Management Section */
                         <div className="space-y-6 animate-in fade-in duration-300">
                             <div className="flex items-center gap-3 px-2">
@@ -172,6 +316,7 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
                                         <div className="hidden md:flex items-center gap-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">
                                             <span className="w-44">タグの名称（直接変更可）</span>
                                             <span className="flex-1">自動挿入する文字</span>
+                                            <span className="w-28">表示列</span>
                                         </div>
                                     )}
                                     {localTags.map((tag, idx) => {
@@ -220,6 +365,20 @@ export default function SettingsModal({ onClose, tags, tagInsertTexts = {}, onSa
                                                     >
                                                         ＋プログラム内容
                                                     </button>
+                                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider whitespace-nowrap hidden md:block">表示列</span>
+                                                        <select
+                                                            value={localTagColumnMap[tag] || 'none'}
+                                                            onChange={e => setLocalTagColumnMap(prev => ({ ...prev, [tag]: e.target.value }))}
+                                                            className="px-2 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none transition-all shadow-2xs cursor-pointer"
+                                                            title="このタグのチャットメモをどのテーブル列に表示するか"
+                                                        >
+                                                            <option value="none">（表示なし）</option>
+                                                            <option value="learning">📚 学習列</option>
+                                                            <option value="program">🎯 プログラム列</option>
+                                                            <option value="remarks">📝 備考列</option>
+                                                        </select>
+                                                    </div>
                                                     <button 
                                                         type="button"
                                                         onClick={() => removeTag(tag)} 

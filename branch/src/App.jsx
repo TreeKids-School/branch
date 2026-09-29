@@ -155,6 +155,9 @@ export default function App() {
     const [isNoticeCollapsed, setIsNoticeCollapsed] = useState(false);
     const [isProgramCollapsed, setIsProgramCollapsed] = useState(false);
     const [isActivitiesCollapsed, setIsActivitiesCollapsed] = useState(false);
+    const [showWeeklySummaryModal, setShowWeeklySummaryModal] = useState(false);
+    const [weeklySummaryData, setWeeklySummaryData] = useState([]); // [{date, activities, notice}, ...]
+    const [isLoadingWeeklySummary, setIsLoadingWeeklySummary] = useState(false);
     const [activeProgramTab, setActiveProgramTab] = useState(0);
     const [isDashboardMode, setIsDashboardMode] = useState(true);
     const [attendance, setAttendance] = useState({});
@@ -496,7 +499,7 @@ export default function App() {
 
 
     const [tags, setTags] = useState(() => {
-        const defaultTags = ['【ツリー式学習】', '【宿題】', '【プリント】', '【プログラム】', '【おやつ】', '【自由時間】', '【備考】'];
+        const defaultTags = ['【ツリー式学習】', '【宿題】', '【プリント】', '【プログラム】', '【おやつ】', '【自由時間】', '【備考】', '【共有】'];
         try {
             const saved = localStorage.getItem('care_pro_tags');
             if (saved) {
@@ -509,6 +512,10 @@ export default function App() {
                 }
                 if (!newTags.includes('【備考】')) {
                     newTags.push('【備考】');
+                    updated = true;
+                }
+                if (!newTags.includes('【共有】')) {
+                    newTags.push('【共有】');
                     updated = true;
                 }
                 if (updated) {
@@ -533,6 +540,24 @@ export default function App() {
             }
         } catch (e) { console.error('Tag insert texts load error', e); }
         return defaultInsertTexts;
+    });
+
+    const [tagColumnMap, setTagColumnMap] = useState(() => {
+        // タグがどのテーブル列に表示されるかのマッピング
+        // key: tag name, value: 'learning' | 'program' | 'remarks' | 'none'
+        const defaults = {
+            '【ツリー式学習】': 'learning',
+            '【学習】': 'learning',
+            '【宿題】': 'learning',
+            '【プリント】': 'learning',
+            '【プログラム】': 'program',
+            '【備考】': 'remarks',
+        };
+        try {
+            const saved = localStorage.getItem('care_pro_tag_column_map');
+            if (saved) return { ...defaults, ...JSON.parse(saved) };
+        } catch (e) { console.error('Tag column map load error', e); }
+        return defaults;
     });
 
     // --- Hooks (MUST be called before any early returns) ---
@@ -728,7 +753,25 @@ export default function App() {
                 setActiveLocks(data.activeLocks || {});
                 // 楽観的ローカル更新（hasPendingWrites）の場合は、入力フォーカス外れを防ぐため状態更新をスキップ
                 if (!snap.metadata.hasPendingWrites) {
-                    setResults(data.results || {});
+                    setResults(prevResults => {
+                        const incomingResults = data.results || {};
+                        const currentEditingId = selectedChildId || lastPanelData?.memo;
+                        if (currentEditingId && prevResults[currentEditingId]) {
+                            const localRes = prevResults[currentEditingId];
+                            const incRes = incomingResults[currentEditingId] || {};
+                            return {
+                                ...incomingResults,
+                                [currentEditingId]: {
+                                    ...incRes,
+                                    ...localRes,
+                                    D: localRes.D !== undefined && localRes.D !== '' ? localRes.D : (incRes.D || ''),
+                                    // futurePlan（今後の予定）は他アプリからも編集されるため、サーバー/外部の変更を最優先で反映
+                                    futurePlan: incRes.futurePlan !== undefined ? incRes.futurePlan : (localRes.futurePlan || '')
+                                }
+                            };
+                        }
+                        return incomingResults;
+                    });
                     setSummaryC(data.summaryC || '');
                     setDailyMessages(data.messages || {});
                     setChildren(Array.isArray(data.children) ? data.children : []);
@@ -830,12 +873,39 @@ export default function App() {
             if (snap.exists()) {
                 const data = snap.data();
                 if (Array.isArray(data.tags) && data.tags.length > 0) {
-                    setTags(data.tags);
-                    localStorage.setItem('care_pro_tags', JSON.stringify(data.tags));
+                    let updated = false;
+                    let newTags = [...data.tags];
+                    if (!newTags.includes('【自由時間】')) {
+                        newTags.push('【自由時間】');
+                        updated = true;
+                    }
+                    if (!newTags.includes('【備考】')) {
+                        newTags.push('【備考】');
+                        updated = true;
+                    }
+                    if (!newTags.includes('【共有】')) {
+                        newTags.push('【共有】');
+                        updated = true;
+                    }
+                    setTags(newTags);
+                    localStorage.setItem('care_pro_tags', JSON.stringify(newTags));
+                    
+                    if (updated) {
+                        try {
+                            const metaRef = doc(firestore, 'meta', 'tag_settings');
+                            setDoc(metaRef, { tags: newTags }, { merge: true });
+                        } catch(e) {
+                            console.warn("Failed to update migrated tags to Firestore:", e);
+                        }
+                    }
                 }
                 if (data.tagInsertTexts) {
                     setTagInsertTexts(prev => ({ ...prev, ...data.tagInsertTexts }));
                     localStorage.setItem('care_pro_tag_insert_texts', JSON.stringify(data.tagInsertTexts));
+                }
+                if (data.tagColumnMap) {
+                    setTagColumnMap(prev => ({ ...prev, ...data.tagColumnMap }));
+                    localStorage.setItem('care_pro_tag_column_map', JSON.stringify(data.tagColumnMap));
                 }
             }
         }, (error) => {
@@ -950,18 +1020,23 @@ export default function App() {
     }, [globalLog]);
 
     // 5. Normal Functions & Handlers
-    const handleUpdateTags = async (newTags, newInsertTexts) => {
+    const handleUpdateTags = async (newTags, newInsertTexts, newColumnMap) => {
         setTags(newTags);
         localStorage.setItem('care_pro_tags', JSON.stringify(newTags));
         if (newInsertTexts !== undefined) {
             setTagInsertTexts(newInsertTexts);
             localStorage.setItem('care_pro_tag_insert_texts', JSON.stringify(newInsertTexts));
         }
+        if (newColumnMap !== undefined) {
+            setTagColumnMap(newColumnMap);
+            localStorage.setItem('care_pro_tag_column_map', JSON.stringify(newColumnMap));
+        }
         try {
             const metaRef = doc(firestore, 'meta', 'tag_settings');
             await setDoc(metaRef, { 
                 tags: newTags, 
-                tagInsertTexts: newInsertTexts !== undefined ? newInsertTexts : tagInsertTexts 
+                tagInsertTexts: newInsertTexts !== undefined ? newInsertTexts : tagInsertTexts,
+                tagColumnMap: newColumnMap !== undefined ? newColumnMap : tagColumnMap
             }, { merge: true });
         } catch (e) {
             console.error("Failed to save tag settings to Firestore:", e);
@@ -1038,8 +1113,10 @@ export default function App() {
         const dailyData = { children: ch, messages: msgs, results: res, summaryC: sum, dailyTable: table || dailyTable, globalLog: global || globalLog, changeLogs: customLogs || changeLogs, updatedAt: new Date().toISOString() };
 
         const savePromise = (async () => {
+            const promises = [];
+
             // 1. Save traditional daily bulk report
-            await cs({ action: 'saveReport', date, data: dailyData, officeId: selectedOffice?.id });
+            promises.push(cs({ action: 'saveReport', date, data: dailyData, officeId: selectedOffice?.id }));
 
             // 2. Save individual child communications for cross-app synchronization
             for (const child of ch) {
@@ -1058,13 +1135,15 @@ export default function App() {
                     notes: getRemarksText(child.id)
                 };
 
-                await cs({
+                promises.push(cs({
                     action: 'saveIndividualTreeComm',
                     childId: child.id,
                     date: date,
                     data: individualData
-                });
+                }));
             }
+
+            await Promise.all(promises);
         })();
 
         activeSavePromiseRef.current = savePromise;
@@ -1226,16 +1305,20 @@ export default function App() {
                 console.log('[Sandbox] saveDailyDataGranular bypassed');
                 return;
             }
+            
+            const promises = [];
+
             // 変更履歴は専用コレクションへ（reports ドキュメントには含めない）
             if (newLogs.length > 0) {
-                await cs({
+                promises.push(cs({
                     action: 'saveChangeLogs',
                     date: selectedDate,
                     officeId: selectedOffice?.id,
                     logs: newLogs
-                });
+                }));
             }
-            await cs({
+            
+            promises.push(cs({
                 action: 'updateDailyReportChildData',
                 date: selectedDate,
                 officeId: selectedOffice?.id,
@@ -1244,7 +1327,7 @@ export default function App() {
                 tableRow,
                 messagesList,
                 childrenList: children
-            });
+            }));
 
             const childObj = children.find(c => c.id === childId);
             if (childObj && !childObj.isPlaceholder) {
@@ -1261,13 +1344,15 @@ export default function App() {
                     notes: getRemarksText(childId)
                 };
 
-                await cs({
+                promises.push(cs({
                     action: 'saveIndividualTreeComm',
                     childId,
                     date: selectedDate,
                     data: individualData
-                });
+                }));
             }
+
+            await Promise.all(promises);
         })();
 
         activeSavePromiseRef.current = savePromise;
@@ -1425,6 +1510,37 @@ export default function App() {
         const newLog = { ...globalLog, [field]: value };
         setGlobalLog(newLog);
         await saveDailyData(selectedDate, children, dailyMessages, results, summaryC, dailyTable, newLog);
+    };
+
+    const fetchWeeklySummary = async () => {
+        setIsLoadingWeeklySummary(true);
+        setShowWeeklySummaryModal(true);
+        try {
+            const officeId = selectedOffice?.id;
+            const fetched = [];
+            const baseDate = new Date(selectedDate);
+            for (let i = 1; i <= 7; i++) {
+                const d = new Date(baseDate);
+                d.setDate(baseDate.getDate() - i);
+                const yyyy = d.getFullYear();
+                const mm = String(d.getMonth()+1).padStart(2,'0');
+                const dd = String(d.getDate()).padStart(2,'0');
+                const dateStr = `${yyyy}-${mm}-${dd}`;
+                try {
+                    const data = await cs({ action: 'getReport', date: dateStr, officeId });
+                    const activities = data?.globalLog?.activities || '';
+                    const notice = data?.globalLog?.notice || '';
+                    fetched.push({ date: dateStr, activities, notice, loading: false });
+                } catch (e) {
+                    fetched.push({ date: dateStr, activities: '', notice: '', loading: false });
+                }
+            }
+            setWeeklySummaryData(fetched);
+        } catch (e) {
+            console.error('Weekly summary fetch error:', e);
+        } finally {
+            setIsLoadingWeeklySummary(false);
+        }
     };
 
     const updateGlobalPrograms = async (updatedPrograms) => {
@@ -1716,6 +1832,16 @@ export default function App() {
         const newMessages = { ...dailyMessages, [childId]: childMsgs };
         setDailyMessages(newMessages);
         await saveDailyDataGranular({ childId, messagesList: childMsgs });
+        // 【共有】タグのメッセージは共有事項（activities）に自動追記
+        const tags = tag ? tag.split(' ').filter(Boolean) : [];
+        if (tags.includes('【共有】')) {
+            const child = children.find(c => c.id === childId);
+            const childName = child ? (child.lastName ? `${child.lastName} ${child.firstName}` : child.name) : '';
+            const prefix = childName ? `[${childName}] ` : '';
+            const existing = globalLog.activities || '';
+            const newActivities = existing ? `${existing}\n${prefix}${text}` : `${prefix}${text}`;
+            await updateGlobalLog('activities', newActivities);
+        }
     };
 
     const deleteMessage = async (childId, msgId) => {
@@ -1954,37 +2080,26 @@ export default function App() {
         }
     };
 
-    // タグ抽出
-    const getStudyText = (childId) => {
+    // タグ抽出（tagColumnMapベース）
+    const getTextForColumn = (childId, column) => {
         const msgs = dailyMessages[childId] || [];
+        const separator = column === 'learning' ? '\n' : ' / ';
         return msgs.filter(m => {
-            const hasStudyTag = m.tag && (m.tag === '【ツリー式学習】' || m.tag === '【学習】' || m.tag === '【宿題】' || m.tag === '【プリント】');
-            const hasTextPrefix = m.text.includes('【ツリー式学習】') || m.text.includes('【学習】') || m.text.includes('【宿題】') || m.text.includes('【プリント】');
-            return hasStudyTag || hasTextPrefix;
-        })
-        .map(m => {
+            if (!m.tag) return false;
+            const msgTags = m.tag.split(' ').filter(Boolean);
+            return msgTags.some(t => (tagColumnMap[t] || 'none') === column);
+        }).map(m => {
             let t = m.text.trim();
-            if (m.tag && !t.includes(m.tag)) {
+            if (m.tag && !t.includes(m.tag.split(' ')[0])) {
                 t = `${m.tag}${t}`;
             }
             return t;
-        }).filter(t => t).join('\n');
+        }).filter(t => t).join(separator);
     };
-    const getProgramText = (childId) => {
-        const msgs = dailyMessages[childId] || [];
-        return msgs.filter(m => {
-            const hasProgTag = m.tag && m.tag === '【プログラム】';
-            const hasTextPrefix = m.text.includes('【プログラム】');
-            return hasProgTag || hasTextPrefix;
-        })
-        .map(m => {
-            let t = m.text.trim();
-            if (m.tag && !t.includes(m.tag)) {
-                t = `${m.tag}${t}`;
-            }
-            return t;
-        }).filter(t => t).join(' / ');
-    };
+
+    const getStudyText = (childId) => getTextForColumn(childId, 'learning');
+    const getProgramText = (childId) => getTextForColumn(childId, 'program');
+    const getRemarksTextByColumn = (childId) => getTextForColumn(childId, 'remarks');
 
     const exportBackupCSV = async (range = 'day') => {
         const officeId = selectedOffice?.id;
@@ -2576,17 +2691,20 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* 2. 本日の特記事項 (旧 全体的な様子) */}
+                {/* 2. 特記事項（全体へ事前周知事項） */}
                 <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
                     <div
                         className="flex items-center justify-between gap-4 px-3 py-2 bg-apple-50/80 border-b border-apple-100 flex-shrink-0 cursor-pointer hover:bg-apple-100/60 transition-all select-none"
                         onClick={() => setIsNoticeCollapsed(!isNoticeCollapsed)}
                     >
-                        <div className="flex items-center gap-2">
-                            <FileText className="w-4 h-4 text-apple-600" />
-                            <span className="text-xs font-black text-apple-700 uppercase tracking-widest whitespace-nowrap">本日の特記事項</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                            <FileText className="w-4 h-4 text-apple-600 flex-shrink-0" />
+                            <div className="flex flex-col min-w-0">
+                                <span className="text-xs font-black text-apple-700 uppercase tracking-widest whitespace-nowrap">特記事項（全体へ事前周知）</span>
+                                <span className="text-[9px] text-apple-500 font-bold">朝礼周知・注意事項・全体への事前アナウンス</span>
+                            </div>
                             {isNoticeCollapsed && localNotice && localNotice.trim() !== '' && (
-                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="入力済み" />
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0" title="入力済み" />
                             )}
                         </div>
                         <button
@@ -2800,30 +2918,42 @@ export default function App() {
                     </div>
                 </div>
 
-                {/* 4. 共有事項 (旧 業務・活動内容) */}
+                {/* 4. 共有事項（現場から全体へ） */}
                 <div className="bg-white/95 backdrop-blur-xl rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col transition-all duration-300 w-full animate-in fade-in h-full">
                     <div
                         className="flex items-center justify-between gap-4 px-3 py-2 bg-wood-50/80 border-b border-wood-100 flex-shrink-0 cursor-pointer hover:bg-wood-100/60 transition-all select-none"
                         onClick={() => setIsActivitiesCollapsed(!isActivitiesCollapsed)}
                     >
-                        <div className="flex items-center gap-2">
-                            <ClipboardList className="w-4 h-4 text-wood-600" />
-                            <span className="text-xs font-black text-wood-700 uppercase tracking-widest whitespace-nowrap">共有事項</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                            <ClipboardList className="w-4 h-4 text-wood-600 flex-shrink-0" />
+                            <div className="flex flex-col min-w-0">
+                                <span className="text-xs font-black text-wood-700 uppercase tracking-widest whitespace-nowrap">共有事項（現場から全体へ）</span>
+                                <span className="text-[9px] text-wood-500 font-bold">現場での出来事・申し送り・引き継ぎ</span>
+                            </div>
                             {isActivitiesCollapsed && localActivities && localActivities.trim() !== '' && (
-                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" title="入力済み" />
+                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse flex-shrink-0" title="入力済み" />
                             )}
                         </div>
-                        <button
-                            className="p-1 hover:bg-wood-100/50 rounded-full transition-all flex-shrink-0"
-                            title={isActivitiesCollapsed ? "展開する" : "最小化する"}
-                            onClick={(e) => { e.stopPropagation(); setIsActivitiesCollapsed(!isActivitiesCollapsed); }}
-                        >
-                            {isActivitiesCollapsed ? (
-                                <ChevronDown className="w-4 h-4 text-wood-500" />
-                            ) : (
-                                <ChevronUp className="w-4 h-4 text-wood-500" />
-                            )}
-                        </button>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                                className="flex items-center gap-1 px-2 py-1 bg-wood-100 hover:bg-wood-200 text-wood-700 rounded-lg text-[10px] font-black transition-all active:scale-95 whitespace-nowrap"
+                                title="直近7日間の共有事項まとめを表示"
+                                onClick={(e) => { e.stopPropagation(); fetchWeeklySummary(); }}
+                            >
+                                📅 先週のまとめ
+                            </button>
+                            <button
+                                className="p-1 hover:bg-wood-100/50 rounded-full transition-all flex-shrink-0"
+                                title={isActivitiesCollapsed ? "展開する" : "最小化する"}
+                                onClick={(e) => { e.stopPropagation(); setIsActivitiesCollapsed(!isActivitiesCollapsed); }}
+                            >
+                                {isActivitiesCollapsed ? (
+                                    <ChevronDown className="w-4 h-4 text-wood-500" />
+                                ) : (
+                                    <ChevronUp className="w-4 h-4 text-wood-500" />
+                                )}
+                            </button>
+                        </div>
                     </div>
                     <div className={`transition-all duration-500 ease-in-out overflow-hidden ${isActivitiesCollapsed ? 'max-h-0 opacity-0' : 'flex-1 flex flex-col min-h-0 max-h-[2000px] opacity-100'}`}>
                         <div className="p-3 flex-1 flex flex-col">
@@ -2835,6 +2965,7 @@ export default function App() {
                                 style={{ fontSize: '14px' }}
                                 className="w-full flex-1 min-h-0 text-xs md:text-sm font-medium leading-relaxed bg-slate-50/50 hover:bg-slate-50 focus:bg-white border border-slate-200 rounded-xl p-3 outline-none focus:border-wood-400 focus:ring-4 focus:ring-wood-50 transition-all resize-none text-slate-700 shadow-inner"
                             />
+                            <p className="text-[9px] text-wood-500 font-bold mt-1 px-1">💡 チャットメモで【共有】タグを使うと、上のテキストに自動で追記されます</p>
                         </div>
                     </div>
                 </div>
@@ -3161,15 +3292,28 @@ export default function App() {
                                                                     )}
                                                                 </button>
                                                                 {/* ツリー通信 担当スタッフの1文字丸アイコン（右上） */}
-                                                                {!isPlaceholder && row.assignedStaff && (
-                                                                    <div 
-                                                                        className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-black shadow-xs flex-shrink-0 ml-1"
-                                                                        style={{ backgroundColor: getStaffColor(row.assignedStaff) }}
-                                                                        title={`ツリー通信担当: ${row.assignedStaff}`}
-                                                                    >
-                                                                        {row.assignedStaff.charAt(0)}
-                                                                    </div>
-                                                                )}
+                                                                {!isPlaceholder && row.assignedStaff && (() => {
+                                                                    const isCompleted = !!results[child.id]?.isCompleted;
+                                                                    return (
+                                                                        <div className="relative inline-flex items-center flex-shrink-0 ml-1.5">
+                                                                            <div 
+                                                                                className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-black shadow-xs"
+                                                                                style={{ backgroundColor: getStaffColor(row.assignedStaff) }}
+                                                                                title={`ツリー通信担当: ${row.assignedStaff}${isCompleted ? '（ツリー通信入力完了）' : ''}`}
+                                                                            >
+                                                                                {row.assignedStaff.charAt(0)}
+                                                                            </div>
+                                                                            {isCompleted && (
+                                                                                <div 
+                                                                                    className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-emerald-500 text-white rounded-full flex items-center justify-center ring-1.5 ring-white shadow-xs"
+                                                                                    title="ツリー通信 入力完了"
+                                                                                >
+                                                                                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    );
+                                                                })()}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -3744,6 +3888,7 @@ export default function App() {
                     onClose={() => setShowSettingsModal(false)}
                     tags={tags}
                     tagInsertTexts={tagInsertTexts}
+                    tagColumnMap={tagColumnMap}
                     onSaveTags={handleUpdateTags}
                     okWords={okWords}
                     onSaveOkWords={handleSaveOkWords}
@@ -3752,6 +3897,10 @@ export default function App() {
                         setShowUpdateModal(true);
                     }}
                     onStartTour={handleStartUpdateTour}
+                    greetingTemplates={greetingTemplates}
+                    onSaveGreetingTemplate={handleSaveGreetingTemplate}
+                    currentStaffName={getCurrentStaffName()}
+                    staffList={filteredStaffList}
                 />
             )}
             <UpdateModal
@@ -4015,6 +4164,65 @@ export default function App() {
             )}
 
 
+
+            {/* 先週のまとめモーダル */}
+            {showWeeklySummaryModal && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-md" onClick={() => setShowWeeklySummaryModal(false)} />
+                    <div className="relative w-full max-w-lg max-h-[80vh] bg-white rounded-[2rem] shadow-2xl overflow-hidden flex flex-col border border-white">
+                        <div className="p-5 bg-wood-600 flex items-center justify-between flex-shrink-0">
+                            <div>
+                                <h3 className="font-black text-lg text-white">📅 先週のまとめ</h3>
+                                <p className="text-[10px] text-wood-100 font-bold">直近7日間の共有事項・特記事項</p>
+                            </div>
+                            <button onClick={() => setShowWeeklySummaryModal(false)} className="p-2 hover:bg-white/10 rounded-xl text-white">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                            {isLoadingWeeklySummary ? (
+                                <div className="text-center py-8 text-slate-400 font-bold text-sm">読み込み中...</div>
+                            ) : weeklySummaryData.length === 0 ? (
+                                <div className="text-center py-8 text-slate-400 font-bold text-sm">データがありません</div>
+                            ) : weeklySummaryData.map(item => {
+                                const hasContent = item.activities?.trim() || item.notice?.trim();
+                                if (!hasContent) return null;
+                                const d = new Date(item.date + 'T00:00:00');
+                                const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+                                const label = `${d.getMonth()+1}/${d.getDate()} (${dayNames[d.getDay()]})`;
+                                return (
+                                    <div key={item.date} className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+                                        <div className="text-[10px] font-black text-wood-700 mb-1.5">{label}</div>
+                                        {item.notice?.trim() && (
+                                            <div className="mb-1.5">
+                                                <span className="text-[9px] font-black text-apple-600 bg-apple-50 px-1.5 py-0.5 rounded-full mr-1">特記事項</span>
+                                                <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap mt-0.5">{item.notice}</p>
+                                            </div>
+                                        )}
+                                        {item.activities?.trim() && (
+                                            <div>
+                                                <span className="text-[9px] font-black text-wood-600 bg-wood-50 px-1.5 py-0.5 rounded-full mr-1">共有事項</span>
+                                                <p className="text-xs text-slate-700 font-medium whitespace-pre-wrap mt-0.5">{item.activities}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            }).filter(Boolean)}
+                            {!isLoadingWeeklySummary && weeklySummaryData.length > 0 && weeklySummaryData.every(item => !item.activities?.trim() && !item.notice?.trim()) && (
+                                <div className="text-center py-8 text-slate-400 font-bold text-sm">直近7日間に共有事項・特記事項の記録がありません</div>
+                            )}
+                        </div>
+                        <div className="p-4 border-t border-slate-100 flex-shrink-0">
+                            <button
+                                onClick={() => setShowWeeklySummaryModal(false)}
+                                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-black text-xs transition-all"
+                            >
+                                閉じる
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Custom Toast Notification */}
             {toast && (

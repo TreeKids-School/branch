@@ -7,6 +7,8 @@ import { callStorage } from '../hooks/useStorage';
 import { getRoleFromPost } from '../app_constants';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { firestore } from '../firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 // Smart name detection helper (excluding common stop words)
 const scanForNames = (text, okWords = []) => {
@@ -90,23 +92,29 @@ export default function MemoPanel({
     const [copiedFuturePlanEditor, setCopiedFuturePlanEditor] = useState(false);
     const initialFutureTextRef = useRef('');
 
+    // ── 端末内下書き保護（手元ボード）用ヘルパー ──
+    const getDraftKey = (childId) => {
+        const datePart = propSelectedDate || new Date().toISOString().slice(0, 10);
+        return `tree_draft_${datePart}_${childId}`;
+    };
+    const clearDraft = (childId) => {
+        if (!childId) return;
+        try {
+            localStorage.removeItem(getDraftKey(childId));
+        } catch (e) {
+            console.warn('[Draft] Failed to clear draft', e);
+        }
+    };
+
     const handleClose = () => {
-        const currentD = result?.D || '';
-        const currentFuture = result?.futurePlan || '';
-        const updates = { ...result };
-        let hasChanges = false;
-        
-        if (treeContent !== currentD && child?.id) {
-            updates.D = treeContent;
-            hasChanges = true;
-        }
-        if (futurePlanContent !== currentFuture && child?.id) {
-            updates.futurePlan = futurePlanContent;
-            hasChanges = true;
-        }
-        
-        if (hasChanges && child?.id) {
+        if (child?.id) {
+            const updates = {
+                ...result,
+                D: treeContent,
+                futurePlan: futurePlanContent
+            };
             onSaveTree(child.id, updates);
+            // clearDraft(child.id); // 下書きは残す
         }
         onClose();
     };
@@ -265,9 +273,16 @@ export default function MemoPanel({
     const [isFocused, setIsFocused] = useState(false);
     const [activeToolbarMenu, setActiveToolbarMenu] = useState(null); // 'memo' | 'program' | 'template' | null
 
-    // 挨拶テンプレの長押しタイマー管理
-    const templateLongPressTimerRef = useRef(null);
-    const isTemplateLongPressRef = useRef(false);
+    // チャットメモ反映モーダル & 選択順序管理 (①, ②, ③...)
+    const [showChatImportModal, setShowChatImportModal] = useState(false);
+    const [selectedMemoOrder, setSelectedMemoOrder] = useState([]);
+
+    // 入力完了状態管理
+    const [isCompleted, setIsCompleted] = useState(!!result?.isCompleted);
+
+    useEffect(() => {
+        setIsCompleted(!!result?.isCompleted);
+    }, [result?.isCompleted]);
 
     // Conflict detection states
     const [hasConflict, setHasConflict] = useState(false);
@@ -306,61 +321,67 @@ export default function MemoPanel({
     const handleInsertTemplate = () => {
         const template = greetingTemplates[currentStaffName] || '';
         if (!template.trim()) {
-            const confirmRegister = confirm('挨拶テンプレがまだ登録されていません。登録しますか？');
-            if (confirmRegister) {
-                setTemplateDraft('');
-                setIsEditingTemplate(true);
-                setActiveToolbarMenu('template');
-            }
+            alert(`【${currentStaffName || 'スタッフ'}】の挨拶テンプレがまだ登録されていません。\n画面右上の「設定（歯車）」＞「挨拶設定」タブから登録・編集できます。`);
             return;
         }
         appendTextToEnd(template);
     };
 
-    // 挨拶テンプレボタンの長押し / タップ制御
-    const handleTemplatePointerDown = (e) => {
-        isTemplateLongPressRef.current = false;
-        templateLongPressTimerRef.current = setTimeout(() => {
-            isTemplateLongPressRef.current = true;
-            const t = greetingTemplates[currentStaffName] || '';
-            setTemplateDraft(t);
-            setIsEditingTemplate(true);
-            setActiveToolbarMenu('template');
-        }, 550); // 550ms で長押しと判定
+    // チャットメモ一括反映ロジック（選択順に \n\n で結合して挿入）
+    const toggleSelectMemo = (msgId) => {
+        setSelectedMemoOrder(prev => {
+            if (prev.includes(msgId)) {
+                return prev.filter(id => id !== msgId);
+            } else {
+                return [...prev, msgId];
+            }
+        });
     };
 
-    const handleTemplatePointerUp = (e) => {
-        if (templateLongPressTimerRef.current) {
-            clearTimeout(templateLongPressTimerRef.current);
-            templateLongPressTimerRef.current = null;
+    const handleInsertSelectedMemos = () => {
+        if (selectedMemoOrder.length === 0) return;
+        const textsToInsert = selectedMemoOrder.map(msgId => {
+            const msg = messages.find(m => (m.id || String(m.timestamp)) === msgId);
+            if (!msg) return '';
+            let cleaned = (msg.text || '').trim();
+            for (const tag of tags) {
+                if (cleaned.startsWith(tag)) {
+                    cleaned = cleaned.substring(tag.length).trim();
+                    break;
+                }
+            }
+            cleaned = cleaned.replace(/^(?:【[^】]+】|\[[^\]]+\])\s*/, '');
+            return cleaned;
+        }).filter(Boolean);
+
+        if (textsToInsert.length > 0) {
+            appendTextToEnd(textsToInsert.join('\n\n'));
         }
-        if (!isTemplateLongPressRef.current) {
-            // 短いタップの場合は一番下に挿入
-            handleInsertTemplate();
-        }
-        isTemplateLongPressRef.current = false;
+        setSelectedMemoOrder([]);
+        setShowChatImportModal(false);
     };
 
-    const handleTemplatePointerLeave = () => {
-        if (templateLongPressTimerRef.current) {
-            clearTimeout(templateLongPressTimerRef.current);
-            templateLongPressTimerRef.current = null;
+    // 入力を完了して保存（赤色ボタン・書き終えたかの確認ダイアログ付き）
+    const handleSaveCompleted = (completedStatus = true) => {
+        if (completedStatus) {
+            const childDisplayName = child?.lastName ? `${child.lastName} ${child.firstName}` : (child?.name || '児童');
+            const ok = window.confirm(`【${childDisplayName}】のツリー通信の入力を完了として保存します。\n\n本当に通信を書き終えましたか？`);
+            if (!ok) return;
         }
-        isTemplateLongPressRef.current = false;
+        const updates = {
+            ...result,
+            D: treeContent,
+            futurePlan: futurePlanContent,
+            isCompleted: completedStatus
+        };
+        setIsCompleted(completedStatus);
+        if (child?.id) {
+            onSaveTree(child.id, updates);
+            // clearDraft(child.id); // 下書きは残す
+        }
+        onClose();
     };
 
-    const handleStartEditTemplate = () => {
-        const template = greetingTemplates[currentStaffName] || '';
-        setTemplateDraft(template);
-        setIsEditingTemplate(true);
-    };
-
-    const handleSaveTemplateClick = () => {
-        if (onSaveTemplate) {
-            onSaveTemplate(currentStaffName, templateDraft);
-        }
-        setIsEditingTemplate(false);
-    };
     const [isMemoExpanded, setIsMemoExpanded] = useState(false);
     const [showHelpTree, setShowHelpTree] = useState(false);
 
@@ -374,33 +395,81 @@ export default function MemoPanel({
             });
     };
 
-        // ロード時に初期設定
+    // ロード時に初期設定
     const [prevChildId, setPrevChildId] = useState(null);
+    const skipSaveRef = useRef(false);
 
     useEffect(() => {
         const isChildChanged = child?.id !== prevChildId;
         setPrevChildId(child?.id);
 
         if (isChildChanged) {
+            skipSaveRef.current = true;
             setHasConflict(false);
             setConflictingDbText('');
-            initialTextRef.current = result?.D || '';
-            setTreeContent(result?.D || '');
 
-            initialFutureTextRef.current = result?.futurePlan || '';
-            setFuturePlanContent(result?.futurePlan || '');
+            const dbD = result?.D || '';
+            const dbFuture = result?.futurePlan || '';
+            let initialD = dbD;
+            let initialFuture = dbFuture;
+
+            // ── 手元ボード（LocalStorage）からの自動復元チェック ──
+            if (child?.id) {
+                try {
+                    const savedDraftStr = localStorage.getItem(getDraftKey(child.id));
+                    if (savedDraftStr) {
+                        const savedDraft = JSON.parse(savedDraftStr);
+                        // ツリー通信(D)は1人が執筆するため手元ボードから最優先で復元！
+                        if (savedDraft.D !== undefined && savedDraft.D !== dbD && savedDraft.D.trim()) {
+                            console.log(`[Draft Board] Restored local draft for child: ${child.name || child.id}`);
+                            initialD = savedDraft.D;
+                        }
+                        if (savedDraft.chatText !== undefined) {
+                            setChatText(savedDraft.chatText);
+                        } else {
+                            setChatText('');
+                        }
+                        if (savedDraft.selectedTags !== undefined) {
+                            setSelectedTags(savedDraft.selectedTags);
+                        } else {
+                            setSelectedTags([]);
+                        }
+                        // ※ 今後の予定(futurePlan)は他アプリからも編集されるため、LocalStorageで上書きせずDB最新値を優先
+                    } else {
+                        setChatText('');
+                        setSelectedTags([]);
+                    }
+                } catch (e) {
+                    console.warn('[Draft Board] Failed to restore local draft', e);
+                    setChatText('');
+                    setSelectedTags([]);
+                }
+            }
+
+            initialTextRef.current = initialD;
+            setTreeContent(initialD);
+
+            initialFutureTextRef.current = initialFuture;
+            setFuturePlanContent(initialFuture);
         } else {
             const isSavedBySelf = currentStaffName && result?.staffName === currentStaffName;
             const dbVal = result?.D || '';
             if (dbVal !== initialTextRef.current) {
                 if (isSavedBySelf) {
-                    // Update initial text baseline to match database value, as it represents our own saved state
                     initialTextRef.current = dbVal;
                 } else if (dbVal === treeContent) {
                     initialTextRef.current = dbVal;
-                } else if (treeContent !== initialTextRef.current) {
+                } else if (treeContent && treeContent !== initialTextRef.current) {
+                    // 手元で入力中の場合は絶対に自動消去せず競合警告を表示
                     setHasConflict(true);
                     setConflictingDbText(dbVal);
+                } else if (!treeContent && dbVal) {
+                    // 手元が空でDBに内容がある場合のみ反映
+                    setTreeContent(dbVal);
+                    initialTextRef.current = dbVal;
+                } else if (treeContent && !dbVal) {
+                    // DB側が空で手元にテキストがある場合は消去をブロック
+                    console.warn('[Safety Guard] Blocked empty DB overwrite on treeContent');
                 } else {
                     setTreeContent(dbVal);
                     initialTextRef.current = dbVal;
@@ -409,19 +478,65 @@ export default function MemoPanel({
 
             const dbFuture = result?.futurePlan || '';
             if (dbFuture !== initialFutureTextRef.current) {
-                if (isSavedBySelf) {
-                    initialFutureTextRef.current = dbFuture;
-                } else if (dbFuture === futurePlanContent) {
-                    initialFutureTextRef.current = dbFuture;
-                } else {
-                    setFuturePlanContent(dbFuture);
-                    initialFutureTextRef.current = dbFuture;
-                }
+                // 今後の予定は他アプリからも編集されるため、外部からの変更を即座に画面へ反映
+                setFuturePlanContent(dbFuture);
+                initialFutureTextRef.current = dbFuture;
             }
         }
     }, [child, result, prevChildId, treeContent, futurePlanContent, currentStaffName]);
 
-    // リアルタイム自動保存 (800msデバウンス)
+    // ── 外部アプリ連携: tree_communications ドキュメントのリアルタイム監視 ──
+    useEffect(() => {
+        if (!child?.id || !propSelectedDate || !firestore) return;
+        const commDocRef = doc(firestore, 'children', child.id, 'app_categories', '書類管理', 'tree_communications', propSelectedDate);
+        const unsub = onSnapshot(commDocRef, (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                const extFuture = data.future_plan !== undefined ? data.future_plan : (data.futurePlan !== undefined ? data.futurePlan : null);
+                if (extFuture !== null && extFuture !== initialFutureTextRef.current) {
+                    console.log('[External App Sync] Detected future_plan change from tree_communications doc:', extFuture);
+                    setFuturePlanContent(extFuture);
+                    initialFutureTextRef.current = extFuture;
+                    if (onSaveTree) {
+                        onSaveTree(child.id, {
+                            ...result,
+                            futurePlan: extFuture
+                        });
+                    }
+                }
+            }
+        }, (err) => {
+            console.warn('[External App Sync] tree_communications onSnapshot error:', err);
+        });
+        return () => unsub();
+    }, [child?.id, propSelectedDate]);
+
+    // ── 端末内LocalStorageへのリアルタイム即時バックアップ（手元ボードへの書き込み：ツリー通信のみ） ──
+    useEffect(() => {
+        if (!child?.id) return;
+        
+        if (skipSaveRef.current) {
+            skipSaveRef.current = false;
+            return;
+        }
+
+        if (treeContent || chatText || selectedTags.length > 0) {
+            try {
+                localStorage.setItem(getDraftKey(child.id), JSON.stringify({
+                    D: treeContent,
+                    chatText: chatText,
+                    selectedTags: selectedTags,
+                    updatedAt: Date.now()
+                }));
+            } catch (e) {
+                console.warn('[Draft Board] Failed to save draft', e);
+            }
+        } else {
+            clearDraft(child.id);
+        }
+    }, [treeContent, chatText, selectedTags, child?.id]);
+
+    // クラウドへの自動同期 (2000ms: タイピング一段落時に安全にクラウドへ反映)
     useEffect(() => {
         if (!child?.id || hasConflict) return;
         const currentD = result?.D || '';
@@ -432,7 +547,7 @@ export default function MemoPanel({
                     ...result, 
                     D: treeContent
                 });
-            }, 800);
+            }, 2000);
             return () => clearTimeout(timer);
         }
     }, [treeContent, child?.id, onSaveTree, result, hasConflict]);
@@ -561,27 +676,165 @@ export default function MemoPanel({
                 </div>
             )}
 
-            {/* Tab Switches (Tree vs Chat vs futurePlan) */}
-            <div className="flex border-b border-slate-200 bg-white flex-shrink-0 z-20">
-                <button 
-                    onClick={() => setActiveTab('tree')}
-                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all ${isTree ? 'text-tree-600 border-b-4 border-tree-600 bg-tree-50/20' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                    ツリー通信
-                </button>
-                <button 
-                    onClick={() => setActiveTab('chat')}
-                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'chat' ? 'text-red-600 border-b-4 border-red-600 bg-red-50/20' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                    チャットメモ ({messages.length})
-                </button>
-                <button 
-                    onClick={() => setActiveTab('futurePlan')}
-                    className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all ${isFuturePlan ? 'text-wood-600 border-b-4 border-wood-600 bg-wood-50/20' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                    今後の予定
-                </button>
-            </div>
+            {/* Chat Memo Import Modal */}
+            {showChatImportModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 md:p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-300">
+                        {/* Modal Header */}
+                        <div className="p-4 md:p-5 flex items-center justify-between border-b border-slate-100 bg-red-50/50 flex-shrink-0">
+                            <div className="flex items-center gap-2.5">
+                                <div className="p-2 bg-red-100 text-red-600 rounded-xl">
+                                    <MessageSquare className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h4 className="font-black text-slate-800 text-sm md:text-base leading-tight">
+                                        チャットメモから反映
+                                    </h4>
+                                    <p className="text-[10px] text-slate-500 font-bold mt-0.5">
+                                        挿入したい順にタップしてください（①, ②, ③...）。メモ間に1行改行を入れて順番に挿入されます。
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setShowChatImportModal(false);
+                                    setSelectedMemoOrder([]);
+                                }}
+                                className="p-1.5 hover:bg-slate-200 rounded-full transition-colors text-slate-400 hover:text-slate-600"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Modal Body: Memo List */}
+                        <div className="p-3 md:p-5 overflow-y-auto custom-scrollbar flex-1 space-y-2 bg-slate-50/30">
+                            {messages.length === 0 ? (
+                                <div className="text-center py-12 text-slate-400 flex flex-col items-center gap-2">
+                                    <MessageCircle className="w-10 h-10 text-slate-300" />
+                                    <span className="text-xs font-bold">チャットメモがありません</span>
+                                </div>
+                            ) : (
+                                messages.map((m, idx) => {
+                                    const msgId = m.id || String(m.timestamp);
+                                    const orderIndex = selectedMemoOrder.indexOf(msgId);
+                                    const isSelected = orderIndex !== -1;
+                                    let cleanedText = (m.text || '').trim();
+                                    for (const tag of tags) {
+                                        if (cleanedText.startsWith(tag)) {
+                                            cleanedText = cleanedText.substring(tag.length).trim();
+                                            break;
+                                        }
+                                    }
+                                    cleanedText = cleanedText.replace(/^(?:【[^】]+】|\[[^\]]+\])\s*/, '');
+
+                                    return (
+                                        <div
+                                            key={msgId || idx}
+                                            onClick={() => toggleSelectMemo(msgId)}
+                                            className={`p-3 rounded-2xl border-2 transition-all cursor-pointer select-none flex items-start gap-3 relative ${
+                                                isSelected
+                                                    ? 'bg-red-50/70 border-red-500 shadow-sm'
+                                                    : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+                                            }`}
+                                        >
+                                            {/* 順番バッジ */}
+                                            <div className="flex-shrink-0 pt-0.5">
+                                                {isSelected ? (
+                                                    <div className="w-6 h-6 rounded-full bg-red-600 text-white font-black text-xs flex items-center justify-center shadow-sm">
+                                                        {orderIndex + 1}
+                                                    </div>
+                                                ) : (
+                                                    <div className="w-6 h-6 rounded-full border-2 border-slate-300 flex items-center justify-center text-[10px] text-slate-400 font-bold">
+                                                        -
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
+                                                        <Clock className="w-3 h-3" />
+                                                        {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
+                                                    {m.staffName && (
+                                                        <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">
+                                                            {m.staffName}
+                                                        </span>
+                                                    )}
+                                                    {m.tag && (
+                                                        <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">
+                                                            {m.tag}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <p className="text-xs font-bold text-slate-800 whitespace-pre-wrap leading-relaxed">
+                                                    {cleanedText}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div className="p-3 md:p-4 bg-white border-t border-slate-100 flex items-center justify-between gap-2 flex-shrink-0">
+                            <div>
+                                {selectedMemoOrder.length > 0 && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectedMemoOrder([])}
+                                        className="text-xs font-bold text-slate-500 hover:text-slate-800 underline px-2 py-1"
+                                    >
+                                        選択をすべてクリア
+                                    </button>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setShowChatImportModal(false);
+                                        setSelectedMemoOrder([]);
+                                    }}
+                                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
+                                >
+                                    キャンセル
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleInsertSelectedMemos}
+                                    disabled={selectedMemoOrder.length === 0}
+                                    className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black shadow-md transition-all active:scale-95 flex items-center gap-1.5"
+                                >
+                                    <Check className="w-4 h-4" />
+                                    <span>選択したメモを挿入 ({selectedMemoOrder.length}件)</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Tab Switches (Only Tree vs futurePlan when NOT in chat mode) */}
+            {activeTab !== 'chat' && (
+                <div className="flex border-b border-slate-200 bg-white flex-shrink-0 z-20">
+                    <button 
+                        onClick={() => setActiveTab('tree')}
+                        className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all ${isTree ? 'text-tree-600 border-b-4 border-tree-600 bg-tree-50/20' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                        ツリー通信
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('futurePlan')}
+                        className={`flex-1 py-2.5 text-[10px] font-black uppercase tracking-widest transition-all ${isFuturePlan ? 'text-wood-600 border-b-4 border-wood-600 bg-wood-50/20' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                        今後の予定
+                    </button>
+                </div>
+            )}
+
 
             {/* TAB CONTENTS */}
             {isTree ? (
@@ -592,40 +845,6 @@ export default function MemoPanel({
                     
                     {/* === 3-Button Toolbar === */}
                     <div className="border-b border-slate-200 bg-white flex-shrink-0">
-                        {/* Popover: チャットメモ */}
-                        {activeToolbarMenu === 'memo' && (
-                            <div className="max-h-[200px] overflow-y-auto bg-white p-2 border-b border-slate-200 flex flex-col gap-1.5 custom-scrollbar animate-in slide-in-from-top-2 duration-200">
-                                <div className="flex justify-between items-center px-2 py-1 text-[9px] font-black text-slate-400 uppercase">
-                                    <span>挿入するチャットメモを選択</span>
-                                    <button onClick={() => setActiveToolbarMenu(null)} className="text-slate-500 hover:text-slate-800">閉じる</button>
-                                </div>
-                                {messages.length === 0 ? (
-                                    <p className="text-center py-4 text-xs text-slate-400">チャットメモがありません</p>
-                                ) : (
-                                    messages.map((m, idx) => {
-                                        let cleanedText = m.text.trim();
-                                        for (const tag of tags) {
-                                            if (cleanedText.startsWith(tag)) {
-                                                cleanedText = cleanedText.substring(tag.length).trim();
-                                                break;
-                                            }
-                                        }
-                                        cleanedText = cleanedText.replace(/^(?:【[^】]+】|\[[^\]]+\])\s*/, '');
-                                        return (
-                                            <button
-                                                key={m.id || idx}
-                                                onClick={() => { appendTextToEnd(cleanedText); setActiveToolbarMenu(null); }}
-                                                className="text-left p-2 hover:bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-slate-700 truncate active:scale-95 transition-all"
-                                            >
-                                                {m.tag && <span className="text-[9px] bg-red-50 text-red-600 px-1 rounded mr-1">{m.tag}</span>}
-                                                {cleanedText}
-                                            </button>
-                                        );
-                                    })
-                                )}
-                            </div>
-                        )}
-
                         {/* Popover: プログラム */}
                         {activeToolbarMenu === 'program' && (
                             <div className="max-h-[200px] overflow-y-auto bg-white p-2 border-b border-slate-200 flex flex-col gap-1.5 custom-scrollbar animate-in slide-in-from-top-2 duration-200">
@@ -659,45 +878,32 @@ export default function MemoPanel({
                             </div>
                         )}
 
-                        {/* Popover: 挨拶テンプレ設定・編集（長押しで開く） */}
-                        {activeToolbarMenu === 'template' && (
-                            <div className="bg-white p-2.5 border-b border-slate-200 flex flex-col gap-2 animate-in slide-in-from-top-2 duration-200">
-                                <div className="flex justify-between items-center px-1 text-[9px] font-black text-slate-400 uppercase">
-                                    <span>{currentStaffName} の挨拶テンプレ設定 (長押しで表示)</span>
-                                    <button onClick={() => setActiveToolbarMenu(null)} className="text-slate-500 hover:text-slate-800">閉じる</button>
-                                </div>
-                                <textarea
-                                    value={templateDraft}
-                                    onChange={(e) => setTemplateDraft(e.target.value)}
-                                    placeholder="お疲れ様です。ツリーキッズの〇〇です。等..."
-                                    rows={3}
-                                    className="w-full p-2 text-xs bg-white border border-slate-200 rounded-lg focus:border-tree-400 outline-none leading-normal font-medium text-slate-700 resize-y"
-                                />
-                                <div className="flex justify-end gap-1.5">
-                                    <button type="button" onClick={() => setActiveToolbarMenu(null)} className="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-[9px] font-black transition-all active:scale-95">閉じる</button>
-                                    <button type="button" onClick={() => { handleSaveTemplateClick(); setActiveToolbarMenu(null); }} className="px-3 py-1 bg-tree-600 hover:bg-tree-700 text-white rounded-lg text-[9px] font-black transition-all active:scale-95 shadow-sm">保存</button>
-                                </div>
-                            </div>
-                        )}
-
                         {/* Main 3 Buttons */}
                         <div className="flex items-center p-2 gap-2">
-                            <button type="button" onClick={() => setActiveToolbarMenu(prev => prev === 'memo' ? null : 'memo')} className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer ${activeToolbarMenu === 'memo' ? 'bg-red-500 text-white border-red-600' : 'bg-white text-red-600 border-red-200'}`}>
-                                <MessageSquare className="w-3.5 h-3.5" /><span>チャットメモ</span>
-                            </button>
-                            <button type="button" onClick={() => setActiveToolbarMenu(prev => prev === 'program' ? null : 'program')} className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer ${activeToolbarMenu === 'program' ? 'bg-wood-500 text-white border-wood-600' : 'bg-white text-wood-700 border-wood-200'}`}>
-                                <FileText className="w-3.5 h-3.5" /><span>プログラム</span>
-                            </button>
-
-                            {/* 挨拶テンプレ: タップで末尾即座挿入 / 長押しで設定・編集 */}
                             <button 
                                 type="button" 
-                                onPointerDown={handleTemplatePointerDown}
-                                onPointerUp={handleTemplatePointerUp}
-                                onPointerLeave={handleTemplatePointerLeave}
-                                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                onClick={() => setShowChatImportModal(true)} 
+                                className="flex-1 py-2 bg-white hover:bg-red-50 text-red-600 rounded-xl text-xs font-black shadow-sm border border-red-200 transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer"
+                                title="チャットメモを選択してツリー通信に一括挿入"
+                            >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span>チャットメモから反映</span>
+                            </button>
+                            <button 
+                                type="button" 
+                                onClick={() => setActiveToolbarMenu(prev => prev === 'program' ? null : 'program')} 
+                                className={`flex-1 py-2 rounded-xl text-xs font-black shadow-sm border transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer ${activeToolbarMenu === 'program' ? 'bg-wood-500 text-white border-wood-600' : 'bg-white text-wood-700 border-wood-200'}`}
+                            >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>プログラム</span>
+                            </button>
+
+                            {/* 挨拶テンプレ: タップで末尾即座挿入（編集は設定から） */}
+                            <button 
+                                type="button" 
+                                onClick={handleInsertTemplate}
                                 className="flex-1 py-2 bg-tree-600 hover:bg-tree-700 text-white rounded-xl text-xs font-black shadow-sm border border-tree-700 transition-all active:scale-95 flex items-center justify-center gap-1 cursor-pointer select-none"
-                                title="タップ: 末尾に即座挿入 / 長押し: テンプレ設定・編集"
+                                title="タップで挨拶テンプレを末尾に即座挿入（変更は設定から）"
                             >
                                 <Sparkles className="w-3.5 h-3.5" />
                                 <span>挨拶テンプレ</span>
@@ -818,16 +1024,16 @@ export default function MemoPanel({
                         </div>
 
                         <div className="flex items-center justify-between gap-3 mt-1 pt-2 border-t border-slate-100 flex-shrink-0">
-                            <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping" />
-                                自動保存中
+                            <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1.5" title="端末内にリアルタイム下書き保護されています（閉じても復元されます）">
+                                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
+                                下書き保護中
                             </span>
                             <div className="flex items-center gap-2">
-                                                                <button
+                                <button
                                     type="button"
                                     onClick={handleCopyEditor}
                                     disabled={!treeContent.trim() || hasConflict}
-                                    className={`px-5 py-2.5 rounded-xl font-black text-xs shadow-sm flex items-center justify-center gap-2 transition-all active:scale-95 border ${
+                                    className={`px-4 py-2.5 rounded-xl font-black text-xs shadow-sm flex items-center justify-center gap-1.5 transition-all active:scale-95 border ${
                                         copiedEditor 
                                             ? 'bg-green-50 border-green-200 text-green-600' 
                                             : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-600 disabled:opacity-50 disabled:pointer-events-none'
@@ -841,10 +1047,25 @@ export default function MemoPanel({
                                     type="button"
                                     onClick={handleClose}
                                     disabled={hasConflict}
-                                    className={`px-5 py-2.5 rounded-xl font-black text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 ${hasConflict ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200 shadow-none' : 'bg-tree-600 hover:bg-tree-700 text-white shadow-md'}`}
+                                    className={`px-4 py-2.5 rounded-xl font-black text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 ${hasConflict ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200 shadow-none' : 'bg-slate-600 hover:bg-slate-700 text-white shadow-md'}`}
+                                    title="現在の内容を保存して閉じます"
                                 >
                                     <Check className="w-4 h-4" />
                                     <span>保存して閉じる</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleSaveCompleted(!isCompleted)}
+                                    disabled={hasConflict}
+                                    className={`px-4 py-2.5 rounded-xl font-black text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 border ${
+                                        isCompleted
+                                            ? 'bg-red-800 hover:bg-red-900 text-white border-red-900 ring-2 ring-red-400/50'
+                                            : 'bg-red-600 hover:bg-red-700 text-white border-red-700'
+                                    } ${hasConflict ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    title={isCompleted ? 'クリックで完了状態を解除して保存します' : 'ツリー通信の入力を完了として保存します'}
+                                >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>{isCompleted ? '完了済み（解除）' : '入力を完了して保存'}</span>
                                 </button>
                             </div>
                         </div>
@@ -946,9 +1167,9 @@ export default function MemoPanel({
                         </div>
 
                         <div className="flex items-center justify-between gap-3 mt-1 pt-2 border-t border-slate-100 flex-shrink-0">
-                            <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1.5">
+                            <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1.5" title="端末内にリアルタイム下書き保護されています（閉じても復元されます）">
                                 <span className="w-1.5 h-1.5 bg-wood-500 rounded-full animate-ping" />
-                                自動保存中
+                                下書き保護中
                             </span>
                             <div className="flex items-center gap-2">
                                 <button
