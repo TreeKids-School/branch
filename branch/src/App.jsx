@@ -691,6 +691,22 @@ export default function App() {
         return () => unsubscribe();
     }, [fetchMasterChildren, fetchStaffNames, fetchOffices]);
 
+    // 前日以前の変更履歴を自動削除（1日1回）
+    useEffect(() => {
+        if (!user) return;
+        const today = new Date().toISOString().slice(0, 10);
+        const lastCleanup = localStorage.getItem('care_pro_changelog_cleanup_date');
+        if (lastCleanup === today) return; // 今日すでに実行済み
+        cs({ action: 'cleanupOldChangeLogs' }).then(result => {
+            localStorage.setItem('care_pro_changelog_cleanup_date', today);
+            if (result?.deleted > 0) {
+                console.log(`[ChangeLog Cleanup] ${result.deleted}件の古い変更履歴を削除しました。`);
+            }
+        }).catch(e => {
+            console.warn('[ChangeLog Cleanup] 削除に失敗:', e);
+        });
+    }, [user, cs]);
+
     // 2.5 Authentication Bridge (Portal integration)
     useEffect(() => {
         const handleAuthMessage = async (event) => {

@@ -409,7 +409,20 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return { status: 'OK' };
             }
+            case 'cleanupOldChangeLogs': {
+                // 今日より前の changeLogs ドキュメントを削除する
+                const today = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+                const colRef = collection(firestore, 'changeLogs');
+                const q = query(colRef, where('date', '<', today));
+                const snap = await getDocs(q);
+                const deletePromises = snap.docs.map(d => deleteDoc(d.ref));
+                await Promise.all(deletePromises);
+                setConnectionStatus?.('online'); setLastError?.(null);
+                console.log(`[ChangeLog Cleanup] Deleted ${snap.docs.length} old changeLogs documents.`);
+                return { deleted: snap.docs.length };
+            }
             default: return null;
+
         }
     } catch (e) {
         const projectId = firestore.app.options.projectId;
