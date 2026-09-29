@@ -827,9 +827,25 @@ export default function App() {
             console.error("Error listening to attendance:", error);
         });
 
+        // 3. changeLogs コレクションのリアルタイム同期リスナー登録
+        const logDocId = selectedOffice.id ? `${selectedOffice.id}_${selectedDate}` : selectedDate;
+        const changeLogsDocRef = doc(firestore, 'changeLogs', logDocId);
+        const unsubscribeChangeLogs = onSnapshot(changeLogsDocRef, (snap) => {
+            if (isSandboxMode) return;
+            if (snap.exists()) {
+                const logs = snap.data().logs || [];
+                setChangeLogs(logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+            } else {
+                setChangeLogs([]);
+            }
+        }, (error) => {
+            console.error('Error listening to changeLogs:', error);
+        });
+
         return () => {
             unsubscribeReport();
             unsubscribeAttendance();
+            unsubscribeChangeLogs();
         };
     }, [selectedDate, selectedOffice, user, isSandboxMode]);
 
