@@ -1,0 +1,11 @@
+{
+  "name": "ツリー通信v2",
+  "systemName": "ツリー通信システム",
+  "stage": "isolated-development",
+  "sourceRepository": "https://github.com/TreeKids-School/branch",
+  "sourceCommit": "20b3bc63a91a7d87c3e0964ac6f9f3e1e473674b",
+  "sourceDirectory": "branch",
+  "firebaseProject": "demo-tree-tsushin-v2",
+  "liveConnectionEnabled": false,
+  "deploymentEnabled": false
+}

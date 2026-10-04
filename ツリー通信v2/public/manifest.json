@@ -1,0 +1,16 @@
+{
+  "name": "ツリー通信v2",
+  "short_name": "ツリー通信v2",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "description": "ツリー通信システム・分離開発環境",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

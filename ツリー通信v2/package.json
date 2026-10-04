@@ -1,0 +1,30 @@
+{
+  "name": "tree-tsushin-v2",
+  "private": true,
+  "version": "2.0.0-dev.1",
+  "type": "module",
+  "scripts": {
+    "guard": "node scripts/check-isolation.mjs",
+    "dev": "npm run guard && vite --host 127.0.0.1 --port 5183 --strictPort",
+    "build": "npm run guard && vite build",
+    "preview": "npm run guard && vite preview --host 127.0.0.1 --port 4183 --strictPort",
+    "emulators": "npm run guard && node scripts/start-emulators.mjs",
+    "deploy": "node scripts/block-deploy.mjs"
+  },
+  "dependencies": {
+    "firebase": "^10.7.1",
+    "lucide-react": "^0.330.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "vite": "^5.0.8"
+  }
+}
