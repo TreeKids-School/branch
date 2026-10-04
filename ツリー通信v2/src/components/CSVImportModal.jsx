@@ -1,17 +1,23 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
     X, FileSpreadsheet, Upload, CheckCircle2, AlertTriangle, Check, 
     Loader2, ShieldAlert, RefreshCw, Filter, Info, Lock, AlertCircle, Users
 } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
+import { parseCSV } from '../utils/csv';
+import { normalizeDate } from '../utils/backup';
+import './WorkflowModals.css';
+import { columnText } from '../utils/communicationFlow';
 
 const SLOT_LIMIT = 10; // 定員（10名）
 
 export default function CSVImportModal({ 
     show, onClose, masterChildren, offices, selectedOffice, selectedDate, 
-    cs, onRefresh, onImportSandbox, user, currentStaffName, firestore 
+    cs, onRefresh, onImportSandbox, user, currentStaffName, firestore, tagColumnMap, onDirtyChange
 }) {
     const [dragActive, setDragActive] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
+    const [progress, setProgress] = useState('');
     const [parsedRows, setParsedRows] = useState([]);
     const [isSaving, setIsSaving] = useState(false);
     const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
@@ -21,54 +27,20 @@ export default function CSVImportModal({
     const [overflowNotice, setOverflowNotice] = useState(null); // 定員超過通知モーダル/アラート
     const fileInputRef = useRef(null);
 
+    useEffect(() => { onDirtyChange?.(isSaving || isCheckingDuplicates); }, [isSaving, isCheckingDuplicates, onDirtyChange]);
+    useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+    const handleClose = () => { if (!isSaving && !isCheckingDuplicates) onClose(); };
     if (!show) return null;
-
-    // Helper: Parse date into YYYY-MM-DD
-    const parseCSVDate = (dateStr) => {
-        if (!dateStr) return '';
-        let clean = dateStr.trim().replace(/\//g, '-');
-        if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
-        const parts = clean.split('-');
-        if (parts.length === 3) {
-            let y = parts[0];
-            let m = parts[1].padStart(2, '0');
-            let d = parts[2].padStart(2, '0');
-            if (y.length === 2) {
-                y = '20' + y;
-            }
-            return `${y}-${m}-${d}`;
-        }
-        return '';
-    };
-
-    // Robust CSV parser handling quotes
-    const parseCSVLine = (line) => {
-        const result = [];
-        let current = '';
-        let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-            const char = line[i];
-            if (char === '"') {
-                inQuotes = !inQuotes;
-            } else if (char === ',' && !inQuotes) {
-                result.push(current.trim());
-                current = '';
-            } else {
-                current += char;
-            }
-        }
-        result.push(current.trim());
-        return result;
-    };
 
     // Check existing reports to identify duplicates, differences, and capacity overflow (11th+ child)
     const checkDuplicatesAndEnrich = async (rawRows) => {
         setIsCheckingDuplicates(true);
+        setErrorMessage('');
         try {
             // Collect unique date + office combinations
             const groupKeys = {};
             rawRows.forEach(r => {
-                if (r.matchedChild && r.office?.id) {
+                if (r.matchedChild && r.office?.id && !r.validationError) {
                     const k = `${r.date}_${r.office.id}`;
                     groupKeys[k] = { date: r.date, officeId: r.office.id };
                 }
@@ -95,11 +67,11 @@ export default function CSVImportModal({
 
             // Enrich each row with duplicate and capacity analysis
             const enriched = rawRows.map(row => {
-                if (!row.matchedChild || !row.office?.id) {
+                if (!row.matchedChild || !row.office?.id || row.validationError) {
                     return { 
                         ...row, 
-                        isExisting: false, 
-                        conflictDetails: [], 
+                        isExisting: false, enabled: false,
+                        conflictDetails: row.validationError ? [row.validationError] : [],
                         willBeWaitlistDueToCapacity: false 
                     };
                 }
@@ -159,7 +131,7 @@ export default function CSVImportModal({
                     diffs.push(`時間: ${existingTime || '未設定'} → ${row.pickupTime || '未設定'}`);
                 }
                 if (existingNotes !== (row.notes || '')) {
-                    diffs.push(`備考差分あり`);
+                    diffs.push(`備考: ${existingNotes || '未設定'} → ${row.notes || '未設定'}`);
                 }
                 if (diffs.length === 0) {
                     diffs.push(`登録済（登録内容と同一）`);
@@ -187,7 +159,8 @@ export default function CSVImportModal({
             setParsedRows(enriched);
         } catch (err) {
             console.error('Failed to check duplicates:', err);
-            setParsedRows(rawRows);
+            setParsedRows(rawRows.map(row => ({ ...row, enabled: false })));
+            setErrorMessage('既存データの照合に失敗しました。ファイルを選び直してください。');
         } finally {
             setIsCheckingDuplicates(false);
         }
@@ -195,11 +168,13 @@ export default function CSVImportModal({
 
     const handleFile = (file) => {
         if (!file) return;
+        if (isSaving || isCheckingDuplicates) return;
         setFileName(file.name);
+        setParsedRows([]); setErrorMessage('');
         const reader = new FileReader();
         reader.onload = async (e) => {
             const text = e.target.result;
-            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+            const lines = parseCSV(text);
             if (lines.length <= 1) {
                 alert('CSVファイルが空か、ヘッダー行しかありません。');
                 return;
@@ -208,7 +183,7 @@ export default function CSVImportModal({
             const rows = [];
             // Parse lines (skip first header row)
             for (let i = 1; i < lines.length; i++) {
-                const parts = parseCSVLine(lines[i]);
+                const parts = lines[i].map(value => String(value).trim());
                 if (parts.length < 2) continue; // skip invalid rows
 
                 const [csvName, csvDate, csvOffice, csvStatus, csvPickupLocation, csvPickupTime, csvNotes] = parts;
@@ -228,44 +203,53 @@ export default function CSVImportModal({
                     const cleanCsvOffice = csvOffice.replace(/\s+/g, '');
                     matchedOffice = offices.find(o => {
                         const cleanOfficeName = (o.name || '').replace(/\s+/g, '');
-                        return cleanOfficeName === cleanCsvOffice || cleanOfficeName.includes(cleanCsvOffice) || cleanCsvOffice.includes(cleanOfficeName);
+                        return cleanOfficeName === cleanCsvOffice;
                     });
                 }
                 // Fallback to currently selected office if no match found
-                if (!matchedOffice) {
-                    matchedOffice = selectedOffice;
-                }
+                if (!csvOffice) matchedOffice = selectedOffice;
 
                 // Match Date
-                const targetDate = parseCSVDate(csvDate) || selectedDate;
+                const targetDate = csvDate ? normalizeDate(csvDate) : selectedDate;
+                const timeParts = (csvPickupTime || '').match(/^(\d{1,2}):(\d{2})$/);
+                const validTime = !csvPickupTime || (timeParts && Number(timeParts[1]) < 24 && Number(timeParts[2]) < 60);
+                const pickupTime = timeParts && validTime ? `${timeParts[1].padStart(2, '0')}:${timeParts[2]}` : csvPickupTime || '';
+                const validationError = !matchedOffice?.id ? '事業所を照合できません' : !targetDate ? '日付を確認してください' : !validTime ? '迎え時間を確認してください（時:分）' : !['通常', '欠席', 'キャンセル待ち', ''].includes(csvStatus || '') ? '状態を確認してください' : '';
 
                 rows.push({
                     id: `${i}-${Date.now()}`,
-                    originalName: csvName,
+                    originalName: csvName, validationError,
                     matchedChild,
                     date: targetDate,
                     office: matchedOffice,
                     status: csvStatus || '通常',
                     pickupLocation: csvPickupLocation || '',
-                    pickupTime: csvPickupTime || '',
+                    pickupTime,
                     notes: csvNotes || '',
-                    enabled: !!matchedChild, // Default: matched
+                    enabled: !!matchedChild && !validationError,
                     isExisting: false,
                     conflictDetails: [],
                     willBeWaitlistDueToCapacity: false
                 });
             }
 
-            // Enrich with duplicate & capacity check
+            // A second row for the same child/date/office would silently win. Require correction in the file.
+            const seen = new Set();
+            rows.forEach(row => {
+                const key = `${row.matchedChild?.id || row.originalName}_${row.date}_${row.office?.id || ''}`;
+                if (seen.has(key)) { row.validationError = '同じ児童・日付・事業所の行が重複しています'; row.enabled = false; }
+                seen.add(key);
+            });
             await checkDuplicatesAndEnrich(rows);
         };
+        reader.onerror = () => setErrorMessage('ファイルを読み込めませんでした。');
         reader.readAsText(file, 'UTF-8');
     };
 
     const handleModeChange = (newMode) => {
         setImportMode(newMode);
         setParsedRows(prev => prev.map(row => {
-            if (!row.matchedChild) return row;
+            if (!row.matchedChild || row.validationError) return { ...row, enabled: false };
             if (row.isExisting) {
                 return { ...row, enabled: newMode === 'overwrite' };
             }
@@ -303,21 +287,24 @@ export default function CSVImportModal({
     };
 
     const toggleAllEnabled = () => {
-        const anyDisabled = parsedRows.some(r => !r.enabled && r.matchedChild);
+        const anyDisabled = parsedRows.some(r => !r.enabled && r.matchedChild && !r.validationError);
         setParsedRows(prev => prev.map(row => {
-            if (!row.matchedChild) return row; // Keep unmatched rows disabled
+            if (!row.matchedChild || row.validationError) return { ...row, enabled: false }; // Keep unmatched rows disabled
             return { ...row, enabled: anyDisabled };
         }));
     };
 
     const handleSave = async () => {
-        const activeRows = parsedRows.filter(r => r.enabled && r.matchedChild);
+        const activeRows = parsedRows.filter(r => r.enabled && r.matchedChild && !r.validationError);
         if (activeRows.length === 0) {
             alert('インポート対象の有効な児童が選択されていません。');
             return;
         }
 
-        setIsSaving(true);
+        if (isSaving || isCheckingDuplicates || errorMessage) return;
+        if (!window.confirm(`${activeRows.length}件（既存上書き${activeRows.filter(row => row.isExisting).length}件）を反映します。\n対象: ${[...new Set(activeRows.map(row => `${row.office.name} / ${row.date}`))].join('、')}\n選択していない行は変更しません。`)) return;
+        setIsSaving(true); setErrorMessage('');
+        let completedGroups = 0;
         let acquiredLock = false;
         const allOverflowChildren = [];
 
@@ -357,9 +344,9 @@ export default function CSVImportModal({
             // Process each group
             for (const key of Object.keys(groups)) {
                 const { date, officeId, officeName, rows } = groups[key];
+                setProgress(`${officeName} / ${date} を保存中…`);
 
-                // Fetch current daily report
-                const currentData = await cs({ action: 'getReport', date, officeId });
+                const buildReport = (currentData) => {
                 const finalReport = currentData && typeof currentData === 'object' ? { ...currentData } : {};
                 
                 // Initialize sub structures
@@ -385,6 +372,7 @@ export default function CSVImportModal({
                     let isAbsent = row.status === '欠席';
                     let isWaitlist = row.status === 'キャンセル待ち';
 
+                    if ((isAbsent || isWaitlist) && existingRegularChildIds.delete(child.id)) currentRegularCount--;
                     // 11人目以降の定員超過自動振り分けロジック
                     if (!isAbsent && !isWaitlist) {
                         const isAlreadyRegular = existingRegularChildIds.has(child.id);
@@ -395,12 +383,7 @@ export default function CSVImportModal({
                             if (currentRegularCount >= SLOT_LIMIT) {
                                 // 11人目以降：自動的にキャンセル待ちに配置
                                 isWaitlist = true;
-                                allOverflowChildren.push({
-                                    childName: child.name,
-                                    date,
-                                    officeName: officeName || '事業所',
-                                    orderNumber: currentRegularCount + 1
-                                });
+
                             } else {
                                 isWaitlist = false;
                                 currentRegularCount++;
@@ -436,6 +419,7 @@ export default function CSVImportModal({
 
                 // Package and save daily bulk report
                 const updatedReport = {
+                    ...finalReport,
                     children: currentChildren,
                     messages: currentMessages,
                     results: currentResults,
@@ -446,52 +430,40 @@ export default function CSVImportModal({
                     updatedAt: new Date().toISOString()
                 };
 
+                    return updatedReport;
+                };
+                let savedReport;
                 if (sandboxOnly) {
-                    if (onImportSandbox) {
-                        onImportSandbox(date, officeId, updatedReport);
-                    }
+                    if (!onImportSandbox) throw new Error('一時表示の反映先がありません。');
+                    savedReport = buildReport(await cs({ action: 'getReport', date, officeId }));
+                    await onImportSandbox(date, officeId, savedReport);
                 } else {
-                    await cs({ action: 'saveReport', date, data: updatedReport, officeId });
-
-                    // Save individual child communications
-                    for (const child of currentChildren) {
-                        if (child.isPlaceholder) continue;
-                        const childResult = currentResults[child.id] || {};
-                        const childTable = currentTable[child.id] || {};
-
-                        const individualData = {
-                            name: child.name,
-                            tree_comm_text: childResult.D || '',
-                            future_plan: childResult.futurePlan || '',
-                            pickupLocation: childTable.pickupLocation || '',
-                            endTime: childTable.endTime || '',
-                            transportTime: childTable.transportTime || '',
-                            notes: childTable.notes || ''
-                        };
-
-                        await cs({
-                            action: 'saveIndividualTreeComm',
-                            childId: child.id,
-                            date,
-                            data: individualData
-                        });
-                    }
+                    const saved = await cs({ action: 'commitDailyMutation', date, officeId,
+                        mutate: buildReport, deriveRemarks: (messages, id, report) => [columnText(messages, 'remarks', tagColumnMap), report.dailyTable?.[id]?.notes || ''].filter(Boolean).join(' / '), syncChildIds: rows.map(row => row.matchedChild.id) });
+                    savedReport = saved.report;
                 }
+                rows.forEach(row => {
+                    if (row.status !== '欠席' && row.status !== 'キャンセル待ち' && savedReport.children.find(c => c.id === row.matchedChild.id)?.isWaitlist) {
+                        allOverflowChildren.push({ childName: row.matchedChild.name, date, officeName, orderNumber: SLOT_LIMIT + 1 });
+                    }
+                });
+                completedGroups++;
             }
 
             // 11人目以降のキャンセル待ち振り分けがあった場合は通知
             if (allOverflowChildren.length > 0) {
                 setOverflowNotice(allOverflowChildren);
             } else {
-                alert(sandboxOnly ? 'CSVデータのデモ反映が完了しました（データベース保存無効中）' : 'CSVデータの取り込みが完了しました。');
+                alert(sandboxOnly ? 'CSVデータのデモ反映が完了しました（保存せず一時表示）' : 'CSVデータの取り込みが完了しました。');
                 if (!sandboxOnly) {
-                    onRefresh(); // Refresh screen
+                    await onRefresh?.();
                 }
                 onClose();
             }
         } catch (error) {
             console.error(error);
-            alert('インポート中にエラーが発生しました: ' + error.message);
+            setErrorMessage(`${completedGroups}日・事業所分の保存後に停止しました。保存済みの内容を確認してください。${error.message || ''}`);
+            await onRefresh?.();
         } finally {
             // 排他ロックを確実に解除
             if (acquiredLock && firestore) {
@@ -507,7 +479,7 @@ export default function CSVImportModal({
                     console.error('Failed to release importLock:', unlockErr);
                 }
             }
-            setIsSaving(false);
+            setIsSaving(false); setProgress('');
         }
     };
 
@@ -515,13 +487,13 @@ export default function CSVImportModal({
     const existingCount = parsedRows.filter(r => r.matchedChild && r.isExisting).length;
     const newCount = parsedRows.filter(r => r.matchedChild && !r.isExisting).length;
     const unmatchedCount = parsedRows.filter(r => !r.matchedChild).length;
-    const activeSelectedCount = parsedRows.filter(r => r.enabled && r.matchedChild).length;
+    const activeSelectedCount = parsedRows.filter(r => r.enabled && r.matchedChild && !r.validationError).length;
     const capacityOverflowCount = parsedRows.filter(r => r.willBeWaitlistDueToCapacity).length;
 
     return (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-300">
+        <div className="io-modal fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-300">
             {/* Backdrop */}
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={onClose} />
+            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={handleClose} />
             
             {/* Modal Box */}
             <div className="relative w-full max-w-5xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col border border-white animate-in zoom-in-95 duration-300 max-h-[90vh]">
@@ -532,17 +504,20 @@ export default function CSVImportModal({
                             <FileSpreadsheet className="w-5 h-5" />
                         </div>
                         <div>
-                            <h2 className="text-base md:text-lg font-black tracking-wider">CSV送迎記録インポート</h2>
+                            <h2 className="text-base md:text-lg font-black tracking-wider">送迎CSVの差分確認</h2>
                             <p className="text-[10px] md:text-xs text-white/80 font-semibold mt-0.5">送迎表・乗車記録などのCSVファイルを読み込み、一括でスケジュールや備考を各事業所・日付に反映させます。</p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/15 rounded-full transition-all cursor-pointer">
+                    <button onClick={handleClose} className="p-2 hover:bg-white/15 rounded-full transition-all cursor-pointer">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
                 {/* Content */}
                 <div className="flex-grow p-4 md:p-6 overflow-y-auto min-h-0 flex flex-col gap-4 custom-scrollbar">
+                    <div className="io-status">{selectedOffice?.name} · 表示中 {selectedDate} / CSVの事業所・日付ごとに保存します。</div>
+                    {errorMessage && <div role="alert" className="workflow-error">{errorMessage}</div>}
+                    {progress && <div role="status" className="io-status">{progress}</div>}
                     {/* Drag and Drop Zone */}
                     {parsedRows.length === 0 && (
                         <div
@@ -639,12 +614,12 @@ export default function CSVImportModal({
 
                                 {/* Duplicate Policy Selection Buttons */}
                                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
-                                    <div className="flex items-center gap-2">
+                                    <div className="io-policy flex items-center gap-2">
                                         <span className="text-xs font-black text-slate-700 flex items-center gap-1">
                                             <Filter className="w-3.5 h-3.5 text-indigo-600" />
-                                            既存重複の処理方針:
+                                            既存行の初期選択:
                                         </span>
-                                        <div className="inline-flex rounded-xl bg-slate-200/70 p-0.5 gap-0.5">
+                                        <div className="inline-flex flex-wrap rounded-xl bg-slate-200/70 p-0.5 gap-0.5">
                                             <button
                                                 type="button"
                                                 onClick={() => handleModeChange('skip')}
@@ -655,7 +630,7 @@ export default function CSVImportModal({
                                                 }`}
                                             >
                                                 <ShieldAlert className="w-3.5 h-3.5 text-emerald-600" />
-                                                <span>かぶっている情報はスキップ</span>
+                                                <span>既存行を選択しない</span>
                                                 <span className="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-700 rounded-full font-bold">推奨</span>
                                             </button>
                                             <button
@@ -668,7 +643,7 @@ export default function CSVImportModal({
                                                 }`}
                                             >
                                                 <RefreshCw className="w-3.5 h-3.5" />
-                                                <span>すでにある情報は上書き</span>
+                                                <span>既存行も選択</span>
                                             </button>
                                         </div>
                                     </div>
@@ -688,7 +663,7 @@ export default function CSVImportModal({
                                                 <th className="p-2.5 text-center w-12">
                                                     <input
                                                         type="checkbox"
-                                                        checked={parsedRows.length > 0 && parsedRows.filter(r => r.matchedChild).every(r => r.enabled)}
+                                                        checked={parsedRows.some(r => r.matchedChild && !r.validationError) && parsedRows.filter(r => r.matchedChild && !r.validationError).every(r => r.enabled)} disabled={isSaving || !!errorMessage}
                                                         onChange={toggleAllEnabled}
                                                         className="w-4 h-4 rounded accent-indigo-600 cursor-pointer"
                                                     />
@@ -705,8 +680,8 @@ export default function CSVImportModal({
                                         </thead>
                                         <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
                                             {parsedRows.map((row) => {
-                                                const isSkipTarget = row.isExisting && importMode === 'skip';
-                                                const isOverwriteTarget = row.isExisting && importMode === 'overwrite';
+                                                const isSkipTarget = row.isExisting && !row.enabled;
+                                                const isOverwriteTarget = row.isExisting && row.enabled;
 
                                                 return (
                                                     <tr
@@ -723,17 +698,17 @@ export default function CSVImportModal({
                                                                             : 'bg-white hover:bg-indigo-50/30'
                                                         }`}
                                                     >
-                                                        <td className="p-2 text-center">
+                                                        <td data-label="反映対象" className="p-2 text-center">
                                                             <input
                                                                 type="checkbox"
-                                                                checked={row.enabled}
-                                                                disabled={!row.matchedChild}
+                                                                aria-label={`${row.originalName} ${row.date}を反映対象にする`} checked={row.enabled}
+                                                                disabled={!row.matchedChild || !!row.validationError || isSaving || !!errorMessage}
                                                                 onChange={() => toggleRowEnabled(row.id)}
                                                                 className="w-4 h-4 rounded accent-indigo-600 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                                                             />
                                                         </td>
-                                                        <td className="p-2">
-                                                            {!row.matchedChild ? (
+                                                        <td data-label="照合" className="p-2">
+                                                            {row.validationError ? <span className="text-rose-700 font-bold">要確認</span> : !row.matchedChild ? (
                                                                 <span className="inline-flex items-center gap-1 text-[10px] font-black text-rose-600 bg-rose-100/70 px-2 py-0.5 rounded-full border border-rose-200">
                                                                     <AlertTriangle className="w-3 h-3" /> 未登録
                                                                 </span>
@@ -753,7 +728,7 @@ export default function CSVImportModal({
                                                                 </span>
                                                             )}
                                                         </td>
-                                                        <td className="p-2">
+                                                        <td data-label="児童" className="p-2">
                                                             <div className="flex flex-col">
                                                                 <span className="font-bold text-[11px] text-slate-400">{row.originalName}</span>
                                                                 {row.matchedChild ? (
@@ -767,13 +742,13 @@ export default function CSVImportModal({
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td className="p-2 font-bold">{row.date}</td>
-                                                        <td className="p-2">
+                                                        <td data-label="日付" className="p-2 font-bold">{row.date}</td>
+                                                        <td data-label="事業所" className="p-2">
                                                             <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-black text-[10px] border border-indigo-100">
                                                                 {row.office?.name || '---'}
                                                             </span>
                                                         </td>
-                                                        <td className="p-2">
+                                                        <td data-label="状態" className="p-2">
                                                             {row.willBeWaitlistDueToCapacity ? (
                                                                 <div className="flex flex-col gap-0.5">
                                                                     <span className="line-through text-slate-400 text-[10px]">通常</span>
@@ -793,9 +768,9 @@ export default function CSVImportModal({
                                                                 </span>
                                                             )}
                                                         </td>
-                                                        <td className="p-2 font-bold">{row.pickupLocation || '---'}</td>
-                                                        <td className="p-2 font-bold">{row.pickupTime || '---'}</td>
-                                                        <td className="p-2">
+                                                        <td data-label="迎え場所" className="p-2 font-bold">{row.pickupLocation || '---'}</td>
+                                                        <td data-label="時間" className="p-2 font-bold">{row.pickupTime || '---'}</td>
+                                                        <td data-label="備考・差分" className="p-2">
                                                             <div className="flex flex-col gap-0.5 max-w-sm">
                                                                 {row.notes && (
                                                                     <span className="text-slate-600 truncate font-medium" title={row.notes}>
@@ -839,17 +814,17 @@ export default function CSVImportModal({
                         <input 
                             type="checkbox"
                             checked={sandboxOnly}
-                            onChange={(e) => setSandboxOnly(e.target.checked)}
+                            disabled={isSaving} onChange={(e) => setSandboxOnly(e.target.checked)}
                             className="w-4 h-4 rounded accent-amber-600 cursor-pointer flex-shrink-0"
                         />
                         <div className="flex flex-col">
                             <span className="text-xs font-black text-amber-800">データベースに保存せず、画面上でのみ動作検証する（デモモード）</span>
-                            <span className="text-[10px] text-amber-700/80 font-bold">本番データベースに影響を与えずに、CSVインポートのマッチングや表示の動作確認が可能です（他端末ロックも実行されません）。</span>
+                            <span className="text-[10px] text-amber-700/80 font-bold">保存先へ書き込まず、読み込んだ内容を一時表示します。再読込み後には残りません。</span>
                         </div>
                     </label>
                     <div className="flex items-center justify-between w-full">
                         <button
-                            onClick={onClose}
+                            onClick={handleClose}
                             disabled={isSaving}
                             className="px-5 py-2.5 font-bold text-xs text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-xl transition-all cursor-pointer disabled:opacity-50"
                         >
@@ -858,7 +833,7 @@ export default function CSVImportModal({
                         {parsedRows.length > 0 && (
                             <button
                                 onClick={handleSave}
-                                disabled={isSaving || activeSelectedCount === 0}
+                                disabled={isSaving || isCheckingDuplicates || !!errorMessage || activeSelectedCount === 0}
                                 className={`px-6 py-3 rounded-xl font-black text-xs shadow-md transition-all active:scale-95 flex items-center gap-2 tracking-wider cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                                     sandboxOnly 
                                         ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200/50' 
@@ -924,10 +899,10 @@ export default function CSVImportModal({
 
                         <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                                 setOverflowNotice(null);
                                 if (!sandboxOnly) {
-                                    onRefresh();
+                                    await onRefresh?.();
                                 }
                                 onClose();
                             }}

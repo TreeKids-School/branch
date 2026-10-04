@@ -1,247 +1,68 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, PlusCircle, UserPlus, Search, Check, Clock } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, UserPlus, Search, Check, Clock, AlertCircle } from 'lucide-react';
+import { availableChildren, childDisplayName } from '../utils/childSelection.js';
 
-export default function AddChildModal({ show, onClose, masterChildren, currentChildren, onAddChildren }) {
+export default function AddChildModal({ show, onClose, masterChildren = [], currentChildren = [], onAddChildren, selectedDate, officeName, onDirtyChange }) {
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedToAdd, setSelectedToAdd] = useState([]);
-    const inputRef = useRef(null);
-
-    // Autofocus input when modal opens, and clear selections
-    useEffect(() => {
-        if (show) {
-            setSelectedToAdd([]);
-            setSearchQuery('');
-            // Small timeout to guarantee DOM is rendered
-            setTimeout(() => {
-                inputRef.current?.focus();
-            }, 100);
-        }
-    }, [show]);
-
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const busyRef = useRef(false);
+    useEffect(() => { if (show) { setSelectedIds([]); setSearchQuery(''); setError(''); setSaving(false); busyRef.current = false; } }, [show]);
+    useEffect(() => { if (show) onDirtyChange?.(selectedIds.length > 0 || saving); }, [show, selectedIds.length, saving, onDirtyChange]);
+    useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
     if (!show) return null;
-
-    // Filter master list to find children that are:
-    // 1. Not already in current daily list (currentChildren)
-    // 2. Not already in the modal's select list (selectedToAdd)
-    const availableChildren = masterChildren
-        .filter(m => !currentChildren.some(c => c.id === m.id))
-        .filter(m => !selectedToAdd.some(s => s.id === m.id))
-        .filter(m => {
-            if (!searchQuery) return true;
-            
-            const toKatakana = (str) => {
-                return str.replace(/[\u3041-\u3096]/g, (match) => {
-                    return String.fromCharCode(match.charCodeAt(0) + 0x60);
-                });
-            };
-
-            const toHiragana = (str) => {
-                return str.replace(/[\u30a1-\u30f6]/g, (match) => {
-                    return String.fromCharCode(match.charCodeAt(0) - 0x60);
-                });
-            };
-            
-            const q = searchQuery.toLowerCase().trim();
-            const qKata = toKatakana(q);
-            const qHira = toHiragana(q);
-            
-            const nameStr = (m.name || '').toLowerCase();
-            const fullNameStr = `${m.lastName || ''}${m.firstName || ''}`.toLowerCase();
-            const furiganaStr = `${m.lastNameFurigana || ''}${m.firstNameFurigana || ''}`.toLowerCase();
-            const nameFuriStr = (m.nameFurigana || '').toLowerCase();
-            const yomiStr = (m.yomi || '').toLowerCase();
-            
-            const targets = [
-                nameStr, 
-                fullNameStr, 
-                furiganaStr, 
-                nameFuriStr, 
-                yomiStr,
-                toKatakana(furiganaStr),
-                toHiragana(furiganaStr),
-                toKatakana(nameFuriStr),
-                toHiragana(nameFuriStr),
-                toKatakana(yomiStr),
-                toHiragana(yomiStr)
-            ];
-            
-            return targets.some(target => target.includes(q) || target.includes(qKata) || target.includes(qHira));
-        })
-        .sort((a, b) => {
-            const aStr = a.yomi || a.name || '';
-            const bStr = b.yomi || b.name || '';
-            return aStr.localeCompare(bStr, 'ja');
-        });
-
-    const handleSelectChild = (child) => {
-        setSelectedToAdd(prev => [...prev, child]);
-        setSearchQuery(''); // reset search query so user can type next child name
-        inputRef.current?.focus();
+    const candidates = availableChildren(masterChildren, currentChildren, searchQuery);
+    const selected = masterChildren.filter(child => selectedIds.includes(child.id) && !currentChildren.some(current => current.id === child.id));
+    const toggle = id => { if (!busyRef.current) { setSelectedIds(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]); setError(''); } };
+    const close = () => { if (!busyRef.current) onClose(); };
+    const submit = async isWaitlist => {
+        if (busyRef.current || !selected.length) return;
+        busyRef.current = true; setSaving(true); setError('');
+        try {
+            const result = await onAddChildren(selected, isWaitlist);
+            if (result === false) throw new Error('保存を完了できませんでした。');
+            onClose();
+        } catch (failure) {
+            setError('追加できませんでした。選択を残しています。' + (failure.message || 'もう一度お試しください。'));
+        } finally { busyRef.current = false; setSaving(false); }
     };
-
-    const handleDeselectChild = (childId) => {
-        setSelectedToAdd(prev => prev.filter(c => c.id !== childId));
-        inputRef.current?.focus();
-    };
-
-    const handleAddSubmit = (isWaitlist = false) => {
-        onAddChildren(selectedToAdd, isWaitlist);
-        onClose();
-    };
-
-    return (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-300">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={onClose} />
-            <div className="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col border border-white animate-in zoom-in-95 duration-500 max-h-[90vh]">
-                
-                {/* Header */}
-                <div className="p-6 bg-tree-600 flex items-center justify-between shadow-lg flex-shrink-0">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
-                            <UserPlus className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                            <h3 className="font-black text-xl text-white tracking-tight">児童を選択して追加</h3>
-                            <p className="text-[9px] font-bold text-tree-100 uppercase tracking-widest opacity-80">Add children to daily report</p>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-all text-white/80 hover:text-white">
-                        <X className="w-5 h-5" />
-                    </button>
+    return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/45 p-0 md:p-6" role="presentation">
+        <div className="absolute inset-0" onClick={close} />
+        <section role="dialog" aria-modal="true" aria-labelledby="add-child-title" className="relative w-full max-w-3xl h-[100dvh] md:h-auto md:max-h-[92dvh] bg-slate-50 md:rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <header className="px-5 py-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
+                <div><p className="text-xs text-slate-500 mb-1">ツリー通信v2 / 当日の業務</p><h2 id="add-child-title" className="font-bold text-xl text-slate-800">児童を追加</h2><p className="text-sm text-slate-600 mt-1">{officeName || '選択中の事業所'}{selectedDate ? ' · ' + selectedDate : ''}</p></div>
+                <button onClick={close} disabled={saving} aria-label="児童追加を閉じる" className="min-h-[44px] min-w-[44px] rounded-xl hover:bg-slate-100"><X className="w-5 h-5 mx-auto" /></button>
+            </header>
+            <div className="p-4 md:p-6 bg-white border-b border-slate-200 shrink-0">
+                <label htmlFor="child-search" className="font-semibold text-sm text-slate-700">名前・読み仮名で検索</label>
+                <div className="relative mt-2"><Search className="w-5 h-5 absolute top-3.5 left-3 text-slate-400" />
+                    <input id="child-search" type="search" value={searchQuery} disabled={saving} onChange={event => setSearchQuery(event.target.value)} placeholder="例：やまだ、ヤマダ" autoComplete="off" className="w-full min-h-[48px] pl-10 pr-4 text-base bg-slate-50 rounded-xl border border-slate-200 focus:ring-2 focus:ring-tree-500 focus:outline-none" />
                 </div>
-
-                {/* Main Body (Flex column) */}
-                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-slate-50/50 flex flex-col gap-4">
-                    
-                    {/* Part 1: Pool of children to be added */}
-                    <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex-shrink-0">
-                        <h4 className="font-black text-[10px] text-slate-400 uppercase tracking-widest mb-2 flex items-center justify-between">
-                            <span>追加予定の児童 ({selectedToAdd.length} 名)</span>
-                            {selectedToAdd.length > 0 && <span className="text-[9px] text-tree-600 font-bold bg-tree-50 px-2 py-0.5 rounded-full border border-tree-100 shadow-sm">追加待機中</span>}
-                        </h4>
-                        
-                        {selectedToAdd.length === 0 ? (
-                            <p className="text-center py-6 text-xs text-slate-400 font-bold italic bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
-                                下の検索欄から児童を検索し、タップして選択してください。
-                            </p>
-                        ) : (
-                            <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto custom-scrollbar p-1">
-                                {selectedToAdd.map(child => (
-                                    <div 
-                                        key={child.id}
-                                        className="bg-tree-50 text-tree-700 font-bold border border-tree-200 pl-3 pr-1 py-1 rounded-full flex items-center gap-1.5 shadow-sm text-xs animate-in zoom-in-95 duration-200"
-                                    >
-                                        <span>{child.lastName ? `${child.lastName} ${child.firstName}` : child.name}</span>
-                                        <button 
-                                            onClick={() => handleDeselectChild(child.id)}
-                                            className="p-1 hover:bg-tree-100 rounded-full text-tree-500 transition-colors"
-                                            title="除外する"
-                                        >
-                                            <X className="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Part 2: Search suggestion list (Shown ABOVE search input) */}
-                    <div className="flex-1 min-h-[180px] bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
-                        <div className="p-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">検索結果候補</span>
-                            <span className="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-150 shadow-inner">
-                                {searchQuery ? `${availableChildren.length} 件一致` : '全件表示中'}
-                            </span>
-                        </div>
-                        
-                        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1 bg-white">
-                            {availableChildren.length === 0 ? (
-                                <div className="text-center py-10 space-y-2">
-                                    <p className="font-bold text-slate-300 text-xs">見つかりませんでした</p>
-                                    <p className="text-[10px] text-slate-400">名前または読み仮名を入力し直してください</p>
-                                </div>
-                            ) : (
-                                availableChildren.map(child => (
-                                    <button 
-                                        key={child.id} 
-                                        onClick={() => handleSelectChild(child)}
-                                        className="w-full p-2.5 bg-slate-50/50 hover:bg-tree-50 border border-slate-100 rounded-xl flex items-center justify-between group transition-all active:scale-98 shadow-sm hover:shadow-md"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div className="w-7 h-7 bg-tree-50 rounded-full flex items-center justify-center text-tree-600 font-black text-xs group-hover:bg-tree-100 transition-colors flex-shrink-0">
-                                                {(child.lastName || child.name || '?')[0]}
-                                            </div>
-                                            <div className="text-left min-w-0">
-                                                <span className="font-black text-slate-700 tracking-tight text-xs block truncate">
-                                                    {child.lastName ? `${child.lastName} ${child.firstName}` : child.name}
-                                                </span>
-                                                {(child.lastNameFurigana || child.nameFurigana) && (
-                                                    <span className="text-[8px] text-slate-400 font-bold block truncate opacity-70">
-                                                        {child.lastNameFurigana ? `${child.lastNameFurigana} ${child.firstNameFurigana}` : child.nameFurigana}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        <PlusCircle className="w-4.5 h-4.5 text-slate-300 group-hover:text-tree-500 transition-colors flex-shrink-0" />
-                                    </button>
-                                ))
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Part 3: Search input (At the bottom of content) */}
-                    <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex-shrink-0">
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400" />
-                            <input 
-                                ref={inputRef}
-                                type="text" 
-                                placeholder="名前や読み仮名で検索して追加予定に追加..." 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                style={{ fontSize: '16px' }} // Prevent iOS Zoom
-                                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-600 focus:outline-none focus:border-tree-400 focus:ring-4 focus:ring-tree-50 transition-all shadow-sm placeholder:text-slate-400"
-                            />
-                            {searchQuery && (
-                                <button 
-                                    onClick={() => { setSearchQuery(''); inputRef.current?.focus(); }}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-slate-200 rounded-full text-slate-400 transition-colors"
-                                >
-                                    <X className="w-3.5 h-3.5" />
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Footer */}
-                <div className="p-6 bg-white border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4 flex-shrink-0">
-                    <button 
-                        onClick={onClose}
-                        className="px-6 py-2.5 font-black text-xs text-slate-400 hover:text-slate-600 uppercase tracking-widest transition-all w-full sm:w-auto text-center"
-                    >
-                        キャンセル
-                    </button>
-                    <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
-                        <button
-                            onClick={() => handleAddSubmit(true)}
-                            disabled={selectedToAdd.length === 0}
-                            className="px-4 py-3 bg-wood-500 hover:bg-wood-600 text-white rounded-xl font-black text-xs shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 uppercase tracking-widest w-full sm:w-auto"
-                        >
-                            <Clock className="w-4 h-4" />
-                            <span>キャンセル待ちとして追加</span>
-                        </button>
-                        <button
-                            onClick={() => handleAddSubmit(false)}
-                            disabled={selectedToAdd.length === 0}
-                            className="px-4 py-3 bg-tree-600 hover:bg-tree-700 text-white rounded-xl font-black text-xs shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 uppercase tracking-widest w-full sm:w-auto"
-                        >
-                            <Check className="w-4 h-4" />
-                            <span>通常児童として追加</span>
-                        </button>
-                    </div>
-                </div>
+                {!!selected.length && <div className="mt-3"><p className="text-sm font-semibold text-tree-800 mb-2">{selected.length}名を選択中</p>
+                    <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">{selected.map(child => <button key={child.id} onClick={() => toggle(child.id)} disabled={saving} aria-label={childDisplayName(child) + 'の選択を解除'} className="min-h-[44px] bg-tree-50 border border-tree-200 rounded-xl px-3 text-sm text-tree-800 flex items-center gap-2">{childDisplayName(child)}<X className="w-4 h-4" /></button>)}</div>
+                </div>}
             </div>
-        </div>
-    );
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 md:p-6">
+                {error && <p role="alert" className="mb-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex gap-2"><AlertCircle className="w-5 h-5 shrink-0" />{error}</p>}
+                <p className="text-sm text-slate-500 mb-3">当日一覧にいない児童 · {candidates.length}名</p>
+                {!candidates.length ? <div className="bg-white border border-dashed border-slate-300 rounded-xl p-8 text-center"><p className="font-semibold text-slate-700">{!masterChildren.length ? '児童名簿がまだありません' : '追加できる児童が見つかりません'}</p><p className="text-sm text-slate-500 mt-2">{!masterChildren.length ? '既存データと予約児童の自動取込みはまだ接続されていません。' : '検索条件を変えるか、すでに当日一覧にいないか確認してください。'}</p></div>
+                    : <div className="grid md:grid-cols-2 gap-2">{candidates.map(child => {
+                        const checked = selectedIds.includes(child.id);
+                        const reading = child.nameFurigana || [child.lastNameFurigana, child.firstNameFurigana].filter(Boolean).join(' ') || child.yomi;
+                        return <button key={child.id} role="checkbox" aria-checked={checked} onClick={() => toggle(child.id)} disabled={saving} className={'min-h-[72px] rounded-xl border px-4 py-3 flex gap-3 items-center text-left ' + (checked ? 'bg-tree-50 border-tree-600' : 'bg-white border-slate-200 hover:border-tree-400')}>
+                            <span className={'w-6 h-6 shrink-0 rounded-md border flex items-center justify-center ' + (checked ? 'bg-tree-700 border-tree-700 text-white' : 'bg-white border-slate-300')}>{checked && <Check className="w-4 h-4" />}</span>
+                            <span className="min-w-0"><span className="block font-bold text-base text-slate-800">{childDisplayName(child)}</span>{reading && <span className="block text-sm text-slate-500 mt-0.5">{reading}</span>}</span>
+                        </button>;
+                    })}</div>}
+            </div>
+            <footer className="shrink-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-white border-t border-slate-200">
+                <p className="text-sm text-slate-600 mb-3">{saving ? '当日一覧へ保存しています…' : selected.length + '名を当日一覧へ追加します。児童名簿は変更しません。'}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button onClick={() => submit(false)} disabled={saving || !selected.length} className="min-h-[48px] bg-tree-700 rounded-xl text-white font-bold disabled:opacity-40 flex items-center justify-center gap-2"><UserPlus className="w-5 h-5" />通常児童として追加</button>
+                    <button onClick={() => submit(true)} disabled={saving || !selected.length} className="min-h-[48px] bg-white border border-amber-300 rounded-xl text-amber-800 font-semibold disabled:opacity-40 flex items-center justify-center gap-2"><Clock className="w-5 h-5" />キャンセル待ちとして追加</button>
+                </div>
+            </footer>
+        </section>
+    </div>;
 }

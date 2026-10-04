@@ -8,7 +8,7 @@ const getGuideSteps = (isMobile) => {
             {
                 id: 'guide-help',
                 title: 'ヘルプガイドへようこそ！',
-                text: 'このガイドでは、事業所日誌アプリの基本的な使い方をご案内します。',
+                text: 'このガイドでは、予約V2内のツリー通信v2の基本的な使い方をご案内します。',
                 position: 'bottom'
             },
             {
@@ -26,7 +26,7 @@ const getGuideSteps = (isMobile) => {
             {
                 id: 'guide-child-name',
                 title: '個別サポート内容と連絡帳',
-                text: '児童名をクリックすると右側に個別パネルが開きます。チャット形式での個別サポート記録やスタッフ間メモの作成、ツリー通信（保護者連絡）の入力を行います。',
+                text: '児童を選ぶと、PCでは個別パネル、スマホでは入力画面が開きます。チャット形式での個別サポート記録やスタッフ間メモの作成、ツリー通信（保護者連絡）の入力を行います。',
                 position: 'right'
             },
             {
@@ -64,15 +64,15 @@ const getGuideSteps = (isMobile) => {
                 mobileId: 'guide-attendance-mobile-btn',
                 inMobileMenu: true,
                 title: '勤怠管理',
-                text: '「勤怠管理」をクリックすると、職員の出勤簿の確認や、日ごとの出退勤時間、休憩時間、交通費などの編集が行えます。',
+                text: '「勤怠管理」をクリックすると、職員の出勤・公休・有給と、日ごとの出退勤時刻を入力できます。職種は表示のみです。',
                 position: 'bottom'
             },
             {
                 id: 'guide-activities-section',
                 mobileId: 'guide-activities-mobile-btn',
                 inMobileMenu: true,
-                title: '業務・活動内容の登録',
-                text: '本日実施した業務活動プログラムの項目にチェックを入れて登録します。',
+                title: '日報・プログラムの記録',
+                text: '日報に、特記事項・共有事項と当日のプログラム名・担当・内容を記録します。',
                 position: 'right'
             },
             {
@@ -96,7 +96,7 @@ const getGuideSteps = (isMobile) => {
                 inMemoPanel: true,
                 memoTab: 'chat',
                 title: 'チャットメモの記録',
-                text: 'スタッフ間で共有するサポート記録やスタッフ間メモを入力します。テキストを入力し、紙飛行機ボタンで送信（記録）します。',
+                text: '児童の様子をメモに残します。現在は利用者別のブラウザー内保存です。スタッフ全員への共有や保護者への送信は行いません。',
                 position: 'left'
             }
         ];
@@ -105,7 +105,7 @@ const getGuideSteps = (isMobile) => {
             {
                 id: 'guide-help',
                 title: 'ヘルプガイドへようこそ！',
-                text: 'このガイドでは、事業所日誌アプリの基本的な使い方をご案内します。この「？」アイコンからいつでも再開できます。',
+                text: 'このガイドでは、予約V2内のツリー通信v2の基本的な使い方をご案内します。この「？」アイコンからいつでも再開できます。',
                 position: 'bottom'
             },
             {
@@ -129,7 +129,7 @@ const getGuideSteps = (isMobile) => {
             {
                 id: 'guide-attendance',
                 title: '勤怠管理',
-                text: '「勤怠管理」をクリックすると、職員の出勤簿の確認や、日ごとの出退勤時間、休憩時間、交通費などの編集が行えます。',
+                text: '「勤怠管理」をクリックすると、職員の出勤・公休・有給と、日ごとの出退勤時刻を入力できます。職種は表示のみです。',
                 position: 'bottom'
             },
             {
@@ -152,8 +152,8 @@ const getGuideSteps = (isMobile) => {
             },
             {
                 id: 'guide-activities-section',
-                title: '業務・活動内容の登録',
-                text: 'カードをクリック（タップ）すると選択モーダルが開きます。本日実施した業務活動プログラムの項目にチェックを入れて登録します。',
+                title: '日報・プログラムの記録',
+                text: 'カードをクリック（タップ）すると選択モーダルが開きます。日報に、特記事項・共有事項と当日のプログラム名・担当・内容を記録します。',
                 position: 'right'
             },
             {
@@ -165,7 +165,7 @@ const getGuideSteps = (isMobile) => {
             {
                 id: 'guide-child-name',
                 title: '個別サポート内容と連絡帳',
-                text: '児童名をクリックすると右側に個別パネルが開きます。チャット形式での個別サポート記録やスタッフ間メモの作成、ツリー通信（保護者連絡）の入力を行います。',
+                text: '児童を選ぶと、PCでは個別パネル、スマホでは入力画面が開きます。チャット形式での個別サポート記録やスタッフ間メモの作成、ツリー通信（保護者連絡）の入力を行います。',
                 position: 'right'
             },
             {
@@ -181,7 +181,7 @@ const getGuideSteps = (isMobile) => {
                 inMemoPanel: true,
                 memoTab: 'chat',
                 title: 'チャットメモの記録',
-                text: 'スタッフ間で共有するサポート記録やスタッフ間メモを入力します。テキストを入力し、紙飛行機ボタンで送信（記録）します。',
+                text: '児童の様子をメモに残します。現在は利用者別のブラウザー内保存です。スタッフ全員への共有や保護者への送信は行いません。',
                 position: 'left'
             }
         ];
@@ -210,7 +210,7 @@ export default function HelpGuide({
     // Step scanning logic to filter only visible targets
     const scanSteps = () => {
         const isMobile = window.innerWidth < 1024;
-        const steps = getGuideSteps(isMobile);
+        const steps = getGuideSteps(isMobile).filter(step => step.id !== 'guide-activities-section');
         const visible = steps.filter(step => {
             if (step.inMemoPanel) {
                 // Keep individual child panel steps active if we have at least one child registered

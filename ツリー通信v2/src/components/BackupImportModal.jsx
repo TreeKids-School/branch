@@ -1,7 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { X, FileSpreadsheet, Upload, CheckCircle2, AlertTriangle, Check, Loader2, CalendarDays, ShieldCheck } from 'lucide-react';
 import { parseCSV, buildHeaderIndex, findChildByName } from '../utils/csv';
 import { normalizeDate, mergeBackupRowsIntoReport } from '../utils/backup';
+import './WorkflowModals.css';
+import { columnText } from '../utils/communicationFlow';
 
 /**
  * BackupImportModal
@@ -21,25 +23,31 @@ export default function BackupImportModal({
     selectedDate,
     selectedOffice,
     cs,
-    onRefresh,
+    onRefresh, tagColumnMap, onDirtyChange,
 }) {
     const [dragActive, setDragActive] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
+    const [registerUnknown, setRegisterUnknown] = useState(false);
+    const [restoreDaily, setRestoreDaily] = useState(false);
     const [rows, setRows] = useState([]);
     const [fileName, setFileName] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [progress, setProgress] = useState('');
     const fileInputRef = useRef(null);
 
+    useEffect(() => { onDirtyChange?.(isSaving); }, [isSaving, onDirtyChange]);
+    useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
     if (!show) return null;
 
-    const reset = () => { setRows([]); setFileName(''); setProgress(''); };
+    const reset = () => { setRows([]); setFileName(''); setProgress(''); setErrorMessage(''); };
 
     const handleClose = () => { if (isSaving) return; reset(); onClose(); };
 
     // ── CSV 読み込み ──────────────────────────────────────
     const handleFile = (file) => {
         if (!file) return;
-        setFileName(file.name);
+        if (isSaving) return;
+        reset(); setFileName(file.name);
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
@@ -57,37 +65,43 @@ export default function BackupImportModal({
                     const csvName = String(col(r, '児童名')).trim();
                     if (!csvName) continue;
 
-                    const date = normalizeDate(col(r, '日付')) || selectedDate;
+                    const date = col(r, '日付') ? normalizeDate(col(r, '日付')) : selectedDate;
+                    let invalid = !date ? '日付が不正です' : '';
                     const matchedChild = findChildByName(csvName, currentChildren, masterChildren);
 
                      // 復元用データ（あれば完全復元、無ければ主要4項目のみ）
                      let restore = null;
                      const raw = col(r, '復元用データ');
                      if (raw && String(raw).trim().startsWith('{')) {
-                         try { restore = JSON.parse(raw); } catch { restore = null; }
+                         try { restore = JSON.parse(raw); if (!restore || Array.isArray(restore)) invalid = '復元用データが不正です'; } catch { invalid = '復元用データを読み込めません'; }
                      }
 
+                     if (raw && !restore) invalid = '復元用データが不正です';
+                     if (restore && ((restore.m && !Array.isArray(restore.m)) || (restore.r && (typeof restore.r !== 'object' || Array.isArray(restore.r))) || (restore.t && (typeof restore.t !== 'object' || Array.isArray(restore.t))))) invalid = '復元用データの形式が不正です';
                      // 日次データ（あれば復元）
                      let dailyData = null;
                      const rawDaily = col(r, '日次データ');
                      if (rawDaily && String(rawDaily).trim().startsWith('{')) {
-                         try { dailyData = JSON.parse(rawDaily); } catch { dailyData = null; }
+                         try { dailyData = JSON.parse(rawDaily); } catch { invalid = '日次データを読み込めません'; }
                      }
 
+                     if (rawDaily && (!dailyData || typeof dailyData !== 'object' || Array.isArray(dailyData))) invalid = '日次データが不正です';
                      parsed.push({
-                         id: `${i}-${date}-${csvName}`,
+                         id: `${i}-${date}-${csvName}`, invalid,
                          csvName,
                          date,
                          matchedChild,
                          restore,
                          dailyData,
+                         presentFields: { study: H['学習'] !== undefined, program: H['プログラム'] !== undefined, treeComm: H['ツリー通信'] !== undefined, futurePlan: H['今後の予定'] !== undefined, notes: H['備考'] !== undefined, transportTime: H['送迎時間'] !== undefined, endTime: H['終了時間'] !== undefined, pickupLocation: H['迎え場所'] !== undefined },
+                         futurePlan: col(r, '今後の予定'), notes: col(r, '備考'),
                          study: col(r, '学習'),
                          program: col(r, 'プログラム'),
                          treeComm: col(r, 'ツリー通信'),
                          transportTime: col(r, '送迎時間'),
                          endTime: col(r, '終了時間'),
                          pickupLocation: col(r, '迎え場所'),
-                         enabled: true,
+                         enabled: !invalid,
                      });
                  }
 
@@ -103,6 +117,7 @@ export default function BackupImportModal({
                 alert('CSVの読み込みに失敗しました: ' + err.message);
             }
         };
+        reader.onerror = () => setErrorMessage('ファイルを読み込めませんでした。');
         reader.readAsText(file, 'UTF-8');
     };
 
@@ -120,137 +135,63 @@ export default function BackupImportModal({
     const toggleRow = (id) => setRows(prev => prev.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
     const toggleAll = () => {
         const anyDisabled = rows.some(r => !r.enabled);
-        setRows(prev => prev.map(r => ({ ...r, enabled: anyDisabled })));
+        setRows(prev => prev.map(r => ({ ...r, enabled: !r.invalid && anyDisabled })));
     };
     const toggleDate = (date) => {
         const targets = rows.filter(r => r.date === date);
         const anyDisabled = targets.some(r => !r.enabled);
-        setRows(prev => prev.map(r => (r.date === date) ? { ...r, enabled: anyDisabled } : r));
+        setRows(prev => prev.map(r => (r.date === date) ? { ...r, enabled: !r.invalid && anyDisabled } : r));
     };
 
     // ── 保存 ─────────────────────────────────────────────
     const handleSave = async () => {
-        let active = rows.filter(r => r.enabled);
-        if (active.length === 0) { alert('取り込む行が選択されていません。'); return; }
-
+        if (isSaving) return;
+        const active = rows.filter(row => row.enabled && !row.invalid).map(row => ({ ...row }));
+        const eligible = registerUnknown ? active : active.filter(row => row.matchedChild);
+        if (!eligible.length) { setErrorMessage('復元対象がありません。児童の照合と選択を確認してください。'); return; }
         const officeId = selectedOffice?.id;
-        if (!officeId) { alert('事業所が選択されていません。'); return; }
-
-        setIsSaving(true);
-
-        // 未登録児童の自動登録プロセス
-        const unregisteredNames = [...new Set(active.filter(r => !r.matchedChild).map(r => r.csvName))];
-        if (unregisteredNames.length > 0) {
-            const autoRegister = window.confirm(
-                `移行先の児童マスターに登録されていない児童が ${unregisteredNames.length} 名検出されました：\n` +
-                `${unregisteredNames.slice(0, 10).join(', ')}${unregisteredNames.length > 10 ? ' ほか' : ''}\n\n` +
-                `これらの児童を児童マスターに自動で新規登録してインポートを進めますか？\n` +
-                `（「キャンセル」を選択した場合、未登録の児童のデータはスキップされます）`
-            );
-
-            if (autoRegister) {
-                setProgress('未登録児童を登録中...');
-                try {
-                    for (const name of unregisteredNames) {
-                        const newChildId = 'child_' + Math.random().toString(36).substring(2, 15);
-                        const newChild = {
-                            id: newChildId,
-                            name: name,
-                            lastName: name.substring(0, 1) || '',
-                            firstName: name.substring(1) || '',
-                            createdAt: new Date().toISOString()
-                        };
-                        await cs({ action: 'saveMasterChildren', data: newChild });
-
-                        // メモリ上の matchedChild を更新
-                        active.forEach(r => {
-                            if (r.csvName === name) {
-                                r.matchedChild = newChild;
-                            }
-                        });
-                    }
-                } catch (err) {
-                    console.error('Auto register child error:', err);
-                    alert('児童の自動登録中にエラーが発生しました: ' + err.message);
-                    setIsSaving(false);
-                    setProgress('');
-                    return;
-                }
-            }
-        }
-
-        // matchedChild がある有効な行に絞り込む
-        const finalActive = active.filter(r => r.matchedChild);
-        if (finalActive.length === 0) {
-            alert('取り込む行がありません。');
-            setIsSaving(false);
-            setProgress('');
-            return;
-        }
-
-        const dates = [...new Set(finalActive.map(r => r.date))].sort();
-        const ok = window.confirm(
-            `${dates.length}日分・${finalActive.length}件を取り込みます。\n\n` +
-            `対象日: ${dates.slice(0, 5).join(' / ')}${dates.length > 5 ? ` ほか${dates.length - 5}日` : ''}\n\n` +
-            `※ これらの日の「選択した児童」のデータは上書きされます。\n` +
-            `※ CSVに含まれない児童のデータはそのまま残ります。\n` +
-            `※ 取り消しはできません。`
-        );
-        if (!ok) {
-            setIsSaving(false);
-            setProgress('');
-            return;
-        }
-
-        let saved = 0;
+        if (!officeId) { setErrorMessage('事業所を選択してください。'); return; }
+        const dates = [...new Set(eligible.map(row => row.date))].sort();
+        const unknownNames = [...new Set(eligible.filter(row => !row.matchedChild).map(row => row.csvName))];
+        // All destructive choices are confirmed before the first write, including child registration.
+        if (!window.confirm(`${selectedOffice.name} / ${dates.length}日分・${eligible.length}件を復元します。\n対象日: ${dates.join('、')}\n選択児童の記録を上書きし、選択していない児童は保持します。\n${unknownNames.length ? `未登録${unknownNames.length}名を新規登録します。\n` : ''}${restoreDaily ? '日誌の全体記録も復元します。' : '日誌の全体記録は変更しません。'}`)) return;
+        setIsSaving(true); setErrorMessage('');
+        let saved = 0; const savedDates = [];
         try {
-            for (let di = 0; di < dates.length; di++) {
-                const date = dates[di];
-                setProgress(`${date} を保存中... (${di + 1}/${dates.length})`);
-
-                const current = await cs({ action: 'getReport', date, officeId });
-
-                // CSVに含まれない児童のデータには一切触れずにマージする
-                const { data, applied } = mergeBackupRowsIntoReport(
-                    current,
-                    finalActive.filter(r => r.date === date)
-                );
-                saved += applied;
-
-                // 日次データ (summaryC / globalLog) の復元
-                const rowWithDaily = finalActive.find(r => r.date === date && r.dailyData);
-                if (rowWithDaily && rowWithDaily.dailyData) {
-                    const dailyPatch = rowWithDaily.dailyData;
-                    if (dailyPatch.summaryC) {
-                        data.summaryC = dailyPatch.summaryC;
-                    }
-                    if (dailyPatch.globalLog) {
-                        data.globalLog = {
-                            ...(data.globalLog || {}),
-                            ...dailyPatch.globalLog
-                        };
-                    }
-                }
-
-                await cs({ action: 'saveReport', date, officeId, data });
+            for (const name of unknownNames) {
+                setProgress(`${name} を児童マスターへ登録中…`);
+                const newChild = { id: `child_${crypto.randomUUID()}`, name, lastName: name, firstName: '', createdAt: new Date().toISOString() };
+                await cs({ action: 'saveMasterChildren', data: newChild });
+                eligible.forEach(row => { if (row.csvName === name) row.matchedChild = newChild; });
+                // Retain successful registrations if a later day fails; retries must not duplicate children.
+                setRows(prev => prev.map(row => row.csvName === name ? { ...row, matchedChild: newChild } : row));
             }
-
-            const skipped = rows.length - finalActive.length;
-            alert(
-                `取り込みが完了しました。\n\n` +
-                `・${dates.length}日分 / ${saved}件を取り込みました\n` +
-                `・${skipped}件はスキップしました（未選択または未登録の児童）`
-            );
-            reset();
-            if (onRefresh) onRefresh();
-            onClose();
+            for (const date of dates) {
+                setProgress(`${date} を保存中… (${savedDates.length + 1}/${dates.length})`);
+                const dayRows = eligible.filter(row => row.date === date);
+                await cs({ action: 'commitDailyMutation', date, officeId,
+                    syncChildIds: dayRows.map(row => row.matchedChild.id),
+                    deriveRemarks: (messages, id, report) => [columnText(messages, 'remarks', tagColumnMap), report.dailyTable?.[id]?.notes || ''].filter(Boolean).join(' / '),
+                    mutate: current => {
+                        const { data } = mergeBackupRowsIntoReport(current, dayRows, Date.now(), tagColumnMap);
+                        const daily = restoreDaily && dayRows.find(row => row.dailyData)?.dailyData;
+                        if (daily) {
+                            if (Object.prototype.hasOwnProperty.call(daily, 'summaryC')) data.summaryC = daily.summaryC;
+                            if (daily.globalLog) data.globalLog = { ...(data.globalLog || {}), ...daily.globalLog };
+                        }
+                        return data;
+                    }
+                });
+                saved += dayRows.length; savedDates.push(date);
+                setRows(prev => prev.map(row => dayRows.some(done => done.id === row.id) ? { ...row, enabled: false } : row));
+            }
+            await onRefresh?.();
+            alert(`${savedDates.length}日分 / ${saved}件の復元を保存しました。${rows.length - eligible.length}件は変更していません。`);
+            reset(); onClose();
         } catch (error) {
-            console.error('Backup import error:', error);
-            alert('取り込み中にエラーが発生しました: ' + error.message);
-        } finally {
-            setIsSaving(false);
-            setProgress('');
-        }
+            setErrorMessage(`${savedDates.length}日分（${savedDates.join('、') || '保存済みの日付なし'}）の処理後に停止しました。保存済みの行は選択を外しています。${error.message || ''}`);
+            await onRefresh?.();
+        } finally { setIsSaving(false); setProgress(''); }
     };
 
     // ── 集計 ─────────────────────────────────────────────
@@ -261,7 +202,7 @@ export default function BackupImportModal({
     const restoreCount = rows.filter(r => r.restore).length;
 
     return (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-300">
+        <div className="io-modal fixed inset-0 z-[110] flex items-center justify-center p-4 animate-in fade-in duration-300">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={handleClose} />
 
             <div className="relative w-full max-w-5xl bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col border border-white animate-in zoom-in-95 duration-300 max-h-[88vh]">
@@ -285,6 +226,14 @@ export default function BackupImportModal({
 
                 {/* Content */}
                 <div className="flex-grow p-6 overflow-y-auto min-h-0 flex flex-col gap-4">
+                    <div className="io-status">復元先: {selectedOffice?.name} / ファイルの日付ごとに保存します。</div>
+                    {errorMessage && <div className="workflow-error" role="alert">{errorMessage}</div>}
+                    {rows.length > 0 && <div className="io-selection-summary">
+                        <p>選択 {selectedCount}件 · {dateCount}日分。選択児童の記録を上書きします。</p>
+                        {unmatchedCount > 0 && <label className="flex items-center gap-3 py-3"><input type="checkbox" checked={registerUnknown} disabled={isSaving} onChange={e => setRegisterUnknown(e.target.checked)}/>未登録児童を新規登録して復元する（外すとスキップ）</label>}
+                        {rows.some(row => row.dailyData) && <label className="flex items-center gap-3 py-3"><input type="checkbox" checked={restoreDaily} disabled={isSaving} onChange={e => setRestoreDaily(e.target.checked)}/>選択日の全体記録・特記・共有事項・プログラムも復元する</label>}
+                        <p>CSVにない児童は保持します。日付ごとに保存するため、途中で停止すると一部の日付だけ復元される場合があります。</p>
+                    </div>}
                     {rows.length === 0 ? (
                         <div
                             onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop}
@@ -318,7 +267,7 @@ export default function BackupImportModal({
                                     </span>
                                     {restoreCount > 0 && (
                                         <span className="flex items-center gap-1 font-bold text-indigo-600">
-                                            <ShieldCheck className="w-3.5 h-3.5" /> 完全復元可: {restoreCount}件
+                                            <ShieldCheck className="w-3.5 h-3.5" /> 復元データあり: {restoreCount}件
                                         </span>
                                     )}
                                     {unmatchedCount > 0 && (
@@ -358,16 +307,16 @@ export default function BackupImportModal({
                                                 const isNewDate = idx === 0 || rows[idx - 1].date !== r.date;
                                                 return (
                                                     <tr key={r.id} className={`hover:bg-slate-50/50 ${!r.matchedChild ? 'bg-amber-50/30' : 'bg-white'}`}>
-                                                        <td className="p-2 text-center">
+                                                        <td data-label="復元対象" className="p-2 text-center">
                                                             <input
                                                                 type="checkbox"
-                                                                checked={r.enabled}
-                                                                disabled={isSaving}
+                                                                aria-label={`${r.csvName} ${r.date}を復元対象にする`} checked={r.enabled}
+                                                                disabled={isSaving || !!r.invalid}
                                                                 onChange={() => toggleRow(r.id)}
                                                                 className="w-4 h-4 rounded accent-tree-600 cursor-pointer disabled:opacity-30"
                                                             />
                                                         </td>
-                                                        <td className="p-2 text-slate-500 font-bold">
+                                                        <td data-label="日付" className="p-2 text-slate-500 font-bold">
                                                             {isNewDate ? (
                                                                 <button
                                                                     onClick={() => toggleDate(r.date)}
@@ -378,34 +327,34 @@ export default function BackupImportModal({
                                                                     {r.date}
                                                                 </button>
                                                             ) : (
-                                                                <span className="text-slate-300 text-[10px] pl-2">〃</span>
+                                                                <span className="text-slate-500 text-[10px] pl-2">{r.date}</span>
                                                             )}
                                                         </td>
-                                                        <td className="p-2">
+                                                        <td data-label="児童" className="p-2">
                                                             <div className="flex flex-col">
                                                                 <span className="font-bold text-[11px] text-slate-500">{r.csvName}</span>
                                                                 {r.matchedChild ? (
                                                                     <span className="text-emerald-700 font-black text-xs">✓ {r.matchedChild.name}</span>
                                                                 ) : (
-                                                                    <span className="text-amber-500 font-black text-[9px] flex items-center gap-0.5" title="インポート実行時に児童マスターへ自動登録されます">
-                                                                        <AlertTriangle className="w-3 h-3 flex-shrink-0" /> 未登録（自動作成）
+                                                                    <span className="text-amber-500 font-black text-[9px] flex items-center gap-0.5" title="新規登録するか、スキップするかを上の欄で指定します">
+                                                                        <AlertTriangle className="w-3 h-3 flex-shrink-0" /> 未登録（選択が必要）
                                                                     </span>
                                                                 )}
                                                             </div>
                                                         </td>
-                                                        <td className="p-2">
-                                                            {r.restore ? (
-                                                                <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[9px] font-black">完全復元</span>
+                                                        <td data-label="復元方法" className="p-2">
+                                                            {r.invalid ? <span className="text-red-600">{r.invalid}</span> : r.restore ? (
+                                                                <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[9px] font-black">復元データあり</span>
                                                             ) : (
                                                                 <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[9px] font-black" title="復元用データ列が無いCSVです">主要項目のみ</span>
                                                             )}
                                                         </td>
-                                                        <td className="p-2 text-slate-600 font-medium">
+                                                        <td data-label="ツリー通信" className="p-2 text-slate-600 font-medium">
                                                             <div className="max-h-[42px] overflow-hidden text-[11px] leading-snug whitespace-pre-wrap break-all">
                                                                 {r.treeComm || <span className="text-slate-300 italic">（なし）</span>}
                                                             </div>
                                                         </td>
-                                                        <td className="p-2 text-slate-500 font-bold text-[10px] whitespace-pre-wrap break-all">
+                                                        <td data-label="学習・プログラム" className="p-2 text-slate-500 font-bold text-[10px] whitespace-pre-wrap break-all">
                                                             {[r.study, r.program].filter(Boolean).join(' / ') || '---'}
                                                         </td>
                                                     </tr>

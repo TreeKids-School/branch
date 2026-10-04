@@ -1,615 +1,82 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Settings, Tag, Plus, Trash2, CheckCircle2, Sparkles, MapPin, MousePointerClick, Calendar, History, ExternalLink, MessageSquare, Check } from 'lucide-react';
+import { X, Save, Plus, Trash2, Check } from 'lucide-react';
 import { UPDATE_HISTORY, APP_VERSION } from '../app_constants';
+import './WorkflowModals.css';
 
-export default function SettingsModal({ 
-    onClose, 
-    tags, 
-    tagInsertTexts = {}, 
-    tagColumnMap = {},
-    onSaveTags, 
-    okWords = [], 
-    onSaveOkWords, 
-    onOpenUpdateModal, 
-    onStartTour, 
-    initialTab = 'greetings',
-    greetingTemplates = {},
-    onSaveGreetingTemplate,
-    currentStaffName = '',
-    staffList = []
-}) {
-    const [localTags, setLocalTags] = useState(tags);
-    const [localTagInsertTexts, setLocalTagInsertTexts] = useState(tagInsertTexts);
-    const [localTagColumnMap, setLocalTagColumnMap] = useState(tagColumnMap);
-    const [newTag, setNewTag] = useState('');
-    const [newTagInsertText, setNewTagInsertText] = useState('');
-
-    const [localOkWords, setLocalOkWords] = useState(okWords);
-    const [newOkWord, setNewOkWord] = useState('');
-
-    const [activeTab, setActiveTab] = useState(initialTab); // 'greetings', 'tags', 'okWords', or 'updates'
-
-    const [selectedStaffForGreeting, setSelectedStaffForGreeting] = useState(() => {
-        if (currentStaffName && staffList.some(s => s.name === currentStaffName)) return currentStaffName;
-        return staffList[0]?.name || currentStaffName || 'スタッフ';
-    });
-    const [localGreetings, setLocalGreetings] = useState(greetingTemplates);
-    const [greetingDraft, setGreetingDraft] = useState('');
-    const [greetingSavedSuccess, setGreetingSavedSuccess] = useState(false);
-
-    useEffect(() => {
-        setLocalGreetings(greetingTemplates);
-    }, [greetingTemplates]);
-
-    useEffect(() => {
-        setGreetingDraft(localGreetings[selectedStaffForGreeting] || '');
-        setGreetingSavedSuccess(false);
-    }, [selectedStaffForGreeting, localGreetings]);
-
-    const handleSaveSingleGreeting = () => {
-        if (onSaveGreetingTemplate && selectedStaffForGreeting) {
-            onSaveGreetingTemplate(selectedStaffForGreeting, greetingDraft);
-            setLocalGreetings(prev => ({ ...prev, [selectedStaffForGreeting]: greetingDraft }));
-            setGreetingSavedSuccess(true);
-            setTimeout(() => setGreetingSavedSuccess(false), 2500);
-        }
+export default function SettingsModal({ onClose, tags = [], tagInsertTexts = {}, tagColumnMap = {}, onSaveTags, onSaveSettings, okWords = [], onSaveOkWords, onOpenUpdateModal, onStartTour, initialTab = 'greetings', greetingTemplates = {}, onSaveGreetingTemplate, currentStaffName = '', staffList = [], onDirtyChange }) {
+    const [activeTab, setActiveTab] = useState(initialTab);
+    const [rows, setRows] = useState(() => tags.map((name, index) => ({ id: `tag-${index}`, name, text: tagInsertTexts[name] || '', column: tagColumnMap[name] || '' })));
+    const [words, setWords] = useState(okWords);
+    const [newWord, setNewWord] = useState('');
+    const [staff, setStaff] = useState(currentStaffName || staffList[0]?.name || 'スタッフ');
+    const [greetings, setGreetings] = useState({ ...greetingTemplates });
+    const [savedGreetings, setSavedGreetings] = useState({ ...greetingTemplates });
+    const [dirty, setDirty] = useState(false);
+    const [saving, setSaving] = useState('');
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
+    const greetingDirty = Object.keys(greetings).some(name => (greetings[name] || '') !== (savedGreetings[name] || ''));
+    const mayLeave = () => !(dirty || greetingDirty || newWord.trim()) || window.confirm('保存していない変更があります。変更を破棄して閉じますか？');
+    useEffect(() => { onDirtyChange?.(dirty || greetingDirty || !!newWord.trim() || !!saving); }, [dirty, greetingDirty, newWord, saving, onDirtyChange]);
+    useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+    const close = () => { if (!saving && mayLeave()) onClose(); };
+    const changeRow = (id, key, value) => { setRows(list => list.map(row => row.id === id ? { ...row, [key]: value } : row)); setDirty(true); setSuccess(''); };
+    const saveGreeting = async () => {
+        if (saving || !onSaveGreetingTemplate) return;
+        setSaving('greeting'); setError(''); setSuccess('');
+        const text = greetings[staff] || '';
+        try { await onSaveGreetingTemplate(staff, text); setSavedGreetings(prev => ({ ...prev, [staff]: text })); setSuccess(`${staff}の挨拶を保存しました。`); }
+        catch (err) { setError(`挨拶を保存できませんでした。${err.message || ''}`); }
+        finally { setSaving(''); }
     };
-
-    useEffect(() => {
-        setLocalTags(tags);
-    }, [tags]);
-
-    useEffect(() => {
-        setLocalTagInsertTexts(tagInsertTexts);
-    }, [tagInsertTexts]);
-
-    useEffect(() => {
-        setLocalTagColumnMap(tagColumnMap);
-    }, [tagColumnMap]);
-
-    useEffect(() => {
-        setLocalOkWords(okWords);
-    }, [okWords]);
-
-    const handleSave = () => {
-        const cleanedTags = localTags.map(t => t.trim()).filter(Boolean);
-        const uniqueTags = Array.from(new Set(cleanedTags));
-        onSaveTags(uniqueTags, localTagInsertTexts, localTagColumnMap);
-        if (onSaveOkWords) {
-            onSaveOkWords(localOkWords);
-        }
-        onClose();
+    const saveSettings = async () => {
+        if (saving) return;
+        setError(''); setSuccess('');
+        if (newWord.trim()) { setError('入力中のOKワードを「追加」してから保存してください。'); return; }
+        const names = rows.map(row => row.name.trim());
+        if (names.some(name => !name)) { setError('空のタグ名があります。名前を入力するか、行を削除してください。'); return; }
+        if (new Set(names).size !== names.length) { setError('同じ名前のタグがあります。名前を分けてください。'); return; }
+        setSaving('settings');
+        try {
+            const texts = { ...tagInsertTexts }, columns = { ...tagColumnMap };
+            rows.forEach((row, index) => { texts[names[index]] = row.text; columns[names[index]] = row.column; });
+            if (onSaveSettings) await onSaveSettings(names, texts, columns, words);
+            else { await onSaveTags(names, texts, columns); if (onSaveOkWords) await onSaveOkWords(words); }
+            setDirty(false); setSuccess('タグ・OKワードを保存しました。');
+            if (!greetingDirty) onClose();
+        } catch (err) { setError(`設定を保存できませんでした。入力は残しています。${err.message || ''}`); }
+        finally { setSaving(''); }
     };
-
-    // Tags actions
-    const addTag = () => {
-        const trimmed = newTag.trim();
-        if (!trimmed || localTags.includes(trimmed)) return;
-        setLocalTags([...localTags, trimmed]);
-        if (newTagInsertText.trim()) {
-            setLocalTagInsertTexts(prev => ({ ...prev, [trimmed]: newTagInsertText.trim() }));
-        }
-        setNewTag('');
-        setNewTagInsertText('');
+    const addWord = () => {
+        const word = newWord.trim(); if (!word) return;
+        if (words.includes(word)) { setError('このOKワードはすでに登録されています。'); return; }
+        setWords(list => [...list, word]); setNewWord(''); setDirty(true); setError('');
     };
-
-    const removeTag = (tag) => {
-        setLocalTags(localTags.filter(t => t !== tag));
-        setLocalTagInsertTexts(prev => {
-            const next = { ...prev };
-            delete next[tag];
-            return next;
-        });
-        setLocalTagColumnMap(prev => {
-            const next = { ...prev };
-            delete next[tag];
-            return next;
-        });
-    };
-
-    const handleUpdateTagName = (index, newName) => {
-        const oldTag = localTags[index];
-        setLocalTags(prev => {
-            const next = [...prev];
-            next[index] = newName;
-            return next;
-        });
-        if (oldTag && oldTag !== newName) {
-            setLocalTagInsertTexts(prev => {
-                const next = { ...prev };
-                if (oldTag in next) {
-                    next[newName] = next[oldTag];
-                    delete next[oldTag];
-                }
-                return next;
-            });
-            setLocalTagColumnMap(prev => {
-                const next = { ...prev };
-                if (oldTag in next) {
-                    next[newName] = next[oldTag];
-                    delete next[oldTag];
-                }
-                return next;
-            });
-        }
-    };
-
-    const handleUpdateInsertText = (tag, text) => {
-        setLocalTagInsertTexts(prev => ({
-            ...prev,
-            [tag]: text
-        }));
-    };
-
-    // OK Words actions
-    const addOkWord = () => {
-        if (!newOkWord.trim() || localOkWords.includes(newOkWord.trim())) return;
-        setLocalOkWords([...localOkWords, newOkWord.trim()]);
-        setNewOkWord('');
-    };
-
-    const removeOkWord = (word) => {
-        setLocalOkWords(localOkWords.filter(w => w !== word));
-    };
-
-    return (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-300">
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-md" onClick={onClose} />
-            
-            <div className="relative w-full max-w-2xl max-h-[95vh] bg-white rounded-[2rem] md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col border border-white animate-in zoom-in-95 duration-500">
-                {/* Header - Apple Red Brand */}
-                <div className="p-8 md:p-10 bg-apple-600 flex items-center justify-between shadow-xl flex-shrink-0 z-10">
-                    <div className="flex items-center gap-5">
-                        <div className="p-3 bg-white/10 rounded-2xl backdrop-blur-md ring-2 ring-white/20">
-                            <Settings className="w-7 h-7 text-white" />
-                        </div>
-                        <div>
-                            <h3 className="font-black text-2xl text-white tracking-tight">システム設定</h3>
-                            <p className="text-[10px] font-black text-apple-100 uppercase tracking-[0.2em] mt-1.5 opacity-80 font-mono">Environment Config</p>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="p-4 hover:bg-white/10 rounded-2xl transition-all text-white/80 hover:text-white">
-                        <X className="w-6 h-6" />
-                    </button>
-                </div>
-
-                {/* Tab Navigation */}
-                <div className="flex border-b border-slate-100 bg-slate-50/50 px-8 flex-shrink-0 z-10 shadow-sm overflow-x-auto">
-                    <button
-                        onClick={() => setActiveTab('greetings')}
-                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all shrink-0 ${
-                            activeTab === 'greetings'
-                                ? 'border-apple-600 text-apple-600'
-                                : 'border-transparent text-slate-400 hover:text-slate-600'
-                        }`}
-                    >
-                        <MessageSquare className="w-4 h-4" />
-                        <span>挨拶設定</span>
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('tags')}
-                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all shrink-0 ${
-                            activeTab === 'tags'
-                                ? 'border-apple-600 text-apple-600'
-                                : 'border-transparent text-slate-400 hover:text-slate-600'
-                        }`}
-                    >
-                        <Tag className="w-4 h-4" />
-                        <span>タグ管理</span>
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('okWords')}
-                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all shrink-0 ${
-                            activeTab === 'okWords'
-                                ? 'border-apple-600 text-apple-600'
-                                : 'border-transparent text-slate-400 hover:text-slate-600'
-                        }`}
-                    >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>OKワード管理</span>
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('updates')}
-                        className={`flex items-center gap-2 py-4 px-6 text-xs font-black tracking-wider uppercase border-b-2 transition-all shrink-0 ${
-                            activeTab === 'updates'
-                                ? 'border-apple-600 text-apple-600'
-                                : 'border-transparent text-slate-400 hover:text-slate-600'
-                        }`}
-                    >
-                        <Sparkles className="w-4 h-4 text-amber-500" />
-                        <span>アップデート履歴</span>
-                    </button>
-                </div>
-
-                {/* Tab Contents */}
-                <div className="flex-1 overflow-y-auto p-8 md:p-12 space-y-12 custom-scrollbar bg-slate-50/30">
-                    {activeTab === 'greetings' ? (
-                        /* Staff Greeting Template Management Section */
-                        <div className="space-y-6 animate-in fade-in duration-300">
-                            <div className="flex items-center gap-3 px-2">
-                                <div className="w-2 h-2 rounded-full bg-apple-500 shadow-md" />
-                                <h4 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.25em]">スタッフ別 挨拶テンプレ設定</h4>
-                            </div>
-                            <div className="glass-card p-6 md:p-8 rounded-[2.5rem] border border-white shadow-premium space-y-6">
-                                <p className="text-xs text-slate-500 font-bold leading-relaxed px-1">
-                                    児童の担当スタッフになった際や、ツリー通信作成時に自動挿入される定型挨拶を設定・変更できます。
-                                </p>
-
-                                <div className="space-y-2">
-                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider block px-1">スタッフを選択</label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {staffList.map(s => {
-                                            const isSelected = selectedStaffForGreeting === s.name;
-                                            const hasTemplate = !!localGreetings[s.name]?.trim();
-                                            return (
-                                                <button
-                                                    key={s.id || s.name}
-                                                    type="button"
-                                                    onClick={() => setSelectedStaffForGreeting(s.name)}
-                                                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 border cursor-pointer active:scale-95 ${
-                                                        isSelected 
-                                                            ? 'bg-apple-600 text-white border-apple-600 shadow-md shadow-apple-100 scale-105' 
-                                                            : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
-                                                    }`}
-                                                >
-                                                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: s.iconColor || '#94a3b8' }} />
-                                                    <span>{s.name}</span>
-                                                    {hasTemplate && <span className={`text-[9px] px-1 rounded ${isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-400'}`}>済</span>}
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2 pt-2 border-t border-slate-100">
-                                    <div className="flex items-center justify-between px-1">
-                                        <label className="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
-                                            <MessageSquare className="w-3.5 h-3.5 text-apple-600" />
-                                            <span>【{selectedStaffForGreeting}】 の挨拶文面</span>
-                                        </label>
-                                        {greetingSavedSuccess && (
-                                            <span className="text-[11px] font-black text-emerald-600 flex items-center gap-1 animate-in fade-in">
-                                                <Check className="w-3.5 h-3.5" /> 保存しました
-                                            </span>
-                                        )}
-                                    </div>
-                                    <textarea
-                                        rows={4}
-                                        value={greetingDraft}
-                                        onChange={e => setGreetingDraft(e.target.value)}
-                                        placeholder="例: こんにちは！アクアです。&#10;本日のツリー通信です。"
-                                        className="w-full p-4 bg-white border border-slate-200 rounded-2xl focus:border-apple-500 focus:ring-4 focus:ring-apple-50 outline-none text-xs font-bold text-slate-700 leading-relaxed shadow-inner"
-                                    />
-                                </div>
-
-                                <div className="flex items-center justify-between pt-2">
-                                    <span className="text-[10px] text-slate-400 font-bold">
-                                        ※改行も含めてそのままツリー通信に自動挿入されます。
-                                    </span>
-                                    <button
-                                        type="button"
-                                        onClick={handleSaveSingleGreeting}
-                                        className="px-6 py-2.5 bg-apple-600 hover:bg-apple-700 text-white rounded-xl text-xs font-black shadow-lg shadow-apple-100 transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
-                                    >
-                                        <Save className="w-4 h-4" />
-                                        <span>この挨拶を保存</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    ) : activeTab === 'tags' ? (
-                        /* Tag Management Section */
-                        <div className="space-y-6 animate-in fade-in duration-300">
-                            <div className="flex items-center gap-3 px-2">
-                                <div className="w-2 h-2 rounded-full bg-tree-500 shadow-md" />
-                                <h4 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.25em]">チャットメモ用タグ管理</h4>
-                            </div>
-                            <div className="glass-card p-6 md:p-8 rounded-[2.5rem] border border-white shadow-premium space-y-6">
-                                <p className="text-xs text-slate-500 font-bold leading-relaxed px-1">
-                                    タグを選択した際に、チャットメモ入力欄の先頭へ自動挿入される文字を設定できます。<br className="hidden md:inline" />
-                                    <span className="text-indigo-600 font-black">「＋プログラム内容」</span>ボタンを押すと、その日のプログラム概要が自動挿入されます。空欄にすると文字は自動挿入されません。
-                                </p>
-
-                                {/* Tag List with Auto-Insert Text Config */}
-                                <div className="space-y-3 max-h-[42vh] overflow-y-auto custom-scrollbar pr-1">
-                                    {localTags.length > 0 && (
-                                        <div className="hidden md:flex items-center gap-2.5 px-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">
-                                            <span className="w-44">タグの名称（直接変更可）</span>
-                                            <span className="flex-1">自動挿入する文字</span>
-                                            <span className="w-28">表示列</span>
-                                        </div>
-                                    )}
-                                    {localTags.map((tag, idx) => {
-                                        const currentVal = localTagInsertTexts[tag] ?? '';
-                                        return (
-                                            <div 
-                                                key={idx} 
-                                                className="p-3.5 md:p-4 bg-slate-50/80 hover:bg-slate-50 rounded-2xl border border-slate-200/70 transition-all flex flex-col md:flex-row md:items-center gap-2.5 shadow-xs group"
-                                            >
-                                                <div className="flex items-center justify-between md:w-44 flex-shrink-0 gap-1.5">
-                                                    <div className="relative w-full">
-                                                        <input
-                                                            type="text"
-                                                            value={tag}
-                                                            onChange={e => handleUpdateTagName(idx, e.target.value)}
-                                                            placeholder="例: 【宿題】"
-                                                            className="w-full px-3 py-2 bg-white border border-tree-200 rounded-xl text-xs font-black text-tree-800 placeholder:text-slate-300 focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none transition-all shadow-2xs"
-                                                            title="タグ名を変更できます"
-                                                        />
-                                                    </div>
-                                                    <button 
-                                                        type="button"
-                                                        onClick={() => removeTag(tag)} 
-                                                        className="md:hidden text-slate-400 hover:text-rose-500 p-1 transition-colors flex-shrink-0"
-                                                        title="タグを削除"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-                                                
-                                                <div className="flex-1 flex items-center gap-2">
-                                                    <div className="relative flex-1">
-                                                        <input
-                                                            type="text"
-                                                            value={currentVal}
-                                                            onChange={e => handleUpdateInsertText(tag, e.target.value)}
-                                                            placeholder="自動挿入文字（空欄で自動挿入なし）"
-                                                            className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 placeholder:text-slate-300 focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none transition-all shadow-2xs"
-                                                        />
-                                                    </div>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleUpdateInsertText(tag, '{プログラム内容}')}
-                                                        title="本日のプログラム概要を挿入する設定にします"
-                                                        className="px-2.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-[10px] font-black border border-indigo-200 transition-all active:scale-95 whitespace-nowrap shadow-2xs"
-                                                    >
-                                                        ＋プログラム内容
-                                                    </button>
-                                                    <div className="flex items-center gap-1.5 flex-shrink-0">
-                                                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider whitespace-nowrap hidden md:block">表示列</span>
-                                                        <select
-                                                            value={localTagColumnMap[tag] || 'none'}
-                                                            onChange={e => setLocalTagColumnMap(prev => ({ ...prev, [tag]: e.target.value }))}
-                                                            className="px-2 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none transition-all shadow-2xs cursor-pointer"
-                                                            title="このタグのチャットメモをどのテーブル列に表示するか"
-                                                        >
-                                                            <option value="none">（表示なし）</option>
-                                                            <option value="learning">📚 学習列</option>
-                                                            <option value="program">🎯 プログラム列</option>
-                                                            <option value="remarks">📝 備考列</option>
-                                                        </select>
-                                                    </div>
-                                                    <button 
-                                                        type="button"
-                                                        onClick={() => removeTag(tag)} 
-                                                        className="hidden md:flex text-slate-300 hover:text-rose-500 p-2 rounded-xl hover:bg-rose-50 transition-all flex-shrink-0"
-                                                        title="タグを削除"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                    {localTags.length === 0 && (
-                                        <div className="text-center py-6 text-xs text-slate-400 font-bold">
-                                            登録されているタグはありません。下のフォームから追加してください。
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Add New Tag Form */}
-                                <div className="p-4 bg-tree-50/40 rounded-2xl border border-tree-100/80 space-y-2.5">
-                                    <div className="text-[10px] font-black text-tree-700 uppercase tracking-wider px-1">新しいタグを追加</div>
-                                    <div className="flex flex-col md:flex-row gap-2">
-                                        <div className="relative md:w-44 flex-shrink-0">
-                                            <Tag className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-                                            <input
-                                                type="text"
-                                                value={newTag}
-                                                onChange={e => setNewTag(e.target.value)}
-                                                onKeyDown={e => e.key === 'Enter' && addTag()}
-                                                placeholder="例: 【宿題】"
-                                                className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none text-xs font-bold text-slate-700 transition-all shadow-2xs"
-                                            />
-                                        </div>
-                                        <input
-                                            type="text"
-                                            value={newTagInsertText}
-                                            onChange={e => setNewTagInsertText(e.target.value)}
-                                            onKeyDown={e => e.key === 'Enter' && addTag()}
-                                            placeholder="自動挿入文字（任意）"
-                                            className="flex-1 px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl focus:border-tree-500 focus:ring-2 focus:ring-tree-50 outline-none text-xs font-bold text-slate-700 transition-all shadow-2xs"
-                                        />
-                                        <button 
-                                            type="button"
-                                            onClick={addTag} 
-                                            className="px-5 py-2.5 bg-tree-500 hover:bg-tree-600 text-white rounded-xl text-xs font-black shadow-md shadow-tree-100 transition-all active:scale-95 flex items-center justify-center gap-1.5 flex-shrink-0"
-                                        >
-                                            <Plus className="w-4 h-4" />
-                                            <span>タグ追加</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    ) : activeTab === 'okWords' ? (
-                        /* OK Words Management Section */
-                        <div className="space-y-6 animate-in fade-in duration-300">
-                            <div className="flex items-center gap-3 px-2">
-                                <div className="w-2 h-2 rounded-full bg-apple-500 shadow-md" />
-                                <h4 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.25em]">共有OKワード管理 (スキャン除外)</h4>
-                            </div>
-                            <div className="glass-card p-8 md:p-10 rounded-[3.5rem] border border-white shadow-premium space-y-10">
-                                <p className="text-xs text-slate-500 font-bold leading-relaxed px-2">
-                                    ここに登録された単語は、ツリー通信の個人情報（実名）自動検知チェックの対象外となり、赤マーカー警告が表示されなくなります。お母さん、皆さんなどの他に、固有名詞や一般的な敬称付き単語を登録できます。
-                                </p>
-                                <div className="flex flex-wrap gap-3">
-                                    {localOkWords.map(word => (
-                                        <div key={word} className="flex items-center gap-2 px-5 py-2.5 bg-apple-50 text-apple-700 rounded-full text-xs font-black border border-apple-100 shadow-sm animate-in zoom-in-95 group hover:bg-apple-100 transition-colors">
-                                            {word}
-                                            <button onClick={() => removeOkWord(word)} className="p-0.5 hover:text-red-500 transition-colors">
-                                                <X className="w-3.5 h-3.5" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {localOkWords.length === 0 && (
-                                        <span className="text-xs text-slate-400 font-bold p-2">登録済みのOKワードはありません。</span>
-                                    )}
-                                </div>
-                                <div className="flex gap-3">
-                                    <div className="relative flex-1">
-                                        <CheckCircle2 className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-300" />
-                                        <input
-                                            type="text"
-                                            value={newOkWord}
-                                            onChange={e => setNewOkWord(e.target.value)}
-                                            onKeyDown={e => e.key === 'Enter' && addOkWord()}
-                                            placeholder="OKワード（例：山田さん、太郎くん）を追加..."
-                                            className="w-full pl-14 pr-8 py-5 bg-slate-50 border-2 border-slate-100 rounded-full focus:border-apple-500 focus:bg-white focus:ring-8 focus:ring-apple-50 outline-none transition-all text-sm font-bold shadow-inner"
-                                        />
-                                    </div>
-                                    <button onClick={addOkWord} className="p-5 bg-apple-600 hover:bg-apple-700 text-white rounded-full shadow-lg shadow-apple-100 transition-all active:scale-90 flex-shrink-0">
-                                        <Plus className="w-6 h-6" />
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    ) : (
-                        /* Update History Section */
-                        <div className="space-y-6 animate-in fade-in duration-300">
-                            <div className="flex items-center justify-between px-2">
-                                <div className="flex items-center gap-3">
-                                    <div className="w-2 h-2 rounded-full bg-amber-500 shadow-md" />
-                                    <h4 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.25em]">アップデート履歴・操作ガイド</h4>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    {onStartTour && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                onClose();
-                                                onStartTour();
-                                            }}
-                                            className="px-3 py-1.5 bg-tree-600 hover:bg-tree-700 text-white rounded-xl text-xs font-black shadow-xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
-                                        >
-                                            <Sparkles className="w-3.5 h-3.5 text-yellow-300 animate-pulse" />
-                                            <span>画面で操作ツアーを見る</span>
-                                        </button>
-                                    )}
-                                    {onOpenUpdateModal && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                onClose();
-                                                onOpenUpdateModal();
-                                            }}
-                                            className="text-xs font-black text-tree-600 hover:text-tree-700 flex items-center gap-1 hover:underline cursor-pointer"
-                                        >
-                                            <ExternalLink className="w-3.5 h-3.5" />
-                                            <span>案内ポップアップで開く</span>
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="space-y-6">
-                                {UPDATE_HISTORY.map((u, vIdx) => (
-                                    <div key={u.version} className="glass-card p-6 md:p-8 rounded-[2.5rem] border border-white shadow-premium space-y-5">
-                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
-                                            <div className="flex items-center gap-2.5">
-                                                <span className="px-3 py-1 bg-tree-600 text-white rounded-full text-xs font-black tracking-wider shadow-xs">
-                                                    v{u.version}
-                                                </span>
-                                                {vIdx === 0 && (
-                                                    <span className="px-2 py-0.5 bg-yellow-400 text-tree-950 rounded-full text-[10px] font-black uppercase">
-                                                        最新版
-                                                    </span>
-                                                )}
-                                                <h5 className="font-black text-slate-800 text-sm md:text-base">
-                                                    {u.title}
-                                                </h5>
-                                            </div>
-                                            <span className="text-xs font-bold text-slate-400">
-                                                {u.date}
-                                            </span>
-                                        </div>
-
-                                        <div className="space-y-4">
-                                            {u.items.map((item, iIdx) => {
-                                                const isNew = item.badge === 'new';
-                                                return (
-                                                    <div key={iIdx} className="bg-slate-50/90 rounded-2xl p-4 border border-slate-200/70 space-y-2.5 shadow-2xs">
-                                                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                                                            <div className="flex items-center gap-2">
-                                                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                                                                    isNew 
-                                                                        ? 'bg-amber-100 text-amber-800 border border-amber-200' 
-                                                                        : 'bg-indigo-100 text-indigo-800 border border-indigo-200'
-                                                                }`}>
-                                                                    {isNew ? '✨ 新機能' : '⚡ 改善'}
-                                                                </span>
-                                                                <h6 className="font-black text-slate-800 text-xs md:text-sm">
-                                                                    {item.title}
-                                                                </h6>
-                                                            </div>
-                                                            {item.id && onStartTour && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        onClose();
-                                                                        onStartTour(item.id);
-                                                                    }}
-                                                                    className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
-                                                                    title="画面上でどこを押してどうなるかを確認"
-                                                                >
-                                                                    <MousePointerClick className="w-3 h-3 text-amber-600" />
-                                                                    <span>画面で確認</span>
-                                                                </button>
-                                                            )}
-                                                        </div>
-
-                                                        {/* Guide: どこで & 操作 */}
-                                                        <div className="bg-white p-3 rounded-xl border border-slate-200/60 space-y-1.5 text-xs">
-                                                            <div className="flex items-start gap-2">
-                                                                <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 font-black rounded text-[10px] flex-shrink-0">
-                                                                    どこで
-                                                                </span>
-                                                                <span className="font-bold text-slate-800">{item.location}</span>
-                                                            </div>
-                                                            <div className="flex items-start gap-2">
-                                                                <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 font-black rounded text-[10px] flex-shrink-0">
-                                                                    操作手順
-                                                                </span>
-                                                                <span className="font-black text-indigo-900">{item.action}</span>
-                                                            </div>
-                                                        </div>
-
-                                                        <p className="text-xs text-slate-600 font-bold leading-relaxed px-1">
-                                                            {item.description}
-                                                        </p>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Footer Actions */}
-                <div className="p-8 md:p-10 bg-slate-50/80 backdrop-blur-sm border-t border-slate-100 flex items-center justify-end gap-6 flex-shrink-0">
-                    <button onClick={onClose} className="px-6 py-4 font-black text-[10px] md:text-xs text-slate-400 hover:text-slate-600 transition-all uppercase tracking-[0.2em]">
-                        閉じる（保存しない）
-                    </button>
-                    <button onClick={handleSave} className="px-8 md:px-12 py-5 bg-apple-600 hover:bg-apple-700 text-white rounded-full font-black text-[10px] md:text-sm shadow-2xl shadow-apple-100 transition-all active:scale-95 flex items-center gap-2 md:gap-4 uppercase tracking-[0.15em]">
-                        <Save className="w-5 h-5 md:w-6 md:h-6" />
-                        保存して閉じる
-                    </button>
-                </div>
-            </div>
+    const tour = id => { if (mayLeave()) { onClose(); onStartTour(id); } };
+    return <div className="workflow-overlay" onClick={close}>
+      <section className="workflow-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" onClick={e => e.stopPropagation()}>
+        <header className="workflow-header"><div><p className="workflow-eyebrow">ツリー通信v2 / 業務設定</p><h2 id="settings-title">設定・定型文</h2><p>メモと、業務表・通信のつながりを整えます。</p></div><button aria-label="設定を閉じる" onClick={close} disabled={!!saving} className="workflow-icon"><X /></button></header>
+        <nav className="workflow-tabs" aria-label="設定の種類">{[['greetings','スタッフの挨拶'],['tags','タグ・挿入文'],['okWords','OKワード'],['updates','使い方・更新']].map(([id,label]) => <button key={id} aria-pressed={activeTab === id} onClick={() => setActiveTab(id)}>{label}</button>)}</nav>
+        <div className="workflow-body">
+          {error && <p role="alert" className="workflow-error">{error}</p>}{success && <p role="status" className="workflow-success"><Check size={18}/>{success}</p>}
+          {activeTab === 'greetings' && <section className="workflow-section">
+            <h3>スタッフごとの挨拶</h3><p className="workflow-help">挨拶はスタッフごとに保存します。担当スタッフの挨拶として通信へ挿入する文面です。作成済みの通信本文は書き換わりません。</p>
+            <label className="workflow-field">スタッフ<select value={staff} disabled={!!saving} onChange={e => { setStaff(e.target.value); setSuccess(''); }}>{Array.from(new Set([currentStaffName, ...staffList.map(s => s.name), staff].filter(Boolean))).map(name => <option key={name}>{name}</option>)}</select></label>
+            <label className="workflow-field">{staff}の挨拶<textarea rows={7} value={greetings[staff] || ''} disabled={!!saving} onChange={e => { setGreetings(prev => ({ ...prev, [staff]: e.target.value })); setSuccess(''); }} placeholder="こんにちは。本日のツリー通信です。" /></label>
+            <div className="workflow-actions"><span className="workflow-help">改行もそのまま保存します。</span><button className="workflow-primary" disabled={!!saving} onClick={saveGreeting}><Save size={18}/>{saving === 'greeting' ? '保存中…' : 'この挨拶を保存'}</button></div>
+          </section>}
+          {activeTab === 'tags' && <section className="workflow-section"><h3>メモのタグ・挿入文・表示先</h3><p className="workflow-help">挿入文はタグ選択時にメモへ入ります。表示列を指定したタグのメモは業務表へ反映されます。既存メモのタグ名と表示先は保持します。表示なしを選ぶと、そのタグのメモは業務表から非表示になります。</p>
+            <div className="settings-tags">{rows.map(row => <article className="settings-tag" key={row.id}>
+              <label className="workflow-field">タグ名<input value={row.name} disabled={!!saving} onChange={e => changeRow(row.id, 'name', e.target.value)} /></label>
+              <label className="workflow-field">自動挿入する文<textarea rows={3} value={row.text} disabled={!!saving} onChange={e => changeRow(row.id, 'text', e.target.value)} placeholder="空欄なら文は挿入しません"/><button type="button" className="workflow-text-button" disabled={!!saving} onClick={() => changeRow(row.id, 'text', row.text + '{プログラム内容}')}>＋プログラム内容</button></label>
+              <label className="workflow-field">業務表の表示列<select value={row.column} disabled={!!saving} onChange={e => changeRow(row.id, 'column', e.target.value)}><option value="">表示なし</option><option value="learning">学習</option><option value="program">プログラム</option><option value="remarks">備考</option></select></label>
+              <button className="workflow-icon workflow-danger" aria-label={`${row.name || '空のタグ'}を削除`} disabled={!!saving} onClick={() => { setRows(list => list.filter(r => r.id !== row.id)); setDirty(true); }}><Trash2 size={19}/></button>
+            </article>)}</div><button className="workflow-secondary" disabled={!!saving} onClick={() => { setRows(list => [...list, { id: `new-${Date.now()}`, name: '', text: '', column: '' }]); setDirty(true); }}><Plus size={18}/>タグを追加</button>
+          </section>}
+          {activeTab === 'okWords' && <section className="workflow-section"><h3>名前チェックのOKワード</h3><p className="workflow-help">登録した語は実名チェックの対象から外れます。児童名の登録や公開許可とは別の設定です。</p><div className="workflow-inline"><input aria-label="追加するOKワード" value={newWord} disabled={!!saving} onChange={e => setNewWord(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addWord(); } }} placeholder="検出対象から外す語"/><button className="workflow-secondary" onClick={addWord} disabled={!!saving}><Plus size={18}/>追加</button></div><div className="settings-words">{words.map(word => <span key={word}>{word}<button aria-label={`${word}を削除`} disabled={!!saving} onClick={() => { setWords(list => list.filter(w => w !== word)); setDirty(true); }}><X size={17}/></button></span>)}</div>{words.length === 0 && <p className="workflow-help">OKワードは登録されていません。</p>}</section>}
+          {activeTab === 'updates' && <section className="workflow-section"><h3>使い方・更新履歴 <small>v{APP_VERSION}</small></h3><div className="workflow-actions">{onStartTour && <button className="workflow-secondary" onClick={() => tour()}>画面で操作を確認</button>}{onOpenUpdateModal && <button className="workflow-text-button" disabled={!!saving} onClick={() => { if (mayLeave()) onOpenUpdateModal(); }}>更新案内を開く</button>}</div>{UPDATE_HISTORY.map(update => <article className="workflow-section" key={update.version}><h4>{update.title} <small>v{update.version} · {update.date}</small></h4>{update.items.map((item,index) => <div className="settings-update" key={item.id || index}><strong>{item.title}</strong><p>{item.description}</p><p className="workflow-help">{item.location} / {item.action}</p>{item.id && onStartTour && <button className="workflow-text-button" onClick={() => tour(item.id)}>この操作を確認</button>}</div>)}</article>)}</section>}
         </div>
-    );
+        <footer className="workflow-footer"><p>{dirty ? 'タグ・OKワードに未保存の変更があります。' : 'タグ・OKワードは下のボタンで保存します。'}{greetingDirty && ' 挨拶は「この挨拶を保存」で確定してください。'}</p><div className="workflow-actions"><button className="workflow-secondary" onClick={close} disabled={!!saving}>閉じる</button><button className="workflow-primary" onClick={saveSettings} disabled={!!saving}><Save size={18}/>{saving === 'settings' ? '保存中…' : 'タグ・OKワードを保存'}</button></div></footer>
+      </section>
+    </div>;
 }

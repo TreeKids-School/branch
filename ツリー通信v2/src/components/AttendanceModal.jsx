@@ -1,370 +1,127 @@
-import React, { useState, useEffect } from 'react';
-import { X, Save, Clock, Calendar, UserCheck } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { X, Save, Clock, AlertCircle, RefreshCw } from 'lucide-react';
 import { callStorage } from '../hooks/useStorage';
 import { getRoleFromPost } from '../app_constants';
+import { ATTENDANCE_TYPES, attendancePatch, roundAttendanceTime } from '../utils/attendance.js';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
 const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
-
-// 5分単位に丸めるヘルパー
-const roundTo5Minutes = (timeStr) => {
-    if (!timeStr) return '';
-    const parts = timeStr.split(':');
-    if (parts.length < 2) return timeStr;
-    const h = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10);
-    if (isNaN(h) || isNaN(m)) return timeStr;
-    
-    const roundedMin = Math.round(m / 5) * 5;
-    if (roundedMin === 60) {
-        const nextHour = String((h + 1) % 24).padStart(2, '0');
-        return `${nextHour}:00`;
-    }
-    return `${String(h).padStart(2, '0')}:${String(roundedMin).padStart(2, '0')}`;
-};
-
-export default function AttendanceModal({ onClose, selectedDate, officeId, staffList = [] }) {
+const control = 'min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 text-base text-slate-800 focus:ring-2 focus:ring-tree-500 focus:outline-none disabled:bg-slate-100 disabled:text-slate-400';
+function TimeField({ label, value, disabled, onChange }) {
+    const [hour, minute] = (value || '09:30').split(':');
+    return <div className="flex items-center gap-1">
+        <select aria-label={label + '・時'} className={control + ' w-[68px]'} value={hour} disabled={disabled} onChange={e => onChange(e.target.value + ':' + minute)}>{HOURS.map(item => <option key={item}>{item}</option>)}</select>
+        <span aria-hidden="true">:</span>
+        <select aria-label={label + '・分'} className={control + ' w-[68px]'} value={minute} disabled={disabled} onChange={e => onChange(hour + ':' + e.target.value)}>{MINUTES.map(item => <option key={item}>{item}</option>)}</select>
+    </div>;
+}
+export default function AttendanceModal({ onClose, onSaved, selectedDate, officeId, officeName, staffList = [], onDirtyChange }) {
     const [attendance, setAttendance] = useState({});
+    const [registered, setRegistered] = useState(new Set());
+    const [changed, setChanged] = useState(new Set());
+    const [activeId, setActiveId] = useState(staffList[0]?.id || '');
     const [loading, setLoading] = useState(true);
-
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState('');
+    const [reload, setReload] = useState(0);
+    const [loaded, setLoaded] = useState(false);
+    const busyRef = useRef(false);
+    const staffRef = useRef(staffList);
+    staffRef.current = staffList;
+    const staffSignature = JSON.stringify(staffList.map(staff => [staff.id, staff.name, staff.post, staff.role]));
+    useEffect(() => { onDirtyChange?.(changed.size > 0 || saving); }, [changed.size, saving, onDirtyChange]);
+    useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
     useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                // 1. その日の勤怠データの取得（事業所IDスコープ付き）
-                const data = await callStorage({ action: 'getAttendance', date: selectedDate, officeId });
-                
-                // 初期値の設定
-                const initialAttendance = {};
-                staffList.forEach(staff => {
-                    const role = getRoleFromPost(staff.post) || staff.role || '';
-                    if (data && data[staff.id]) {
-                        // 既存データがあっても role を最新の staffList から補完し、時間は5分刻みに丸める
-                        const record = data[staff.id];
-                        initialAttendance[staff.id] = { 
-                            ...record, 
-                            name: staff.name, 
-                            role,
-                            startTime: roundTo5Minutes(record.startTime || '09:30'),
-                            endTime: roundTo5Minutes(record.endTime || '18:30')
-                        };
-                    } else {
-                        initialAttendance[staff.id] = {
-                            type: 'work',
-                            startTime: '09:30',
-                            endTime: '18:30',
-                            name: staff.name,
-                            role
-                        };
-                    }
-                });
-                setAttendance(initialAttendance);
-            } catch (error) {
-                console.error('Failed to fetch attendance data', error);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchData();
-    }, [selectedDate, officeId, staffList]);
-
-    const handleTypeChange = (staffId, type) => {
-        setAttendance(prev => ({
-            ...prev,
-            [staffId]: {
-                ...prev[staffId],
-                type
-            }
-        }));
-    };
-
-    const handleTimeChange = (staffId, field, value) => {
-        setAttendance(prev => ({
-            ...prev,
-            [staffId]: {
-                ...prev[staffId],
-                [field]: value
-            }
-        }));
-    };
-
-    const handleSave = async () => {
-        try {
-            await callStorage({
-                action: 'saveAttendance',
-                date: selectedDate,
-                officeId,
-                data: attendance
+        let active = true;
+        setLoading(true); setLoaded(false); setError(''); setChanged(new Set());
+        callStorage({ action: 'getAttendance', date: selectedDate, officeId }).then(data => {
+            if (!active) return;
+            const records = {};
+            staffRef.current.forEach(staff => {
+                const record = data?.[staff.id] || {};
+                records[staff.id] = { ...record, name: staff.name, role: getRoleFromPost(staff.post) || staff.role || '',
+                    type: record.type || 'work', startTime: roundAttendanceTime(record.startTime, '09:30'), endTime: roundAttendanceTime(record.endTime, '18:30') };
             });
-            onClose();
-        } catch (error) {
-            console.error('Failed to save attendance data', error);
-            alert('保存に失敗しました。');
-        }
+            setAttendance(records); setRegistered(new Set(Object.keys(data || {})));
+            setActiveId(current => records[current] ? current : staffRef.current[0]?.id || '');
+            setLoaded(true);
+        }).catch(failure => { if (active) setError('勤務を読み込めませんでした。再読込みしてから入力してください。' + (failure.message || '')); })
+          .finally(() => { if (active) setLoading(false); });
+        return () => { active = false; };
+    }, [selectedDate, officeId, staffSignature, reload]);
+    const change = (id, field, value) => {
+        if (!loaded || busyRef.current) return;
+        setAttendance(previous => ({ ...previous, [id]: { ...previous[id], [field]: value } }));
+        setChanged(previous => new Set([...previous, id])); setError('');
     };
-
-    return (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-300">
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-md" onClick={onClose} />
-            
-            <div className="relative w-full max-w-6xl max-h-[95vh] bg-white rounded-[2rem] md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col border border-white animate-in zoom-in-95 duration-500">
-                {/* Header */}
-                <div className="p-5 md:p-8 bg-tree-600 flex items-center justify-between shadow-xl flex-shrink-0 z-10">
-                    <div className="flex items-center gap-3 md:gap-5">
-                        <div className="p-2 md:p-3 bg-white/10 rounded-2xl backdrop-blur-md ring-2 ring-white/20">
-                            <UserCheck className="w-5 h-5 md:w-7 md:h-7 text-white" />
+    const close = () => {
+        if (busyRef.current) return;
+        if (changed.size && !window.confirm('保存していない勤務の変更を破棄して戻りますか？')) return;
+        onClose();
+    };
+    const save = async () => {
+        if (!loaded || busyRef.current || !changed.size) return;
+        busyRef.current = true; setSaving(true); setError('');
+        try {
+            const patch = attendancePatch(attendance, changed);
+            // Send edited staff only; storage merges unrelated staff and fields.
+            await callStorage({ action: 'saveAttendance', date: selectedDate, officeId, data: patch });
+            setChanged(new Set()); onSaved?.(patch); onClose();
+        } catch (failure) { setError('勤務を保存できませんでした。入力内容は残っています。' + (failure.message || '')); }
+        finally { busyRef.current = false; setSaving(false); }
+    };
+    const typeButtons = (staff, record) => <div className="flex flex-wrap gap-1.5" role="group" aria-label={staff.name + 'の勤務区分'}>
+        {ATTENDANCE_TYPES.map(type => <button key={type.value} type="button" disabled={saving}
+            aria-pressed={record.type === type.value && (registered.has(staff.id) || changed.has(staff.id))}
+            onClick={() => change(staff.id, 'type', type.value)}
+            className={'min-h-[44px] px-4 rounded-xl border font-semibold text-sm ' + (record.type === type.value && (registered.has(staff.id) || changed.has(staff.id)) ? 'bg-tree-700 border-tree-700 text-white' : 'bg-white border-slate-200 text-slate-600')}>{type.label}</button>)}
+    </div>;
+    const status = id => changed.has(id) ? '未保存' : registered.has(id) ? '登録済み' : '未登録';
+    const selectedStaff = staffList.find(staff => staff.id === activeId);
+    const selectedRecord = attendance[activeId];
+    return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/45 p-0 md:p-6" role="presentation">
+        <div className="absolute inset-0" onClick={close} />
+        <section role="dialog" aria-modal="true" aria-labelledby="attendance-title" className="relative bg-slate-50 w-full h-[100dvh] md:h-auto md:max-h-[92dvh] max-w-6xl md:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <header className="flex justify-between items-center gap-4 px-5 py-4 bg-white border-b border-slate-200 shrink-0">
+                <div><p className="text-xs text-slate-500 mb-1">ツリー通信v2 / 業務</p><h2 id="attendance-title" className="text-xl font-bold text-slate-800">スタッフ勤務</h2><p className="text-sm text-slate-600 mt-1">{officeName || officeId || '事業所未選択'} · {selectedDate}</p></div>
+                <button aria-label="勤務画面を閉じる" onClick={close} disabled={saving} className="min-h-[44px] min-w-[44px] rounded-xl hover:bg-slate-100"><X className="w-5 h-5 mx-auto" /></button>
+            </header>
+            <div className="overflow-y-auto flex-1 p-4 md:p-6">
+                {error && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 flex flex-col gap-3"><span className="flex gap-2"><AlertCircle className="w-5 h-5 shrink-0" />{error}</span>
+                    {!loaded && !loading && <button onClick={() => setReload(value => value + 1)} className="min-h-[44px] flex items-center justify-center gap-2 font-semibold rounded-lg bg-white border border-red-200"><RefreshCw className="w-4 h-4" />再読込み</button>}</div>}
+                {loading ? <p className="flex items-center justify-center gap-2 py-12 text-slate-500"><Clock className="w-5 h-5 animate-pulse" />勤務を読み込んでいます</p>
+                    : loaded && !staffList.length ? <p className="p-8 text-center text-slate-500">この事業所にスタッフが登録されていません。</p>
+                    : loaded && <>
+                        <p className="mb-5 text-sm text-slate-600">変更したスタッフだけを保存します。職種は表示のみです。未登録のスタッフは勤務区分を選択して登録してください。</p>
+                        <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                            <table className="w-full text-left text-sm"><thead className="bg-slate-100 text-slate-600"><tr><th className="p-4">スタッフ / 職種</th><th className="p-4">勤務区分</th><th className="p-4">開始</th><th className="p-4">終了</th><th className="p-4">状態</th></tr></thead>
+                                <tbody>{staffList.map(staff => { const record = attendance[staff.id]; if (!record) return null; return <tr key={staff.id} className="border-t border-slate-100">
+                                    <th className="p-4 font-semibold text-slate-800">{staff.name}<span className="block text-xs text-slate-500 font-normal mt-1">{record.role || '職種未設定'}</span></th>
+                                    <td className="p-3">{typeButtons(staff, record)}</td>
+                                    <td className="p-3"><TimeField label={staff.name + 'の開始'} value={record.startTime} disabled={record.type !== 'work' || saving} onChange={value => change(staff.id, 'startTime', value)} /></td>
+                                    <td className="p-3"><TimeField label={staff.name + 'の終了'} value={record.endTime} disabled={record.type !== 'work' || saving} onChange={value => change(staff.id, 'endTime', value)} /></td>
+                                    <td className={'p-4 whitespace-nowrap ' + (changed.has(staff.id) ? 'text-amber-700' : 'text-slate-500')}>{status(staff.id)}</td></tr>; })}</tbody>
+                            </table>
                         </div>
-                        <div>
-                            <h3 className="font-black text-lg md:text-2xl text-white tracking-tight">スタッフ勤怠管理</h3>
-                            <p className="text-[9px] md:text-[10px] font-black text-tree-100 uppercase tracking-[0.2em] mt-1 opacity-80">
-                                対象日: {selectedDate}
-                            </p>
+                        <div className="md:hidden space-y-4">
+                            <label className="block text-sm font-semibold text-slate-700">スタッフを選択<select className={control + ' w-full mt-2'} value={activeId} onChange={event => setActiveId(event.target.value)} disabled={saving}>{staffList.map(staff => <option key={staff.id} value={staff.id}>{staff.name} · {status(staff.id)}</option>)}</select></label>
+                            {selectedStaff && selectedRecord && <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-6">
+                                <div className="flex justify-between gap-3"><div><h3 className="text-xl font-bold text-slate-800">{selectedStaff.name}</h3><p className="text-sm text-slate-500 mt-1">{selectedRecord.role || '職種未設定'}（表示のみ）</p></div><span className="text-sm text-amber-700">{status(activeId)}</span></div>
+                                <div><p className="font-semibold text-sm mb-2">勤務区分</p>{typeButtons(selectedStaff, selectedRecord)}</div>
+                                <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-5">
+                                    <div><p className="text-sm font-semibold mb-2">開始時刻</p><TimeField label={selectedStaff.name + 'の開始'} value={selectedRecord.startTime} disabled={selectedRecord.type !== 'work' || saving} onChange={value => change(activeId, 'startTime', value)} /></div>
+                                    <div><p className="text-sm font-semibold mb-2">終了時刻</p><TimeField label={selectedStaff.name + 'の終了'} value={selectedRecord.endTime} disabled={selectedRecord.type !== 'work' || saving} onChange={value => change(activeId, 'endTime', value)} /></div>
+                                </div>
+                                <p className="text-xs leading-relaxed text-slate-500">{selectedRecord.type === 'work' ? '時刻は5分単位です。' : '公休・有給では勤務時間を使いません。出勤に戻すと入力済みの時刻を使えます。'}</p>
+                            </div>}
                         </div>
-                    </div>
-                    <button onClick={onClose} className="p-3 hover:bg-white/10 rounded-xl transition-all text-white/80 hover:text-white">
-                        <X className="w-5 h-5 md:w-6 md:h-6" />
-                    </button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-5 md:p-8 bg-slate-50/30 custom-scrollbar">
-                    {loading ? (
-                        <div className="flex flex-col items-center justify-center py-12 gap-4">
-                            <Clock className="w-10 h-10 text-tree-500 animate-spin" />
-                            <p className="font-black text-slate-400 uppercase tracking-widest text-xs">Loading...</p>
-                        </div>
-                    ) : staffList.length === 0 ? (
-                        <div className="text-center py-12 text-slate-400 font-bold">
-                            スタッフが登録されていません。
-                        </div>
-                    ) : (
-                        <div className="space-y-4">
-                            {/* デスクトップ用 (md以上) */}
-                            <div className="hidden md:grid grid-cols-2 xl:grid-cols-3 gap-4">
-                                {staffList.map(staff => {
-                                    const record = attendance[staff.id] || { type: 'work', startTime: '09:30', endTime: '18:30' };
-                                    const isWork = record.type === 'work';
-
-                                    // 時間の分解
-                                    const [startHour, startMin] = (record.startTime || '09:30').split(':');
-                                    const [endHour, endMin] = (record.endTime || '18:30').split(':');
-
-                                    const handleTimeUpdateLocal = (field, part, val) => {
-                                        const currentVal = record[field] || (field === 'startTime' ? '09:30' : '18:30');
-                                        const [h, m] = currentVal.split(':');
-                                        let newTime = '';
-                                        if (part === 'hour') {
-                                            newTime = `${val}:${m || '00'}`;
-                                        } else {
-                                            newTime = `${h || '00'}:${val}`;
-                                        }
-                                        handleTimeChange(staff.id, field, newTime);
-                                    };
-
-                                    return (
-                                        <div key={staff.id} className="glass-card p-4 rounded-2xl border border-white shadow-premium flex flex-col justify-between gap-3 hover:shadow-md transition-all">
-                                            {/* Top: Staff Name */}
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-tree-100 flex items-center justify-center text-tree-600 font-black text-xs">
-                                                    {staff.name.substring(0, 1)}
-                                                </div>
-                                                <span className="font-black text-slate-700 text-sm">{staff.name}</span>
-                                            </div>
-
-                                            {/* Bottom: Options & Inputs */}
-                                            <div className="flex flex-wrap gap-2 items-center justify-between mt-1">
-                                                {/* 区分選択 */}
-                                                <div className="flex bg-slate-100 p-1 rounded-full border border-slate-200/50 shadow-inner">
-                                                    <button
-                                                        onClick={() => handleTypeChange(staff.id, 'work')}
-                                                        className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all ${isWork ? 'bg-white text-tree-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                                    >
-                                                        出勤
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleTypeChange(staff.id, 'public_holiday')}
-                                                        className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all ${record.type === 'public_holiday' ? 'bg-white text-wood-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                                    >
-                                                        公休
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleTypeChange(staff.id, 'paid_leave')}
-                                                        className={`px-3 py-1.5 rounded-full text-[10px] font-black transition-all ${record.type === 'paid_leave' ? 'bg-white text-apple-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                                    >
-                                                        有給
-                                                    </button>
-                                                </div>
-
-                                                {/* 時間入力 */}
-                                                <div className={`flex items-center gap-1 md:gap-1.5 transition-opacity ${isWork ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
-                                                    {/* 開始時間 */}
-                                                    <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
-                                                        <select
-                                                            disabled={!isWork}
-                                                            value={startHour || '09'}
-                                                            onChange={e => handleTimeUpdateLocal('startTime', 'hour', e.target.value)}
-                                                            className="bg-transparent text-xs font-bold text-slate-700 outline-none px-1 py-0.5 cursor-pointer appearance-none text-center min-w-[28px]"
-                                                        >
-                                                            {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
-                                                        </select>
-                                                        <span className="text-slate-400 font-bold text-[10px] px-0.5">:</span>
-                                                        <select
-                                                            disabled={!isWork}
-                                                            value={startMin || '30'}
-                                                            onChange={e => handleTimeUpdateLocal('startTime', 'minute', e.target.value)}
-                                                            className="bg-transparent text-xs font-bold text-slate-700 outline-none px-1 py-0.5 cursor-pointer appearance-none text-center min-w-[28px]"
-                                                        >
-                                                            {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
-                                                        </select>
-                                                    </div>
-
-                                                    <span className="text-slate-400 font-bold text-xs">〜</span>
-
-                                                    {/* 終了時間 */}
-                                                    <div className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
-                                                        <select
-                                                            disabled={!isWork}
-                                                            value={endHour || '18'}
-                                                            onChange={e => handleTimeUpdateLocal('endTime', 'hour', e.target.value)}
-                                                            className="bg-transparent text-xs font-bold text-slate-700 outline-none px-1 py-0.5 cursor-pointer appearance-none text-center min-w-[28px]"
-                                                        >
-                                                            {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
-                                                        </select>
-                                                        <span className="text-slate-400 font-bold text-[10px] px-0.5">:</span>
-                                                        <select
-                                                            disabled={!isWork}
-                                                            value={endMin || '30'}
-                                                            onChange={e => handleTimeUpdateLocal('endTime', 'minute', e.target.value)}
-                                                            className="bg-transparent text-xs font-bold text-slate-700 outline-none px-1 py-0.5 cursor-pointer appearance-none text-center min-w-[28px]"
-                                                        >
-                                                            {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-
-                            {/* モバイル用 (md未満で表示, スリムなリスト形式) */}
-                            <div className="md:hidden flex flex-col divide-y divide-slate-100 bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-                                {staffList.map(staff => {
-                                    const record = attendance[staff.id] || { type: 'work', startTime: '09:30', endTime: '18:30' };
-                                    const isWork = record.type === 'work';
-                                    const [startHour, startMin] = (record.startTime || '09:30').split(':');
-                                    const [endHour, endMin] = (record.endTime || '18:30').split(':');
-
-                                    const handleTimeUpdateLocal = (field, part, val) => {
-                                        const currentVal = record[field] || (field === 'startTime' ? '09:30' : '18:30');
-                                        const [h, m] = currentVal.split(':');
-                                        let newTime = '';
-                                        if (part === 'hour') {
-                                            newTime = `${val}:${m || '00'}`;
-                                        } else {
-                                            newTime = `${h || '00'}:${val}`;
-                                        }
-                                        handleTimeChange(staff.id, field, newTime);
-                                    };
-
-                                    return (
-                                        <div key={staff.id} className="p-3 flex flex-col gap-2 hover:bg-slate-50/50 transition-colors">
-                                            <div className="flex items-center justify-between gap-2">
-                                                <div className="flex items-center gap-2 min-w-0">
-                                                    <div className="w-6 h-6 rounded-full bg-tree-50 flex items-center justify-center text-tree-600 font-black text-[10px] flex-shrink-0">
-                                                        {staff.name.substring(0, 1)}
-                                                    </div>
-                                                    <span className="font-black text-slate-700 text-xs truncate max-w-[90px]">{staff.name}</span>
-                                                </div>
-                                                
-                                                {/* 区分選択 */}
-                                                <div className="flex bg-slate-100 p-0.5 rounded-full border border-slate-200/50 shadow-inner flex-shrink-0">
-                                                    <button
-                                                        onClick={() => handleTypeChange(staff.id, 'work')}
-                                                        className={`px-2 py-1 rounded-full text-[9px] font-black transition-all ${isWork ? 'bg-white text-tree-600 shadow-sm' : 'text-slate-400'}`}
-                                                    >
-                                                        出勤
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleTypeChange(staff.id, 'public_holiday')}
-                                                        className={`px-2 py-1 rounded-full text-[9px] font-black transition-all ${record.type === 'public_holiday' ? 'bg-white text-wood-600 shadow-sm' : 'text-slate-400'}`}
-                                                    >
-                                                        公休
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleTypeChange(staff.id, 'paid_leave')}
-                                                        className={`px-2 py-1 rounded-full text-[9px] font-black transition-all ${record.type === 'paid_leave' ? 'bg-white text-apple-600 shadow-sm' : 'text-slate-400'}`}
-                                                    >
-                                                        有給
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {/* 時間選択 */}
-                                            {isWork && (
-                                                <div className="flex items-center justify-end gap-1 px-1 py-0.5 animate-in slide-in-from-top-1 duration-200">
-                                                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-0.5 shadow-sm">
-                                                        <select
-                                                            value={startHour || '09'}
-                                                            onChange={e => handleTimeUpdateLocal('startTime', 'hour', e.target.value)}
-                                                            className="bg-transparent text-[10px] font-bold text-slate-700 outline-none px-1 py-0.5 cursor-pointer appearance-none text-center min-w-[22px]"
-                                                        >
-                                                            {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
-                                                        </select>
-                                                        <span className="text-slate-400 font-bold text-[8px] px-0.5">:</span>
-                                                        <select
-                                                            value={startMin || '30'}
-                                                            onChange={e => handleTimeUpdateLocal('startTime', 'minute', e.target.value)}
-                                                            className="bg-transparent text-[10px] font-bold text-slate-700 outline-none px-1 py-0.5 cursor-pointer appearance-none text-center min-w-[22px]"
-                                                        >
-                                                            {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
-                                                        </select>
-                                                    </div>
-
-                                                    <span className="text-slate-400 font-bold text-[10px]">〜</span>
-
-                                                    <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg p-0.5 shadow-sm">
-                                                        <select
-                                                            value={endHour || '18'}
-                                                            onChange={e => handleTimeUpdateLocal('endTime', 'hour', e.target.value)}
-                                                            className="bg-transparent text-[10px] font-bold text-slate-700 outline-none px-1 py-0.5 cursor-pointer appearance-none text-center min-w-[22px]"
-                                                        >
-                                                            {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
-                                                        </select>
-                                                        <span className="text-slate-400 font-bold text-[8px] px-0.5">:</span>
-                                                        <select
-                                                            value={endMin || '30'}
-                                                            onChange={e => handleTimeUpdateLocal('endTime', 'minute', e.target.value)}
-                                                            className="bg-transparent text-[10px] font-bold text-slate-700 outline-none px-1 py-0.5 cursor-pointer appearance-none text-center min-w-[22px]"
-                                                        >
-                                                            {MINUTES.map(m => <option key={m} value={m}>{m}</option>)}
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Footer Actions */}
-                <div className="p-5 md:p-8 bg-slate-50/80 backdrop-blur-sm border-t border-slate-100 flex items-center justify-end gap-4 flex-shrink-0">
-                    <button onClick={onClose} className="px-5 py-3 font-black text-[10px] md:text-xs text-slate-400 hover:text-slate-600 transition-all uppercase tracking-[0.2em]">
-                        キャンセル
-                    </button>
-                    <button
-                        onClick={handleSave}
-                        disabled={loading || staffList.length === 0}
-                        className="px-6 md:px-10 py-4 bg-tree-600 hover:bg-tree-700 disabled:bg-slate-300 text-white rounded-full font-black text-[10px] md:text-sm shadow-xl transition-all active:scale-95 flex items-center gap-2 md:gap-3 uppercase tracking-[0.15em]"
-                    >
-                        <Save className="w-4 h-4 md:w-5 md:h-5" />
-                        勤怠を保存
-                    </button>
-                </div>
+                    </>}
             </div>
-        </div>
-    );
+            <footer className="shrink-0 border-t border-slate-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-wrap items-center gap-3">
+                <p className="text-sm text-slate-600 flex-1">{changed.size ? '変更 ' + changed.size + '名 · 未保存' : '保存する変更はありません'}</p>
+                <button onClick={close} disabled={saving} className="min-h-[48px] px-5 rounded-xl border border-slate-200 font-semibold text-slate-600">戻る</button>
+                <button onClick={save} disabled={loading || saving || !loaded || !changed.size} className="min-h-[48px] px-6 rounded-xl bg-tree-700 text-white font-bold disabled:opacity-40 flex items-center justify-center gap-2"><Save className="w-5 h-5" />{saving ? '保存中…' : '勤務を保存'}</button>
+            </footer>
+        </section>
+    </div>;
 }

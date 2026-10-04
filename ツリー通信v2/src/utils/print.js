@@ -1,5 +1,7 @@
 import { parseForceSheet } from './parseForceSheet';
 import { getRoleFromPost } from '../app_constants';
+import { columnText, DEFAULT_COLUMNS } from './communicationFlow';
+export const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 
 // ── 共通ヘルパー ──────────────────────────────────────────────
 
@@ -14,7 +16,7 @@ function formatAttendance(record) {
 
 /** 1行分の HTML を生成 */
 function staffRow(fmt) {
-    return `<td class="name-cell">${fmt.name}</td><td class="time-cell">${fmt.timeStr}</td><td class="time-cell">${fmt.timeEnd}</td>`;
+    return `<td class="name-cell">${escapeHTML(fmt.name)}</td><td class="time-cell">${escapeHTML(fmt.timeStr)}</td><td class="time-cell">${escapeHTML(fmt.timeEnd)}</td>`;
 }
 
 /**
@@ -169,65 +171,15 @@ export function buildStaffTableHTML(attendance = {}, globalLog = {}, staffList =
     return html;
 }
 
-/** メモからテキストを抽出するヘルパー */
-export function extractStudyText(dailyMessages, childId) {
-    const msgs = dailyMessages[childId] || [];
-    return msgs.filter(m => {
-        const hasStudyTag = m.tag && (m.tag === '【ツリー式学習】' || m.tag === '【学習】' || m.tag === '【宿題】' || m.tag === '【プリント】');
-        const hasTextPrefix = m.text.includes('【ツリー式学習】') || m.text.includes('【学習】') || m.text.includes('【宿題】') || m.text.includes('【プリント】');
-        return hasStudyTag || hasTextPrefix;
-    })
-    .map(m => {
-        // 文章は非表示にし、タグのみを表示する
-        if (m.tag) return m.tag;
-        const match = m.text.match(/^【[^】]+】/);
-        return match ? match[0] : '';
-    }).filter(t => t).join('\n');
+/** The same tag-to-column mapping is used by the editor, exports and print. */
+export function extractStudyText(dailyMessages, childId, tagColumnMap = DEFAULT_COLUMNS) {
+    return columnText(dailyMessages?.[childId] || [], 'learning', tagColumnMap);
 }
-
-export function extractProgramText(dailyMessages, childId) {
-    const msgs = dailyMessages[childId] || [];
-    return msgs.filter(m => {
-        const hasProgTag = m.tag && m.tag === '【プログラム】';
-        const hasTextPrefix = m.text.includes('【プログラム】');
-        return hasProgTag || hasTextPrefix;
-    })
-    .map(m => {
-        // 文章は非表示にし、タグのみを表示する
-        if (m.tag) return m.tag;
-        const match = m.text.match(/^【[^】]+】/);
-        return match ? match[0] : '';
-    }).filter(t => t).join('\n');
+export function extractProgramText(dailyMessages, childId, tagColumnMap = DEFAULT_COLUMNS) {
+    return columnText(dailyMessages?.[childId] || [], 'program', tagColumnMap);
 }
-
-export function extractNotesText(dailyMessages, dailyTable, childId) {
-    const tableNotes = dailyTable[childId]?.notes || '';
-    const msgs = dailyMessages[childId] || [];
-    
-    // 【備考】タグのメッセージを抽出
-    const chatNotes = msgs.filter(m => {
-        const hasNotesTag = m.tag && m.tag === '【備考】';
-        const hasTextPrefix = m.text.includes('【備考】');
-        return hasNotesTag || hasTextPrefix;
-    })
-    .map(m => {
-        let t = m.text.trim();
-        // m.text から 【備考】 プレフィックスを削除する
-        // （タグの表示は不要のため）
-        if (m.tag && t.startsWith(m.tag)) {
-            t = t.substring(m.tag.length).trim();
-        } else {
-            t = t.replace(/^【備考】\s*/, '').trim();
-        }
-        return t;
-    }).filter(t => t).join('\n');
-
-    // 両方を結合
-    const combined = [];
-    if (tableNotes.trim()) combined.push(tableNotes.trim());
-    if (chatNotes.trim()) combined.push(chatNotes.trim());
-    
-    return combined.join('\n');
+export function extractNotesText(dailyMessages, dailyTable, childId, tagColumnMap = DEFAULT_COLUMNS) {
+    return [columnText(dailyMessages?.[childId] || [], 'remarks', tagColumnMap), dailyTable?.[childId]?.notes || ''].filter(Boolean).join(' / ');
 }
 
 // ── 共通スタイル ──────────────────────────────────────────────
@@ -302,7 +254,7 @@ export const GROUP2_ITEMS = [
 ];
 
 /** 1 日分のページ HTML を生成 */
-export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, globalLog, summaryC, attendance, staffList = []) {
+export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, globalLog, summaryC, attendance, staffList = [], tagColumnMap = DEFAULT_COLUMNS) {
     const staffTable = buildStaffTableHTML(attendance, globalLog, staffList);
 
     const activities = globalLog.activities || '';
@@ -325,10 +277,10 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
                 GROUP2_ITEMS.forEach(item => { if (group2.includes(item.id)) selectedLabels.push(item.label); });
                 activityItemsHTML = selectedLabels.join('<br>');
             } catch {
-                activityItemsHTML = activities.replace(/\n/g, '<br>');
+                activityItemsHTML = escapeHTML(activities).replace(/\n/g, '<br>');
             }
         } else {
-            activityItemsHTML = activities.replace(/\n/g, '<br>');
+            activityItemsHTML = escapeHTML(activities).replace(/\n/g, '<br>');
         }
     }
     if (!activityItemsHTML) {
@@ -347,7 +299,7 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
           </td>
           <td style="width: 50%;">
             <div class="section-label">【本日の特記事項】</div>
-            <div class="notes-section">${globalLog.notice || summaryC || ''}</div>
+            <div class="notes-section">${escapeHTML(globalLog.notice || summaryC || '')}</div>
           </td>
           <td style="width: 20%;">
             <div class="section-label">共有事項</div>
@@ -381,14 +333,14 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
             html += `
             <tr>
               <td class="col-no">${i + 1}</td>
-              <td class="col-name">${child.name}</td>
+              <td class="col-name">${escapeHTML(child.name)}</td>
               <td class="col-time"></td>
-              <td class="col-time">${rowData.endTime || ''}</td>
-              <td class="col-loc">${rowData.pickupLocation || ''}</td>
-              <td class="col-time">${rowData.transportTime || ''}</td>
-              <td class="col-study">${extractStudyText(dailyMessages, child.id)}</td>
-              <td class="col-prog">${extractProgramText(dailyMessages, child.id)}</td>
-              <td class="col-notes">${extractNotesText(dailyMessages, dailyTable, child.id)}</td>
+              <td class="col-time">${escapeHTML(rowData.endTime || '')}</td>
+              <td class="col-loc">${escapeHTML(rowData.pickupLocation || '')}</td>
+              <td class="col-time">${escapeHTML(rowData.transportTime || '')}</td>
+              <td class="col-study">${escapeHTML(extractStudyText(dailyMessages, child.id, tagColumnMap))}</td>
+              <td class="col-prog">${escapeHTML(extractProgramText(dailyMessages, child.id, tagColumnMap))}</td>
+              <td class="col-notes">${escapeHTML(extractNotesText(dailyMessages, dailyTable, child.id, tagColumnMap))}</td>
             </tr>`;
         } else {
             html += `
@@ -407,6 +359,8 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
     }
 
     html += `</table>`;
+    const programs = Array.isArray(globalLog.programs) ? globalLog.programs : globalLog.programTitle ? [{ title: globalLog.programTitle, staff: globalLog.programStaff, summary: globalLog.programSummary }] : [];
+    if (programs.length) html += `<table class="children-table"><tr><th>プログラム</th><th>担当</th><th>内容</th></tr>${programs.map(program => `<tr><td>${escapeHTML(program.title)}</td><td>${escapeHTML(program.staff)}</td><td style="white-space:pre-wrap">${escapeHTML(program.summary)}</td></tr>`).join('')}</table>`;
     return html;
 }
 
@@ -414,13 +368,14 @@ export function buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, g
 
 export function printChildDocument(child, result, selectedDate) {
     const printWindow = window.open('', '_blank');
+    if (!printWindow) throw new Error('印刷画面を開けません。ブラウザーのポップアップ許可を確認してください。');
     const force = parseForceSheet(result.K_sheet || '');
     const printContent = `
     <!DOCTYPE html>
     <html lang="ja">
     <head>
       <meta charset="UTF-8">
-      <title>${child.name} - 書類</title>
+      <title>${escapeHTML(child.name)} - 書類</title>
       <style>
         body { font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', sans-serif; padding: 20px; }
         .header { text-align: center; font-size: 20px; font-weight: bold; margin-bottom: 30px; border-bottom: 2px solid #000; padding-bottom: 10px; }
@@ -432,24 +387,25 @@ export function printChildDocument(child, result, selectedDate) {
       </style>
     </head>
     <body>
-      <div class="header">Tree Kids School - ${child.name} 様</div>
+      <div class="header">Tree Kids School - ${escapeHTML(child.name)} 様</div>
       <div class="section">
         <h3>専門的支援実施計画</h3>
         <div class="label">実施した支援の内容・結果</div>
-        <div class="content">${result.B_result || '---'}</div>
+        <div class="content">${escapeHTML(result.B_result || '---')}</div>
         <div class="label" style="margin-top:15px">今後の支援の予定</div>
-        <div class="content">${result.B_plan || '---'}</div>
+        <div class="content">${escapeHTML(result.B_plan || '---')}</div>
         <div class="label" style="margin-top:15px">該当項目</div>
-        <div class="content">${result.B_item || '---'}</div>
+        <div class="content">${escapeHTML(result.B_item || '---')}</div>
       </div>
       ${result.K_sheet ? `
       <div class="section">
         <h3>強行シート</h3>
-        <div class="label">学習</div><div class="content">${force.learning || '該当なし'}</div>
-        <div class="label" style="margin-top:15px">自由遊び</div><div class="content">${force.play || '該当なし'}</div>
-        <div class="label" style="margin-top:15px">プログラム</div><div class="content">${force.program || '該当なし'}</div>
-        <div class="label" style="margin-top:15px">おやつ</div><div class="content">${force.snack || '該当なし'}</div>
+        <div class="label">学習</div><div class="content">${escapeHTML(force.learning || '該当なし')}</div>
+        <div class="label" style="margin-top:15px">自由遊び</div><div class="content">${escapeHTML(force.play || '該当なし')}</div>
+        <div class="label" style="margin-top:15px">プログラム</div><div class="content">${escapeHTML(force.program || '該当なし')}</div>
+        <div class="label" style="margin-top:15px">おやつ</div><div class="content">${escapeHTML(force.snack || '該当なし')}</div>
       </div>` : ''}
+      <div class="section"><h3>ツリー通信</h3><div class="content">${escapeHTML(result.D || '')}</div><h3>今後の予定</h3><div class="content">${escapeHTML(result.futurePlan || '')}</div></div>
       <div style="margin-top:50px;text-align:right;font-size:12px">印刷日: ${new Date().toLocaleDateString('ja-JP')}</div>
     </body>
     </html>
@@ -459,12 +415,13 @@ export function printChildDocument(child, result, selectedDate) {
     setTimeout(() => printWindow.print(), 250);
 }
 
-export function printAllDocuments(children, results, summaryC, selectedDate, dailyTable = {}, dailyMessages = {}, globalLog = {}, attendance = {}, staffList = []) {
+export function printAllDocuments(children, results, summaryC, selectedDate, dailyTable = {}, dailyMessages = {}, globalLog = {}, attendance = {}, staffList = [], tagColumnMap = DEFAULT_COLUMNS) {
     const printWindow = window.open('', '_blank', 'width=1200,height=800,resizable=yes,scrollbars=yes');
+    if (!printWindow) throw new Error('印刷画面を開けません。ブラウザーのポップアップ許可を確認してください。');
     const dateObj = new Date(selectedDate);
     const dateStr = `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月 ${dateObj.getDate()}日`;
 
-    const pageHTML = buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, globalLog, summaryC, attendance, staffList);
+    const pageHTML = buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, globalLog, summaryC, attendance, staffList, tagColumnMap);
 
     const allContent = `
     <!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=1040"><title>業務管理日誌 - ${selectedDate}</title>
@@ -477,9 +434,10 @@ export function printAllDocuments(children, results, summaryC, selectedDate, dai
     setTimeout(() => printWindow.print(), 250);
 }
 
-export function printMonthlyDocuments(monthStr, monthlyData, staffList = []) {
+export function printMonthlyDocuments(monthStr, monthlyData, staffList = [], tagColumnMap = DEFAULT_COLUMNS) {
     const printWindow = window.open('', '_blank', 'width=1200,height=800,resizable=yes,scrollbars=yes');
 
+    if (!printWindow) throw new Error('印刷画面を開けません。ブラウザーのポップアップ許可を確認してください。');
     let pagesHTML = '';
 
     monthlyData.forEach(({ date, data }, pageIndex) => {
@@ -493,7 +451,7 @@ export function printMonthlyDocuments(monthStr, monthlyData, staffList = []) {
         const dateObj = new Date(date);
         const dateStr = `${dateObj.getFullYear()}年${dateObj.getMonth() + 1}月 ${dateObj.getDate()}日`;
 
-        const pageHTML = buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, globalLog, summaryC, attendance, staffList);
+        const pageHTML = buildDayPageHTML(dateStr, children, dailyTable, dailyMessages, globalLog, summaryC, attendance, staffList, tagColumnMap);
         pagesHTML += `<div class="page-break">${pageHTML}</div>`;
     });
 

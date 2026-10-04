@@ -1,8 +1,9 @@
 import { firestore, auth } from '../firebase';
 import { 
     doc, getDoc, setDoc, updateDoc, collection, getDocs, deleteDoc, 
-    addDoc, serverTimestamp, query, where, orderBy, Timestamp, arrayUnion
+    addDoc, serverTimestamp, query, where, orderBy, Timestamp, arrayUnion, runTransaction
 } from 'firebase/firestore';
+import { commitDailyMutation } from '../utils/commitDailyMutation.js';
 
 const isLocal = () => false; // Force Firestore for testing/deployment
 
@@ -101,6 +102,11 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
 
     try {
         switch (action) {
+            case 'commitDailyMutation': {
+                const result = await commitDailyMutation({ firestore, doc, runTransaction, arrayUnion }, payload);
+                setConnectionStatus?.('online'); setLastError?.(null);
+                return result;
+            }
             case 'getMasterChildren': {
                 const projectId = firestore.app.options.projectId;
                 console.log(`[Firestore Debug] Fetching children from project: ${projectId}`);

@@ -1,3 +1,4 @@
+import { DEFAULT_COLUMNS } from './communicationFlow.js';
 // ── バックアップ復元ロジック ──────────────────────────────────────────────────
 // 画面（BackupImportModal）から切り出した純粋な処理。
 // 「CSVに含まれない児童のデータは絶対に触らない」ことをここで保証する。
@@ -20,6 +21,8 @@ export function normalizeDate(input) {
     const mm = m.padStart(2, '0');
     const dd = d.padStart(2, '0');
     if (Number(mm) < 1 || Number(mm) > 12 || Number(dd) < 1 || Number(dd) > 31) return '';
+    const checked = new Date(Number(y), Number(mm) - 1, Number(dd));
+    if (checked.getFullYear() !== Number(y) || checked.getMonth() + 1 !== Number(mm) || checked.getDate() !== Number(dd)) return '';
     return `${y}-${mm}-${dd}`;
 }
 
@@ -36,7 +39,7 @@ export function normalizeDate(input) {
  * @param {number} now          timestamp（テスト用に外から渡せるように）
  * @returns {{data: object, applied: number}}
  */
-export function mergeBackupRowsIntoReport(report, rows, now = Date.now()) {
+export function mergeBackupRowsIntoReport(report, rows, now = Date.now(), tagColumnMap = DEFAULT_COLUMNS) {
     const base = (report && typeof report === 'object') ? report : {};
 
     const children = Array.isArray(base.children) ? [...base.children] : [];
@@ -64,17 +67,28 @@ export function mergeBackupRowsIntoReport(report, rows, now = Date.now()) {
                 dailyTable[child.id] = { ...(dailyTable[child.id] || {}), ...r.restore.t };
             }
         } else {
-            // 復元用データ列が無い旧CSV: 主要項目のみ
-            if (r.treeComm) {
-                results[child.id] = { ...(results[child.id] || {}), D: r.treeComm };
-            }
-            const patch = {
-                ...(r.transportTime ? { transportTime: r.transportTime } : {}),
-                ...(r.endTime ? { endTime: r.endTime } : {}),
-                ...(r.pickupLocation ? { pickupLocation: r.pickupLocation } : {}),
-            };
-            if (Object.keys(patch).length > 0) {
-                dailyTable[child.id] = { ...(dailyTable[child.id] || {}), ...patch };
+            // A present empty CSV cell is an intentional empty value; an absent column preserves the old value.
+            const present = key => r.presentFields ? r.presentFields[key] : Boolean(r[key]);
+            const resultPatch = {};
+            if (present('treeComm')) resultPatch.D = r.treeComm || '';
+            if (present('futurePlan')) resultPatch.futurePlan = r.futurePlan || '';
+            if (Object.keys(resultPatch).length) results[child.id] = { ...(results[child.id] || {}), ...resultPatch };
+            const tablePatch = {};
+            ['transportTime', 'endTime', 'pickupLocation', 'notes'].forEach(key => { if (present(key)) tablePatch[key] = r[key] || ''; });
+            if (Object.keys(tablePatch).length) dailyTable[child.id] = { ...(dailyTable[child.id] || {}), ...tablePatch };
+            // Legacy CSVs have column text rather than original memo objects. Restore those columns as tagged memos.
+            for (const [field, column, fallbackTag] of [['study', 'learning', '【学習】'], ['program', 'program', '【プログラム】']]) {
+                if (!present(field)) continue;
+                const oldMessages = messages[child.id] || [];
+                const tagsForColumn = Object.keys(tagColumnMap).filter(tag => tagColumnMap[tag] === column);
+                const tag = tagsForColumn[0] || fallbackTag;
+                const kept = oldMessages.flatMap(message => {
+                    const originalTags = (message.tag || '').split(' ').filter(Boolean);
+                    if (!originalTags.some(value => tagColumnMap[value] === column)) return [message];
+                    const remainingTags = originalTags.filter(value => tagColumnMap[value] !== column);
+                    return remainingTags.length ? [{ ...message, tag: remainingTags.join(' ') }] : [];
+                });
+                messages[child.id] = r[field] ? [...kept, { id: `backup-${child.id}-${field}-${now}`, tag, text: r[field], timestamp: now, sender: 'バックアップ復元' }] : kept;
             }
         }
         applied++;
@@ -83,6 +97,7 @@ export function mergeBackupRowsIntoReport(report, rows, now = Date.now()) {
     return {
         applied,
         data: {
+            ...base,
             children,
             results,
             messages,

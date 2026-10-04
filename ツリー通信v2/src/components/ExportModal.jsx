@@ -1,31 +1,53 @@
-import { useState } from 'react';
-import { FileSpreadsheet, FileText, Printer, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { FileSpreadsheet, FileText, Printer, Loader2, X, Download } from 'lucide-react';
+import './WorkflowModals.css';
 import * as XLSX from 'xlsx';
 import { parseForceSheet, getRoleFromPost } from '../app_constants';
 import { callStorage } from '../hooks/useStorage';
-import { printMonthlyDocuments, extractNotesText, extractStudyText, extractProgramText } from '../utils/print';
+import { printMonthlyDocuments } from '../utils/print';
+import { columnText, DEFAULT_COLUMNS } from '../utils/communicationFlow';
 
-export default function ExportModal({ 
-    show, 
-    onClose, 
-    children, 
-    results, 
-    selectedDate, 
-    summaryC, 
-    selectedOffice, 
+export default function ExportModal({
+    show,
+    onClose,
+    children,
+    results,
+    selectedDate,
+    summaryC,
+    selectedOffice,
     staffList = [],
     dailyTable = {},
     dailyMessages = {},
     globalLog = {},
-    attendance = {}
+    attendance = {},
+    onExportBackup, onPrintDay, tagColumnMap = DEFAULT_COLUMNS, onDirtyChange
 }) {
     const [targetMonth, setTargetMonth] = useState(selectedDate ? selectedDate.substring(0, 7) : new Date().toISOString().substring(0, 7));
     const [isPrinting, setIsPrinting] = useState(false);
     const [isExportingAll, setIsExportingAll] = useState(false);
 
+    const [isSavingExcel, setIsSavingExcel] = useState(false);
+    const [backupRange, setBackupRange] = useState('day');
+    const [exportError, setExportError] = useState('');
+    const [fileStatus, setFileStatus] = useState('');
+    useEffect(() => { if (show && selectedDate) setTargetMonth(selectedDate.substring(0, 7)); }, [show, selectedDate]);
+    const busy = isSavingExcel || isExportingAll || isPrinting;
+    useEffect(() => { onDirtyChange?.(busy); }, [busy, onDirtyChange]);
+    useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+    const close = () => { if (!busy) onClose(); };
     if (!show) return null;
 
     const officeId = selectedOffice?.id;
+    const handlePrintDay = () => {
+        setExportError('');
+        setFileStatus('');
+        try {
+            onPrintDay();
+            setFileStatus('当日日誌の印刷画面を開きました。PDF保存は印刷画面で選んでください。');
+        } catch (error) {
+            setExportError('当日日誌の印刷画面を開けませんでした: ' + error.message);
+        }
+    };
 
     const handleMonthlyPDF = async () => {
         if (isPrinting) return;
@@ -37,7 +59,7 @@ export default function ExportModal({
                 setIsPrinting(false);
                 return;
             }
-            
+
             const targetDates = datesIndex.filter(d => d.startsWith(targetMonth)).sort();
             if (targetDates.length === 0) {
                 alert(`${targetMonth} のデータが見つかりませんでした。`);
@@ -53,7 +75,7 @@ export default function ExportModal({
                 return { date, data: data ? { ...data, attendance: attendance || {} } : null };
             });
             const results = await Promise.all(fetchPromises);
-            
+
             const validResults = results.filter(r => r.data !== null);
             if (validResults.length === 0) {
                 alert(`${targetMonth} の有効なデータが見つかりませんでした。`);
@@ -61,21 +83,19 @@ export default function ExportModal({
                 return;
             }
 
-            printMonthlyDocuments(targetMonth, validResults, staffList);
-            onClose();
+            printMonthlyDocuments(targetMonth, validResults, staffList, tagColumnMap);
+            setFileStatus(`${targetMonth}の印刷画面を開きました。PDF保存は印刷画面で選んでください。`);
         } catch (error) {
             console.error('Monthly PDF Generation Error:', error);
-            alert('月間PDFの生成中にエラーが発生しました: ' + error.message);
+            setExportError('月間日誌の印刷画面を開けませんでした: ' + error.message);
         } finally {
             setIsPrinting(false);
         }
     };
 
-    const [isSavingExcel, setIsSavingExcel] = useState(false);
-
     const processExcelAndSave = async (data, fileName, fileHandle) => {
         const wb = XLSX.read(data, { type: 'array' });
-        
+
         const dateObj = new Date(selectedDate);
         const day = dateObj.getDate();
         const month = dateObj.getMonth() + 1;
@@ -97,7 +117,7 @@ export default function ExportModal({
         }
 
         if (!targetSheetName) {
-            targetSheetName = wb.SheetNames.find(name => 
+            targetSheetName = wb.SheetNames.find(name =>
                 name.includes(`${day}日`) || name.includes(`${day}`)
             );
         }
@@ -108,6 +128,7 @@ export default function ExportModal({
             targetSheetName = wb.SheetNames[0];
         }
 
+        setFileStatus(`${fileName} / ${targetSheetName} シートへ反映中…`);
         const sheet = wb.Sheets[targetSheetName];
 
         // 1. 日付
@@ -260,11 +281,13 @@ export default function ExportModal({
                 activityText = activities;
             }
         }
-        sheet['H4'] = { t: 's', v: activityText };
+        const programsText = (Array.isArray(globalLog.programs) ? globalLog.programs : globalLog.programTitle ? [{title:globalLog.programTitle,staff:globalLog.programStaff,summary:globalLog.programSummary}] : []).map(program => [program.title, program.staff, program.summary].filter(Boolean).join(' / ')).join('\n');
+        sheet['H4'] = { t: 's', v: [activityText, programsText ? `【プログラム】\n${programsText}` : ''].filter(Boolean).join('\n\n') };
 
         // 5. 児童データテーブル (行13〜)
         const displayRows = children.filter(c => !c.isPlaceholder);
-        const maxRowsInSheet = 15; 
+        const maxRowsInSheet = 15;
+        if (displayRows.length > maxRowsInSheet) throw new Error('この日誌Excelの児童欄は15名分です。16名以上の記録を省略しないため反映を停止しました。日誌の印刷または書類Excelを利用してください。');
 
         for (let i = 0; i < maxRowsInSheet; i++) {
             const r = 13 + i;
@@ -273,15 +296,15 @@ export default function ExportModal({
                 const rowData = dailyTable[child.id] || {};
                 const msgs = dailyMessages[child.id] || [];
 
-                const hasHomework = msgs.some(m => m.tag === '【宿題】' || m.text.includes('【宿題】'));
-                const hasPrint = msgs.some(m => m.tag === '【プリント】' || m.text.includes('【プリント】'));
-                const hasTree = msgs.some(m => m.tag === '【ツリー式学習】' || m.tag === '【学習】' || m.text.includes('【ツリー式学習】') || m.text.includes('【学習】'));
-                const hasProg = msgs.some(m => m.tag === '【プログラム】' || m.text.includes('【プログラム】'));
+                const hasHomework = msgs.some(m => (m.tag || '').split(' ').includes('【宿題】') || (m.text || '').includes('【宿題】'));
+                const hasPrint = msgs.some(m => (m.tag || '').split(' ').includes('【プリント】') || (m.text || '').includes('【プリント】'));
+                const hasTree = msgs.some(m => (m.tag || '').split(' ').some(tag => tagColumnMap[tag] === 'learning') || (m.text || '').includes('【ツリー式学習】') || (m.text || '').includes('【学習】'));
+                const hasProg = msgs.some(m => (m.tag || '').split(' ').some(tag => tagColumnMap[tag] === 'program') || (m.text || '').includes('【プログラム】'));
                 const hasLine = !!rowData.sentChecked;
 
                 sheet[`A${r}`] = { t: 'n', v: i + 1 };
                 sheet[`B${r}`] = { t: 's', v: child.name };
-                sheet[`C${r}`] = { t: 's', v: '' }; 
+                sheet[`C${r}`] = { t: 's', v: '' };
                 sheet[`D${r}`] = { t: 's', v: rowData.endTime || '' };
                 sheet[`E${r}`] = { t: 's', v: rowData.pickupLocation || '' };
                 sheet[`F${r}`] = { t: 's', v: rowData.transportTime || '' };
@@ -290,7 +313,7 @@ export default function ExportModal({
                 sheet[`I${r}`] = { t: 's', v: hasTree ? '〇' : '' };
                 sheet[`J${r}`] = { t: 's', v: hasProg ? '〇' : '' };
                 sheet[`K${r}`] = { t: 's', v: hasLine ? '〇' : '' };
-                sheet[`L${r}`] = { t: 's', v: extractNotesText(dailyMessages, dailyTable, child.id) };
+                sheet[`L${r}`] = { t: 's', v: [columnText(dailyMessages[child.id] || [], 'remarks', tagColumnMap), dailyTable[child.id]?.notes || ''].filter(Boolean).join(' / ') };
             } else {
                 sheet[`A${r}`] = { t: 's', v: '' };
                 sheet[`B${r}`] = { t: 's', v: '' };
@@ -313,7 +336,7 @@ export default function ExportModal({
             const writable = await fileHandle.createWritable();
             await writable.write(wbout);
             await writable.close();
-            alert(`「${targetSheetName}」シートへ本日のデータを上書き保存しました。`);
+            setFileStatus(`「${fileName}」の「${targetSheetName}」シートへ上書き保存しました。`);
         } else {
             const blob = new Blob([wbout], { type: 'application/octet-stream' });
             const url = URL.createObjectURL(blob);
@@ -323,14 +346,14 @@ export default function ExportModal({
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            alert(`編集後のファイル「${fileName}」をダウンロードしました。`);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            setFileStatus(`編集後の「${fileName}」のダウンロードを開始しました。元ファイルは変更していません。`);
         }
-        onClose();
     };
 
     const handleOverwriteExcel = async () => {
         if (isSavingExcel) return;
-        setIsSavingExcel(true);
+        setIsSavingExcel(true); setExportError(''); setFileStatus('');
         try {
             let fileHandle = null;
             let fileData = null;
@@ -363,31 +386,14 @@ export default function ExportModal({
             }
 
             if (!isFileSystemAPI) {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.xlsx';
-                input.onchange = async (e) => {
-                    const file = e.target.files[0];
-                    if (!file) {
-                        setIsSavingExcel(false);
-                        return;
-                    }
-                    const reader = new FileReader();
-                    reader.onload = async (evt) => {
-                        try {
-                            const arrayBuffer = evt.target.result;
-                            const data = new Uint8Array(arrayBuffer);
-                            await processExcelAndSave(data, file.name, null);
-                        } catch (err) {
-                            console.error(err);
-                            alert('エクセルの処理中にエラーが発生しました: ' + err.message);
-                        } finally {
-                            setIsSavingExcel(false);
-                        }
-                    };
-                    reader.readAsArrayBuffer(file);
-                };
-                input.click();
+                const file = await new Promise(resolve => {
+                    const input = document.createElement('input');
+                    input.type = 'file'; input.accept = '.xlsx';
+                    input.onchange = () => resolve(input.files?.[0] || null);
+                    input.oncancel = () => resolve(null);
+                    input.click();
+                });
+                if (file) await processExcelAndSave(new Uint8Array(await file.arrayBuffer()), file.name, null);
                 return;
             }
 
@@ -396,7 +402,7 @@ export default function ExportModal({
             }
         } catch (error) {
             console.error('Excel Overwrite Error:', error);
-            alert('上書き保存中にエラーが発生しました: ' + error.message);
+            setExportError('Excelの保存に失敗しました: ' + error.message);
         } finally {
             setIsSavingExcel(false);
         }
@@ -414,10 +420,10 @@ export default function ExportModal({
         const planSheet = XLSX.utils.aoa_to_sheet(planData);
         planSheet['!cols'] = [{ wch: 15 }, { wch: 40 }, { wch: 25 }, { wch: 20 }];
         XLSX.utils.book_append_sheet(wb, planSheet, '専門的支援実施計画');
-        const commData = [['ツリー通信', ''], ['日付', selectedDate], [], ['児童名', '内容']];
-        childrenWithResults.forEach(child => { const r = results[child.id] || {}; commData.push([child.name, r.D || '']); });
+        const commData = [['ツリー通信', ''], ['日付', selectedDate], [], ['児童名', '内容', '今後の予定']];
+        childrenWithResults.forEach(child => { const r = results[child.id] || {}; commData.push([child.name, r.D || '', r.futurePlan || '']); });
         const commSheet = XLSX.utils.aoa_to_sheet(commData);
-        commSheet['!cols'] = [{ wch: 15 }, { wch: 80 }];
+        commSheet['!cols'] = [{ wch: 15 }, { wch: 80 }, { wch: 40 }];
         XLSX.utils.book_append_sheet(wb, commSheet, 'ツリー通信');
         const forceRows = childrenWithResults.filter(c => (results[c.id] || {}).K_sheet);
         if (forceRows.length > 0) {
@@ -443,11 +449,11 @@ export default function ExportModal({
     const exportToCSV = () => {
         const childrenWithResults = children.filter(c => results[c.id]);
         if (childrenWithResults.length === 0) { alert('エクスポートするデータがありません。'); return; }
-        let csv = '\ufeff"児童名","日付","支援内容・結果","今後の予定","該当項目","ツリー通信","強行_学習","強行_自由遊び","強行_プログラム","強行_おやつ"\n';
+        let csv = '\ufeff"児童名","日付","支援内容・結果","今後の予定","該当項目","ツリー通信","強行_学習","強行_自由遊び","強行_プログラム","強行_おやつ","通信_今後の予定"\n';
         childrenWithResults.forEach(child => {
             const r = results[child.id] || {};
             const force = parseForceSheet(r.K_sheet || '');
-            const row = [child.name, selectedDate, r.B_result || '', r.B_plan || '', r.B_item || '', r.D || '', force.learning || '', force.play || '', force.program || '', force.snack || '']
+            const row = [child.name, selectedDate, r.B_result || '', r.B_plan || '', r.B_item || '', r.D || '', force.learning || '', force.play || '', force.program || '', force.snack || '', r.futurePlan || '']
                 .map(f => `"${(f || '').replace(/"/g, '""')}"`).join(',');
             csv += row + '\n';
         });
@@ -473,7 +479,7 @@ export default function ExportModal({
             const sortedDates = [...datesIndex].sort();
             const batchSize = 20;
             const allReports = [];
-            
+
             for (let i = 0; i < sortedDates.length; i += batchSize) {
                 const batchDates = sortedDates.slice(i, i + batchSize);
                 const promises = batchDates.map(async (date) => {
@@ -519,8 +525,8 @@ export default function ExportModal({
                     const t = dailyTableObj[childId] || {};
                     const m = messagesObj[childId] || [];
 
-                    const studyText = m.filter(msg => msg.tag === '【宿題】' || msg.tag === '【プリント】' || msg.tag === '【学習】').map(msg => msg.text).join('；');
-                    const progText = m.filter(msg => msg.tag === '【プログラム】').map(msg => msg.text).join('；');
+                    const studyText = columnText(m, 'learning', tagColumnMap);
+                    const progText = columnText(m, 'program', tagColumnMap);
 
                     const treeComm = r.D || '';
                     const transportTime = t.transportTime || '';
@@ -568,106 +574,31 @@ export default function ExportModal({
         }
     };
 
-    return (
-        <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-                <h3 className="text-xl font-black text-slate-800 mb-6 text-center">書類一括出力 / 印刷</h3>
-                
-                <div className="space-y-5">
-                    {/* 単一日のエクスポートセクション */}
-                    <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 pl-1">本日 ({selectedDate}) のデータ出力</p>
-                        <div className="space-y-2">
-                            <button 
-                                onClick={handleOverwriteExcel} 
-                                disabled={isSavingExcel}
-                                className="w-full py-3.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-150 rounded-xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] group"
-                            >
-                                {isSavingExcel ? (
-                                    <Loader2 className="w-6 h-6 text-indigo-600 animate-spin" />
-                                ) : (
-                                    <FileSpreadsheet className="w-6 h-6 text-indigo-600 group-hover:scale-110 transition-transform" />
-                                )}
-                                <div className="text-left">
-                                    <p className="font-bold text-sm text-indigo-900">業務管理日誌エクセルを上書き保存</p>
-                                    <p className="text-[11px] text-indigo-600">既存ファイルを選択して本日のデータを上書き</p>
-                                </div>
-                            </button>
-                            <button onClick={exportToExcel} className="w-full py-3.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-150 rounded-xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] group">
-                                <FileSpreadsheet className="w-6 h-6 text-emerald-600 group-hover:scale-110 transition-transform" />
-                                <div className="text-left">
-                                    <p className="font-bold text-sm text-emerald-900">Excel形式 (.xlsx)</p>
-                                    <p className="text-[11px] text-emerald-600">本日の日報を複数シートで出力</p>
-                                </div>
-                            </button>
-                            <button onClick={exportToCSV} className="w-full py-3.5 bg-slate-50 hover:bg-slate-100 border border-slate-150 rounded-xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] group">
-                                <FileText className="w-6 h-6 text-slate-600 group-hover:scale-110 transition-transform" />
-                                <div className="text-left">
-                                    <p className="font-bold text-sm text-slate-900">CSV形式 (.csv)</p>
-                                    <p className="text-[11px] text-slate-500">データ連携用のテキスト形式</p>
-                                </div>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="border-t border-slate-100 my-4"></div>
-
-                    {/* 移行用バックアップセクション */}
-                    <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 pl-1">データ移行用（全期間バックアップ）</p>
-                        <div className="space-y-2">
-                            <button 
-                                onClick={handleAllDataExportCSV} 
-                                disabled={isExportingAll}
-                                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white border border-indigo-700 rounded-xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] group shadow-md shadow-indigo-100"
-                            >
-                                {isExportingAll ? (
-                                    <Loader2 className="w-6 h-6 text-white animate-spin" />
-                                ) : (
-                                    <FileText className="w-6 h-6 text-white group-hover:scale-110 transition-transform" />
-                                )}
-                                <div className="text-left">
-                                    <p className="font-bold text-sm text-white">全期間データバックアップ (.csv)</p>
-                                    <p className="text-[11px] text-indigo-200">全日付の児童データ・日誌を1つのCSVで出力</p>
-                                </div>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="border-t border-slate-100 my-4"></div>
-
-                    {/* 月間一括印刷セクション */}
-                    <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 pl-1">月間業務管理日誌の一括PDF出力</p>
-                        <div className="bg-slate-50 p-4 rounded-xl space-y-3 border border-slate-100">
-                            <div className="flex items-center justify-between gap-4">
-                                <label className="text-xs font-bold text-slate-600">対象の月:</label>
-                                <input 
-                                    type="month" 
-                                    value={targetMonth} 
-                                    onChange={e => setTargetMonth(e.target.value)} 
-                                    className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm font-bold outline-none focus:border-tree-500"
-                                />
-                            </div>
-                            
-                            <button 
-                                onClick={handleMonthlyPDF} 
-                                disabled={isPrinting}
-                                className="w-full py-3.5 bg-tree-600 hover:bg-tree-700 disabled:bg-tree-300 text-white rounded-xl flex items-center justify-center gap-3 transition-all active:scale-[0.98] font-bold text-sm shadow-md shadow-tree-100"
-                            >
-                                {isPrinting ? (
-                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                ) : (
-                                    <Printer className="w-5 h-5" />
-                                )}
-                                <span>{isPrinting ? 'データを取得中...' : '月間PDFを一括印刷'}</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <button onClick={onClose} className="mt-6 w-full py-2 text-slate-400 hover:text-slate-600 text-sm font-bold">閉じる</button>
-            </div>
-        </div>
-    );
+    const rangeEnd = new Date(`${selectedDate}T12:00:00`);
+    const rangeStart = new Date(rangeEnd);
+    if (backupRange === 'week') rangeStart.setDate(rangeStart.getDate() - 6);
+    if (backupRange === 'month') rangeStart.setMonth(rangeStart.getMonth() - 1);
+    if (backupRange === 'year') rangeStart.setFullYear(rangeStart.getFullYear() - 1);
+    const dateLabel = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const backup = async () => {
+        if (busy) return;
+        if (!onExportBackup) { await handleAllDataExportCSV(); return; }
+        setIsExportingAll(true); setExportError('');
+        try { await onExportBackup(backupRange); }
+        catch (error) { setExportError(`書出しに失敗しました。${error.message || ''}`); }
+        finally { setIsExportingAll(false); }
+    };
+    return <div className="workflow-overlay" onClick={close}>
+      <section className="workflow-dialog export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title" onClick={e => e.stopPropagation()}>
+        <header className="workflow-header"><div><p className="workflow-eyebrow">ツリー通信v2 / 記録を持ち出す</p><h2 id="export-title">書出し・日誌の印刷</h2><p>ファイル保存と、ブラウザーの印刷を選べます。</p></div><button className="workflow-icon" onClick={close} disabled={busy} aria-label="書出しを閉じる"><X/></button></header>
+        <div className="workflow-context">{selectedOffice?.name} · 対象日 {selectedDate}</div>
+        <div className="workflow-body">
+          {exportError && <p className="workflow-error" role="alert">{exportError}</p>}{fileStatus && <p className="workflow-success" role="status">{fileStatus}</p>}
+          <section className="workflow-section"><h3>バックアップCSV</h3><p className="workflow-help">通信本文・メモ・予定・送迎・日誌の復元用データを含みます。</p><label className="workflow-field">対象期間<select value={backupRange} disabled={busy} onChange={e => setBackupRange(e.target.value)}><option value="day">選択日のみ</option><option value="week">直近7日</option><option value="month">選択日の1か月前から</option><option value="year">選択日の1年前から</option><option value="all">全記録</option></select></label><div className="workflow-actions"><p>{backupRange === 'all' ? '保存されている全日付' : `${dateLabel(rangeStart)} 〜 ${selectedDate}`}</p><button className="workflow-primary" disabled={busy} onClick={backup}>{isExportingAll ? <Loader2 size={18} className="animate-spin"/> : <Download size={18}/>}CSVを書き出す</button></div></section>
+          <section className="workflow-section"><h3>既存の日誌Excelへ反映</h3><p className="workflow-help">ファイルを選び、対象日のシートへ反映します。対応するPCブラウザーでは元ファイルへ保存し、スマホなどでは編集後ファイルをダウンロードします。</p><div className="workflow-actions"><p className="workflow-help">対象: {selectedDate} / 日誌・児童・スタッフ勤務</p><button className="workflow-secondary" onClick={handleOverwriteExcel} disabled={busy}>{isSavingExcel ? <Loader2 size={18} className="animate-spin"/> : <FileSpreadsheet size={18}/>}日誌Excelを選ぶ</button></div></section>
+          <section className="workflow-section"><h3>選択日の書類</h3><p className="workflow-help">保存されている支援項目・通信などを書き出します。書類CSVはバックアップCSVと異なる形式です。</p><div className="workflow-actions"><button className="workflow-secondary" onClick={exportToExcel} disabled={busy}><FileSpreadsheet size={18}/>書類Excel</button><button className="workflow-secondary" onClick={exportToCSV} disabled={busy}><FileText size={18}/>書類CSV</button>{onPrintDay && <button className="workflow-secondary" onClick={handlePrintDay} disabled={busy}><Printer size={18}/>当日日誌を印刷</button>}</div></section>
+          <section className="workflow-section"><h3>月間日誌を印刷・PDF保存</h3><label className="workflow-field">対象月<input type="month" value={targetMonth} disabled={busy} onChange={e => setTargetMonth(e.target.value)}/></label><div className="workflow-actions"><p className="workflow-help">ブラウザーの印刷画面でPDF保存を選べます。</p><button className="workflow-primary" onClick={handleMonthlyPDF} disabled={busy || !targetMonth}>{isPrinting ? <Loader2 size={18} className="animate-spin"/> : <Printer size={18}/>}印刷・PDF保存へ</button></div></section>
+        </div><footer className="workflow-footer"><div className="workflow-actions"><button className="workflow-secondary" onClick={close} disabled={busy}>業務へ戻る</button></div></footer>
+      </section>
+    </div>;
 }

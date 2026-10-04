@@ -1,28 +1,23 @@
 import React, { useState } from 'react';
-import { Copy, Check, Clipboard } from 'lucide-react';
+import { Copy, Check } from 'lucide-react';
+import { copyToClipboard } from '../utils/clipboard';
 
 export const CopyButton = ({ text, label }) => {
     const [copied, setCopied] = useState(false);
-    const handleCopy = () => {
+    const [error, setError] = useState('');
+    const handleCopy = async () => {
         if (!text) return;
-        const markCopied = () => { setCopied(true); setTimeout(() => setCopied(false), 2000); };
-        if (navigator.clipboard?.writeText) {
-            navigator.clipboard.writeText(text).then(markCopied).catch(() => fallbackCopy(text, markCopied));
-        } else { fallbackCopy(text, markCopied); }
-    };
-    const fallbackCopy = (value, onSuccess) => {
+        setError(''); setCopied(false);
         try {
-            const ta = document.createElement('textarea');
-            ta.value = value; ta.style.position = 'fixed'; ta.style.opacity = '0';
-            document.body.appendChild(ta); ta.select(); document.execCommand('copy');
-            document.body.removeChild(ta); onSuccess();
-        } catch { }
+            await copyToClipboard(text);
+            setCopied(true); setTimeout(() => setCopied(false), 2000);
+        } catch (reason) { setError(reason.message); }
     };
     return (
-        <button onClick={handleCopy} className="text-slate-400 hover:text-indigo-600 transition-colors flex items-center gap-1" title="Copy">
+        <span className="inline-flex flex-col items-start gap-1"><button type="button" onClick={handleCopy} disabled={!text} className="text-slate-500 hover:text-emerald-700 transition-colors flex items-center gap-1 min-h-[40px]" title="コピー" aria-label={copied ? 'コピーしました' : label || 'コピー'}>
             {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
             {label && <span className="text-[10px] font-bold">{label}</span>}
-        </button>
+        </button>{error && <span role="alert" className="text-[11px] text-amber-800 max-w-[260px]">{error}</span>}</span>
     );
 };
 
