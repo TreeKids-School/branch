@@ -9,7 +9,8 @@
     "build": "npm run guard && vite build",
     "preview": "npm run guard && vite preview --host 127.0.0.1 --port 4183 --strictPort",
     "emulators": "npm run guard && node scripts/start-emulators.mjs",
-    "deploy": "node scripts/block-deploy.mjs"
+    "deploy": "node scripts/block-deploy.mjs",
+    "build:portal": "node scripts/build-portal.mjs"
   },
   "dependencies": {
     "firebase": "^10.7.1",
