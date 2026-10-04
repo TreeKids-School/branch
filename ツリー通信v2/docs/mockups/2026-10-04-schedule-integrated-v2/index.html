@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>予約V2の中で使うツリー通信v2 — 画像モック12枚</title>
+  <style>
+    :root{font-family:"Noto Sans JP","Yu Gothic",Meiryo,sans-serif;color:#18364a;background:#f4f7f8;font-synthesis:none;line-height:1.7;--green:#208064;--border:#dbe5e2}
+    *{box-sizing:border-box}body{margin:0}button,a{-webkit-tap-highlight-color:transparent}button{font:inherit;cursor:pointer}a{color:#14684f;text-underline-offset:3px}a:hover{text-decoration-thickness:2px}button:focus-visible,a:focus-visible{outline:3px solid #b38528;outline-offset:4px}body.has-viewer{overflow:hidden}
+    .wrap{max-width:1440px;margin:auto;padding:0 28px}.site-head{border-top:4px solid var(--green);border-bottom:1px solid var(--border);background:white}.brand-row{display:flex;align-items:center;gap:28px;padding-top:22px;padding-bottom:22px}.official-logo{width:112px;height:auto;display:block;flex:none}.eyebrow{font-size:12px;font-weight:700;color:#60756e;margin:0 0 5px;letter-spacing:.05em}h1{font-size:clamp(21px,2.5vw,31px);line-height:1.5;margin:0 0 8px}h2{font-size:23px;line-height:1.5;margin:0}p{margin:0}.lead{max-width:840px;color:#4d645d;font-size:14px}.badge{display:inline-block;font-size:12px;padding:4px 10px;border:1px solid #d1e4d9;border-radius:6px;background:#eef7f2;color:#226049;margin:0 0 9px}
+    .intro{padding-top:24px;padding-bottom:18px}.reading{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.reading a{display:inline-flex;align-items:center;min-height:44px;padding:8px 14px;background:white;border:1px solid var(--border);border-radius:8px;text-decoration:none;font-size:13px;font-weight:700}.reading a:first-child{color:white;background:var(--green);border-color:var(--green)}.note{background:#fffaf0;border:1px solid #eadfc3;border-radius:10px;padding:14px 17px;color:#635535;font-size:13px}.note strong{font-weight:700}.note p+p{margin-top:6px}.documents{font-size:13px;display:flex;flex-wrap:wrap;gap:7px 19px;margin-top:14px}.section{padding-top:25px;padding-bottom:26px;scroll-margin-top:16px}.section-head{display:flex;justify-content:space-between;align-items:end;gap:18px;margin-bottom:18px}.section-head p{font-size:13px;color:#62776f;max-width:710px;margin-top:6px}.count{white-space:nowrap;color:#547464;font-size:13px;font-weight:700}.grid{display:grid;gap:20px}.mobile-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.pc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.card{min-width:0;background:white;border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 3px 12px #18364a04}.preview{display:block;width:100%;border:0;border-bottom:1px solid var(--border);background:#edf1ef;padding:8px;position:relative}.preview:after{content:"拡大 ↗";position:absolute;right:13px;bottom:13px;background:#fffef3ed;border:1px solid #d8e0d9;border-radius:5px;padding:3px 8px;font-size:11px;color:#3a6252;opacity:0;transition:opacity .12s}.preview:hover:after,.preview:focus-visible:after{opacity:1}.preview img{display:block;width:100%;height:100%;object-fit:contain}.mobile-grid .preview{aspect-ratio:9/14}.pc-grid .preview{aspect-ratio:16/10}.card-copy{padding:15px 16px 16px}.card h3{font-size:15px;line-height:1.65;margin:0 0 7px}.screen-id{font-size:11px;color:#668476;display:block;letter-spacing:.08em;margin-bottom:3px}.card-copy p{font-size:12px;line-height:1.8;color:#687b72;min-height:3.6em}.image-link{display:inline-block;font-size:12px;margin-top:10px;min-height:30px;padding-top:3px}.reference{border-top:1px solid var(--border);padding:23px 0 32px}.reference summary{cursor:pointer;min-height:44px;font-size:14px;font-weight:700}.reference p{font-size:13px;color:#61756d;max-width:870px}.ref-links{display:flex;gap:12px;flex-wrap:wrap;margin-top:12px}.ref-links a{font-size:13px;padding:9px 13px;border:1px solid var(--border);border-radius:7px;background:white}.page-footer{border-top:1px solid var(--border);color:#6b7c73;font-size:12px;padding:20px 0 28px}
+    dialog{padding:0;border:1px solid #b6cbc1;border-radius:12px;max-width:none;width:min(1540px,96vw);max-height:none;height:95dvh;background:#f1f5f3;color:#18364a;box-shadow:0 12px 80px #102d2430}dialog::backdrop{background:#11271fde}.viewer{height:100%;display:flex;flex-direction:column}.viewer-head{display:flex;align-items:center;gap:15px;padding:13px 18px;border-bottom:1px solid var(--border);background:white}.viewer-title{flex:1;min-width:0}.viewer-title h2{font-size:17px}.viewer-title p{font-size:12px;color:#718177}.viewer-close,.viewer-step{min-height:44px;min-width:44px;border:1px solid #c8d9d0;border-radius:8px;background:white;color:#205c45}.viewer-close{padding:7px 13px}.viewer-image-area{flex:1;min-height:0;overflow:auto;display:flex;align-items:center;justify-content:center;padding:12px}.viewer-image-area img{display:block;max-width:100%;max-height:100%;object-fit:contain}.viewer-foot{padding:11px 18px;border-top:1px solid var(--border);background:white;display:flex;align-items:center;gap:12px}.viewer-description{flex:1;font-size:12px;color:#62786b}.viewer-footer-links{white-space:nowrap;font-size:12px}.viewer-key-help{font-size:11px;color:#72877b;margin-top:2px}.viewer-counter{font-size:12px;min-width:47px;text-align:center}
+    @media(max-width:1050px){.mobile-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.wrap{padding-left:20px;padding-right:20px}.brand-row{gap:20px}}
+    @media(max-width:740px){.mobile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.pc-grid{grid-template-columns:1fr}.wrap{padding-left:14px;padding-right:14px}.brand-row{gap:16px;padding-top:18px;padding-bottom:18px}.official-logo{width:83px}.eyebrow{font-size:10px}h1{font-size:20px}.lead{font-size:12px}.badge{font-size:10px}.grid{gap:12px}.card-copy{padding:12px}.card h3{font-size:13px}.card-copy p{font-size:11px}.section-head{align-items:start}.section-head p{font-size:12px}.section-head h2{font-size:20px}.count{font-size:12px}.note{font-size:12px}.documents{font-size:12px}.preview:after{opacity:1;font-size:10px;right:8px;bottom:8px}.viewer-head{padding:10px;gap:9px}.viewer-title h2{font-size:14px}.viewer-title p{font-size:10px}.viewer-close{font-size:12px}.viewer-image-area{padding:6px}.viewer-foot{padding:9px;gap:8px;flex-wrap:wrap}.viewer-description{order:5;flex-basis:100%;font-size:11px}.viewer-key-help{display:none}.viewer-footer-links{margin-left:auto}.viewer-counter{min-width:35px}dialog{height:97dvh;width:98vw;border-radius:8px}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <header class="site-head">
+    <div class="wrap brand-row">
+      <img class="official-logo" src="assets/official-logo.png" alt="Tree Kids School（ツリーキッズスクール）">
+      <div>
+        <p class="eyebrow">UI・UX REVIEW · 2026.10.04</p>
+        <span class="badge">モックアップ閲覧用・未実装</span>
+        <h1>予約V2の中で使う、ツリー通信v2</h1>
+        <p class="lead">療育中は、短く記録して子どものもとへ。落ち着いた時間に、日々のメモを通信へまとめる。画像生成で作成したスマホ8枚・PC4枚の改訂案です。</p>
+      </div>
+    </div>
+  </header>
+  <main class="wrap">
+    <section class="intro" aria-label="この資料の見方">
+      <nav class="reading" aria-label="モックアップの章">
+        <a href="#mobile">スマホの8画面</a><a href="#pc">PCの4画面</a><a href="#references">現行画面の参照資料</a>
+      </nav>
+      <div class="note">
+        <p><strong>同じ予約V2から起動する前提です。</strong> 通常画面では既存の外枠を維持し、集中入力中も「予約V2内」と戻り先を残す提案です。画像を押すと拡大できます。</p>
+        <p>現在の通信V2はブラウザー内の仮保存で、端末をまたぐ共有や、予約からの児童・日付・事業所の自動引継ぎはありません。予約V2自身の保存・公開と保護者の「日々のあしあと」は実装されていますが、通信V2からは未接続です。</p>
+      </div>
+      <div class="documents"><a href="DESIGN-NOTES.md">設計メモ・12枚の対応表</a><a href="prompts.json">画像生成プロンプト</a><a href="../2026-10-04-ui-ux/FUNCTION-COVERAGE.md">既存機能の引継ぎ表</a><a href="README.md">資料の説明</a></div>
+    </section>
+    <section id="mobile" class="section">
+      <div class="section-head"><div><h2>スマホ — 記録して、支援へ戻る</h2><p>入口、片手入力、中断と再開、コピー、保存失敗まで。主操作を親指の届く位置に置き、キーボードが出た状態も確かめます。</p></div><span class="count">8 SCREENS</span></div>
+      <div id="mobile-grid" class="grid mobile-grid"></div>
+    </section>
+    <section id="pc" class="section">
+      <div class="section-head"><div><h2>PC — 一覧を見渡し、通信を整える</h2><p>予約の外枠を残し、複数児童の進捗を確認。メモを参照しながら編集し、コピーと手動の送信確認を分けて扱います。</p></div><span class="count">4 SCREENS</span></div>
+      <div id="pc-grid" class="grid pc-grid"></div>
+    </section>
+    <section id="references" class="reference">
+      <details>
+        <summary>現行コードの外枠を確認する参照資料</summary>
+        <p>以下は現行コードをもとに描画した外枠の参照画像です。画像生成による12枚の成果モックには含みません。実データを使った操作検証の記録でもありません。</p>
+        <div class="ref-links"><a href="references/current-shell-mobile.png" target="_blank" rel="noopener">現行スマホ外枠を開く ↗</a><a href="references/current-shell-pc.png" target="_blank" rel="noopener">現行PC外枠を開く ↗</a></div>
+      </details>
+    </section>
+  </main>
+  <footer class="page-footer"><div class="wrap">12枚はすべて画像生成によるUI提案です。既存機能の維持方針を示す資料であり、アプリ実装・データ移行・サーバー接続は行っていません。生成画像のロゴに差異がある場合は、正式ロゴを実装の基準とします。</div></footer>
+  <dialog id="image-viewer" aria-labelledby="viewer-title">
+    <div class="viewer">
+      <header class="viewer-head"><div class="viewer-title"><h2 id="viewer-title"></h2><p>画像モック・未実装 <span id="viewer-type"></span></p></div><button class="viewer-close" id="viewer-close" type="button" aria-label="拡大画像を閉じる">閉じる ×</button></header>
+      <div class="viewer-image-area"><img id="viewer-image" alt=""></div>
+      <footer class="viewer-foot"><button class="viewer-step" id="viewer-prev" type="button" aria-label="前の画像">←</button><span class="viewer-counter" id="viewer-counter" aria-live="polite"></span><button class="viewer-step" id="viewer-next" type="button" aria-label="次の画像">→</button><p class="viewer-description" id="viewer-description"></p><div class="viewer-footer-links"><a id="viewer-original" target="_blank" rel="noopener">画像ファイルを開く ↗</a><p class="viewer-key-help">← → で移動・Esc で閉じる</p></div></footer>
+    </div>
+  </dialog>
+  <noscript><p class="wrap">一覧の表示にはJavaScriptが必要です。<a href="README.md">READMEの画像リンク</a>からも12枚を開けます。</p></noscript>
+  <script>
+    const screens = [
+      {id:'M01',title:'予約V2から入る',description:'既存のスマホ予約画面から「ツリー通信v2」へ。別アプリのログインは挟みません。'},
+      {id:'M02',title:'今日の児童を選ぶ',description:'事業所・日付と児童ごとの状態を確認。メモを残す／続きを書くへ進みます。'},
+      {id:'M03',title:'片手でメモを残す',description:'日本語キーボード表示中の集中入力。児童の確認と保存を近い位置で行います。'},
+      {id:'M04',title:'保存して戻る・続きを再開',description:'メモ保存後は一覧へ。書きかけの通信は、同じ児童から再開できます。'},
+      {id:'M05',title:'メモを使って通信を整える',description:'本文の編集と、①②③の選択順を保つメモ反映シート。原文を確認できます。'},
+      {id:'M06',title:'コピーと送信確認を分ける',description:'本文コピーの後、LINEで送ったことを手動で確認。コピーだけでは送信済みにしません。'},
+      {id:'M07',title:'保存失敗でも入力を守る',description:'入力を画面に残し、再試行・本文コピー・編集継続へ。保存成功とは表示しません。'},
+      {id:'M08',title:'通信内の業務と設定を開く',description:'出欠・送迎・日報・勤務・履歴・入出力・設定へ。主画面を整理しても機能を残します。'},
+      {id:'P01',title:'予約の利用予定から起動',description:'Tree Kids Scheduleの現行ヘッダーとナビを維持し、通信への入口を示します。'},
+      {id:'P02',title:'同じ外枠で通信を一覧する',description:'当日の児童、担当、下書き、入力完了、手動送信確認を一画面で見渡します。'},
+      {id:'P03',title:'記録を参照しながら編集',description:'メモと本文を並べて確認。差込み、今後の予定、保存、完了と解除を残します。'},
+      {id:'P04',title:'対象を確認してコピー',description:'本文と結合対象を確認してコピー。担当と手動送信チェックを別に扱います。'}
+    ];
+    const viewer = document.getElementById('image-viewer');
+    let active = 0;
+    let opener = null;
+    function updateViewer(index){
+      active = (index + screens.length) % screens.length;
+      const screen = screens[active];
+      const path = 'images/' + screen.id + '.png';
+      document.getElementById('viewer-title').textContent = screen.id + ' · ' + screen.title;
+      document.getElementById('viewer-type').textContent = screen.id.startsWith('M') ? '／ スマホ' : '／ PC';
+      document.getElementById('viewer-image').src = path;
+      document.getElementById('viewer-image').alt = screen.id + ' ' + screen.title + 'の画像モック';
+      document.getElementById('viewer-counter').textContent = (active + 1) + ' / ' + screens.length;
+      document.getElementById('viewer-description').textContent = screen.description;
+      document.getElementById('viewer-original').href = path;
+    }
+    function openViewer(index, button){
+      opener = button;
+      updateViewer(index);
+      viewer.showModal();
+      document.body.classList.add('has-viewer');
+      document.getElementById('viewer-close').focus();
+    }
+    screens.forEach((screen,index)=>{
+      const card = document.createElement('article');
+      card.className = 'card';
+      const preview = document.createElement('button');
+      preview.type = 'button';
+      preview.className = 'preview';
+      preview.setAttribute('aria-label',screen.id + ' ' + screen.title + 'を拡大');
+      const img = document.createElement('img');
+      img.src = 'images/' + screen.id + '.png';
+      img.alt = screen.title + 'の画像モック';
+      img.loading = index < 2 ? 'eager' : 'lazy';
+      img.decoding = 'async';
+      preview.append(img);
+      preview.addEventListener('click',()=>openViewer(index,preview));
+      const copy = document.createElement('div');
+      copy.className = 'card-copy';
+      const title = document.createElement('h3');
+      const id = document.createElement('span');
+      id.className = 'screen-id';
+      id.textContent = screen.id + ' · ' + (screen.id.startsWith('M') ? 'MOBILE' : 'DESKTOP');
+      title.append(id,document.createTextNode(screen.title));
+      const description = document.createElement('p');
+      description.textContent = screen.description;
+      const link = document.createElement('a');
+      link.href = img.getAttribute('src');
+      link.target = '_blank';
+      link.rel = 'noopener';
+      link.className = 'image-link';
+      link.textContent = '画像を別に開く ↗';
+      copy.append(title,description,link);
+      card.append(preview,copy);
+      document.getElementById(screen.id.startsWith('M') ? 'mobile-grid' : 'pc-grid').append(card);
+    });
+    document.getElementById('viewer-close').addEventListener('click',()=>viewer.close());
+    document.getElementById('viewer-prev').addEventListener('click',()=>updateViewer(active-1));
+    document.getElementById('viewer-next').addEventListener('click',()=>updateViewer(active+1));
+    viewer.addEventListener('click',event=>{if(event.target === viewer){const bounds=viewer.getBoundingClientRect();if(event.clientX<bounds.left||event.clientX>bounds.right||event.clientY<bounds.top||event.clientY>bounds.bottom)viewer.close();}});
+    viewer.addEventListener('close',()=>{document.body.classList.remove('has-viewer');opener?.focus();});
+    document.addEventListener('keydown',event=>{if(!viewer.open)return;if(event.key==='ArrowLeft'){event.preventDefault();updateViewer(active-1);}if(event.key==='ArrowRight'){event.preventDefault();updateViewer(active+1);}});
+  </script>
+</body>
+</html>
