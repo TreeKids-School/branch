@@ -12,7 +12,9 @@ export function lineDeliveryStatus(status) {
   return ({ pending:'送信待ち', sending:'送信処理中', accepted:'LINE受付済', failed:'送信失敗', uncertain:'LINE受付結果が未確認', cancelled:'送信取消' })[status] || '送信状況を確認中';
 }
 export function communicationDelivery(row, table = {}) {
-  const deliveries = Array.isArray(row?.deliveries) ? row.deliveries : [];
+  const history = Array.isArray(row?.deliveries) ? row.deliveries : [];
+  // An attempt cancelled before sending must not override a later delivery.
+  const deliveries = history.filter(item => item.status !== 'cancelled' || item.attempts !== 0);
   const recipients = row?.recipients || [];
   const accepted = deliveries.filter(isLineAccepted);
   const complete = recipients.length > 0 && deliveries.length > 0 && deliveries.every(isLineAccepted) && recipients.every(recipient => recipient.eligible && accepted.some(item => item.recipientId === recipient.recipientId));
@@ -21,6 +23,7 @@ export function communicationDelivery(row, table = {}) {
   if (accepted.length) return { sent: false, kind: 'partial', label: 'LINE一部受付' };
   if (deliveries.some(item => ['failed', 'uncertain', 'cancelled'].includes(item.status))) return { sent: false, kind: 'failed', label: 'LINE送信を要確認' };
   if (deliveries.length) return { sent: false, kind: 'pending', label: 'LINE送信待ち' };
+  if (history.length) return { sent: false, kind: 'failed', label: 'LINE送信を要確認' };
   return { sent: false, kind: '', label: '' };
 }
 export function previewExpiry(value) {
