@@ -119,3 +119,44 @@
  .comm-sheet-backdrop{align-items:flex-end;padding:0}.comm-sheet{max-height:87dvh;width:100%;border-radius:22px 22px 0 0}.comm-sheet>header{padding:17px}.comm-sheet-content{padding:16px}.comm-sheet>footer{padding:12px 16px calc(15px + env(safe-area-inset-bottom))}.comm-sheet>footer .comm-button{font-size:11px!important;min-height:48px}.comm-sheet h3{font-size:17px}.comm-program-choice{padding:15px}.comm-program-choice>span{font-size:13px}.comm-compare{grid-template-columns:1fr}.comm-conflicts{max-height:48%}.comm-conflicts h3{font-size:14px}.comm-error,.comm-notice{padding:10px 16px}.comm-name-warning{padding:12px}.comm-warning-word button{min-height:42px;font-size:11px}
 }
 @media(prefers-reduced-motion:reduce){.communication-editor *{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+/* Desktop keeps the same editor state while showing source notes and both publication fields. */
+.comm-desktop-layout{display:grid;grid-template-columns:minmax(330px,36fr) minmax(0,64fr);height:100%;min-height:0}
+.comm-desktop-memos,.comm-desktop-writing{min-width:0;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.comm-desktop-memos{padding:20px;background:#edf4f1;border-right:1px solid var(--comm-line)}
+.comm-desktop-pane-heading{display:flex;align-items:flex-start;gap:10px;margin-bottom:20px;color:var(--comm-green)}
+.comm-desktop-pane-heading>svg{flex:none;margin-top:3px}
+.comm-desktop-pane-heading h3{font-size:18px;font-weight:750}
+.comm-desktop-pane-heading p{font-size:11px;color:var(--comm-muted);margin-top:4px}
+.comm-desktop-memos .comm-section-heading{gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.comm-desktop-memos .comm-section-heading h3{font-size:14px}
+.comm-desktop-memos .comm-section-heading p{font-size:11px}
+.comm-desktop-memos .comm-memo-card{padding:13px;border-radius:9px;margin-bottom:10px}
+.comm-desktop-memos .comm-memo-actions{flex-wrap:wrap;gap:4px 8px;margin-top:8px}
+.comm-desktop-memos .comm-memo-actions>button:first-child{margin-right:auto;color:var(--comm-green)}
+.comm-desktop-memos .comm-memo-compose{padding:16px;margin-top:20px;border-radius:10px}
+.comm-desktop-memos .comm-memo-compose textarea{min-height:106px}
+.comm-desktop-memos .comm-tags{gap:6px;margin-bottom:12px}
+.comm-desktop-memos .comm-tags button{font-size:11px;min-height:36px;padding:6px 10px}
+.comm-desktop-memos .comm-compose-actions{flex-wrap:wrap}
+.comm-desktop-writing{display:flex;flex-direction:column;gap:12px;padding:16px;background:#f6f8f5}
+.comm-desktop-writing .comm-writing-main{padding:16px;background:white;border:1px solid var(--comm-line);border-radius:10px;flex:none}
+.comm-desktop-writing .comm-writing-main.is-body{flex:1 0 auto;min-height:400px}
+.comm-desktop-writing .comm-writing-main.is-future{min-height:0}
+.comm-desktop-writing .comm-section-heading{margin-bottom:13px}
+.comm-desktop-writing .comm-section-heading h3{font-size:18px}
+.comm-desktop-writing .comm-insert-toolbar{margin-bottom:12px}
+.comm-desktop-writing .comm-main-textarea{min-height:260px!important;flex:1;line-height:1.85}
+.comm-desktop-writing .comm-main-textarea.future{min-height:120px!important;height:120px;flex:none}
+.comm-desktop-writing .comm-reference-toggle,.comm-desktop-writing .comm-mobile-reference{display:none}
+.is-desktop-workbench .comm-editor-body{overflow:hidden}
+.is-desktop-workbench .comm-editor-tabs{display:none}
+.is-desktop-workbench .comm-editor-header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 16px;padding:10px 22px}
+.is-desktop-workbench .comm-editor-top{grid-column:2;grid-row:1;margin:0}
+.is-desktop-workbench .comm-editor-top>span{display:none}
+.is-desktop-workbench .comm-editor-identity{grid-column:1;grid-row:1;justify-content:flex-start;gap:18px}
+.is-desktop-workbench .comm-editor-identity>div{display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
+.is-desktop-workbench .comm-editor-identity h2{font-size:21px}
+.is-desktop-workbench .comm-editor-identity p{margin:0;font-size:12px}
+.is-desktop-workbench .comm-storage-note{grid-column:1/-1;margin-top:0;font-size:10px}
+.is-desktop-workbench .comm-editor-footer{padding:12px 22px}
