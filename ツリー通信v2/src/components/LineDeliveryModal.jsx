@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ArrowLeft, CheckCircle2, RefreshCw, Send, X } from 'lucide-react';
 import { deliveryReason, isLineAccepted, lineDeliveryStatus, previewExpiry } from '../utils/lineDelivery';
 import './LineDeliveryModal.css';
+import LineDeliveryStatus from './LineDeliveryStatus';
 
 const timeLabel = value => { const time = typeof value === 'number' ? value : Date.parse(value); return Number.isFinite(time) ? new Date(time).toLocaleString('ja-JP') : ''; };
 const canSelect = row => row.canSend || (row.canReview && (row.reasons || []).every(reason => reason === 'review_required'));
@@ -11,6 +12,8 @@ const recipientName = recipient => [recipient.displayName || '連携済みの保
 export default function LineDeliveryModal({ office, date, rows = [], loading, loadError, onRequest, onRefresh, onClose }) {
   const [selected, setSelected] = useState([]), [search, setSearch] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [preview, setPreview] = useState(null), [reviewing, setReviewing] = useState(false), [now, setNow] = useState(Date.now());
+  const [statusView, setStatusView] = useState(false), [submitted, setSubmitted] = useState(null);
+  const bodyRef = useRef(null);
   const [sendUncertain, setSendUncertain] = useState(false);
   const dialogRef = useRef(null), sendAttempt = useRef(null), retryAttempts = useRef(new Map()), busyRef = useRef(false);
   const closeRef=useRef(onClose);closeRef.current=onClose;
@@ -18,6 +21,7 @@ export default function LineDeliveryModal({ office, date, rows = [], loading, lo
   const visible = rows.filter(row => (row.childName || '').includes(search));
   const expiresAt = preview ? previewExpiry(preview.expiresAt) : 0;
   const expired = !!preview && (!Number.isFinite(expiresAt) || expiresAt <= now);
+  useEffect(() => { bodyRef.current?.scrollTo({ top: 0 }); }, [statusView, reviewing, preview]);
   useEffect(() => { const timer = preview ? setInterval(() => setNow(Date.now()), 1000) : null; return () => { if (timer) clearInterval(timer); }; }, [preview]);
   useEffect(() => {
     const previous = document.activeElement;
@@ -53,7 +57,9 @@ export default function LineDeliveryModal({ office, date, rows = [], loading, lo
     if (!sendAttempt.current) sendAttempt.current = { previewId: preview.previewId, requestId: crypto.randomUUID(), confirmed: true };
     try {
       const result = await onRequest('send', sendAttempt.current);
-      setNotice(`${result.count ?? result.jobIds?.length ?? 0}件を送信待ちに登録しました。LINEの受付状況は下の一覧に反映されます。`);
+      setSubmitted({ jobIds: result.jobIds || [], children: (preview.items || []).map(item => ({ childId: item.childId, childName: item.childName })) });
+      setStatusView(true); setSearch('');
+      setNotice(`${result.count ?? result.jobIds?.length ?? 0}件の送信要求を登録しました。この画面で受付状況を確認できます。`);
       setPreview(null); setReviewing(false); setSelected([]); setSendUncertain(false); sendAttempt.current = null;
     } catch (reason) { setSendUncertain(['unavailable','deadline-exceeded','unknown','internal','cancelled'].includes(reason.code)); throw reason; }
   });
@@ -63,13 +69,18 @@ export default function LineDeliveryModal({ office, date, rows = [], loading, lo
     retryAttempts.current.delete(job.jobId); setNotice('選択した失敗分を再試行待ちにしました。受付済みの宛先には再送しません。');
   });
   return createPortal(<div className="line-delivery-backdrop"><section className="line-delivery" role="dialog" aria-modal="true" aria-labelledby="line-delivery-title" ref={dialogRef}>
-    <header><div><small>{office?.name} · {date}</small><h2 id="line-delivery-title">ツリー通信をLINEで送る</h2></div><button disabled={busy} onClick={onClose} aria-label="LINE送信画面を閉じる"><X size={22}/></button></header>
-    <p className="line-delivery-note">最後の「LINEで送信」を押すまで送信されません。保護者への公開は「保護者へ公開」から別に行います。</p>
-    <ol className="line-delivery-steps" aria-label="送信の手順">{['児童を選ぶ', '本文を確認', '宛先を確認して送信'].map((label, index) => <li key={label} aria-current={index === (preview ? 2 : reviewing ? 1 : 0) ? 'step' : undefined}>{index + 1}. {label}</li>)}</ol>
-    <div className="line-delivery-body">
+    <header><div><small>{office?.name} · {date}</small><h2 id="line-delivery-title">{statusView ? 'LINE送信の状況' : 'ツリー通信をLINEで送る'}</h2></div><button disabled={busy} onClick={onClose} aria-label="LINE送信画面を閉じる"><X size={22}/></button></header>
+    <p className="line-delivery-note">{statusView ? '送信した通信の受付状況を確認できます。画面を閉じても送信処理は続きます。' : '最後の「LINEで送信」を押すまで送信されません。保護者への公開は「保護者へ公開」から別に行います。'}</p>
+    {!preview && !reviewing && <nav className="line-delivery-tabs" aria-label="LINE送信メニュー"><button aria-pressed={!statusView} disabled={busy} onClick={() => setStatusView(false)}>送信する</button><button aria-pressed={statusView} disabled={busy} onClick={() => setStatusView(true)}>送信状況</button></nav>}
+    {!statusView && <ol className="line-delivery-steps" aria-label="送信の手順">{['児童を選ぶ', '本文を確認', '宛先を確認して送信'].map((label, index) => <li key={label} aria-current={index === (preview ? 2 : reviewing ? 1 : 0) ? 'step' : undefined}>{index + 1}. {label}</li>)}</ol>}
+    <div className="line-delivery-body" ref={bodyRef}>
       {(error || loadError) && <div className="line-delivery-error" role="alert">{error || loadError}</div>}
       {notice && <p className="line-delivery-success" role="status">{notice}</p>}
-      {preview ? <>
+      {statusView ? <section aria-labelledby="line-status-title">
+        <div className="line-delivery-toolbar line-status-heading"><h3 id="line-status-title">送信状況一覧</h3><button disabled={busy || loading} onClick={() => run(onRefresh)}><RefreshCw size={17}/>{loading ? '更新中…' : '状況を更新'}</button></div>
+        <p className="line-delivery-hint">8秒ごとに自動更新します。送信処理は通常約1分です。「LINE受付済」は配達・既読の確認ではありません。</p>
+        {loading && !rows.length && !submitted ? <p role="status">送信状況を読み込んでいます…</p> : <LineDeliveryStatus rows={rows} submitted={submitted} busy={busy} onRetry={retry}/>}
+      </section> : preview ? <>
         <button className="line-delivery-back" disabled={busy} onClick={() => { setPreview(null); setReviewing(false); setSendUncertain(false); sendAttempt.current = null; }}><ArrowLeft size={17}/>対象の選択へ戻る</button>
         <h3>この宛先・本文で送信します</h3><p className="line-delivery-hint">児童{preview.items?.length || 0}名 · 送信先のべ{(preview.items || []).reduce((total, item) => total + (item.recipients?.length || 0), 0)}件</p>
         {(preview.items || []).map(item => <section className="line-delivery-preview" key={item.childId}><h4>{item.childName}</h4><div className="line-delivery-recipients"><strong>送信先</strong>{(item.recipients || []).map(recipient => <span key={recipient.recipientId}>{recipientName(recipient)}</span>)}</div>{!!item.excludedRecipients?.length&&<div className="line-delivery-excluded"><strong>今回送れない保護者</strong>{item.excludedRecipients.map(recipient=><p key={recipient.recipientId}>{recipientName(recipient)}：{deliveryReason(recipient.reason)}</p>)}</div>}<pre>{item.text}</pre></section>)}
@@ -94,6 +105,6 @@ export default function LineDeliveryModal({ office, date, rows = [], loading, lo
         </article>)}
       </>}
     </div>
-    <footer>{preview ? <><span>「LINE受付済」は配達・既読の確認ではありません。</span><button className="line-delivery-primary" disabled={busy || !(preview.items?.length) || expired && !sendUncertain} onClick={send}><Send size={18}/>{busy ? '送信要求を処理中…' : sendUncertain ? '同じ送信要求で再試行' : '確認した' + preview.items.length + '名の通信をLINEで送信'}</button></> : <><span>{selectedRows.length}名を選択中</span><button className="line-delivery-primary" disabled={busy || loading || !selectedRows.length} onClick={reviewing ? makePreview : () => { setError(''); setReviewing(true); }}><CheckCircle2 size={18}/>{busy ? '宛先を確認中…' : reviewing ? '本文を確認しました・宛先へ進む' : '選んだ児童の本文を確認する'}</button></>}</footer>
+    <footer>{statusView ? <><span>別の児童へ送るときは「送信する」へ</span><button disabled={busy} onClick={onClose}>閉じる</button></> : preview ? <><span>「LINE受付済」は配達・既読の確認ではありません。</span><button className="line-delivery-primary" disabled={busy || !(preview.items?.length) || expired && !sendUncertain} onClick={send}><Send size={18}/>{busy ? '送信要求を処理中…' : sendUncertain ? '同じ送信要求で再試行' : '確認した' + preview.items.length + '名の通信をLINEで送信'}</button></> : <><span>{selectedRows.length}名を選択中</span><button className="line-delivery-primary" disabled={busy || loading || !selectedRows.length} onClick={reviewing ? makePreview : () => { setError(''); setReviewing(true); }}><CheckCircle2 size={18}/>{busy ? '宛先を確認中…' : reviewing ? '本文を確認しました・宛先へ進む' : '選んだ児童の本文を確認する'}</button></>}</footer>
   </section></div>, document.body);
 }
