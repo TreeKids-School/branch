@@ -5,6 +5,7 @@ import * as shared from './sharedFirestore.js';
 import { waitForSession } from './sessionBridge.js';
 export { Timestamp, doc, collection, query, where, orderBy, serverTimestamp, arrayUnion, deleteField } from './browserFirestore.js';
 export { manageLineDelivery } from './sharedFirestore.js';
+export { managePublication } from './sharedFirestore.js';
 const use = async (name, args) => {
   const session = await waitForSession();
   return (session.storageMode === 'browser-preview' ? browser : shared)[name](...args);

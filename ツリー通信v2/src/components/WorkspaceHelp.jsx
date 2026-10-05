@@ -62,10 +62,21 @@ const chapters = [
             ['別の保存内容が届いたとき', '編集中の文章と保存済みの文章を比較し、残す方を選びます。比較が終わるまで自動保存・コピー・入力完了を止めます。'],
         ],
     },
+    {
+        id: 'publication', title: '保護者へ公開する', Icon: FileText,
+        intro: '共有保存版では、確認した通信を保護者の「日々のあしあと」に公開できます。',
+        items: [
+            ['対象と公開内容を確認', '一覧の「保護者へ公開」から一人または複数の児童を選び、保存済みの本文・今後の予定を確認します。確認チェックを付けて「公開する」を押した内容だけが公開されます。スタッフメモは公開しません。'],
+            ['親子の紐付けで閲覧', '予約V2で対象児童に紐付いた保護者が閲覧できます。公開のためにLINEへ再ログインする必要はありません。紐付けが0名でも公開できますが、紐付けられるまで閲覧できる保護者はいません。'],
+            ['修正したら再公開', '公開後に本文や予定を保存し直すと「変更あり・未反映」になります。保護者には以前の公開内容が表示されるため、最新の内容を確認して再公開してください。'],
+            ['公開の取り消し', '公開済みの児童から「公開を取り消す」を選び、対象と内容を確認して実行します。「日々のあしあと」から非表示になりますが、スタッフ側の原文と、すでに送ったLINEは残ります。入力完了・送信済みチェック・LINE送信は公開とは別の操作です。'],
+        ],
+    },
 ];
 
 function initialChapter(startStepId) {
     if (!startStepId) return 0;
+    if (/publication/.test(startStepId)) return 6;
     if (/chat|memo/.test(startStepId)) return 1;
     if (/tree|future|greeting/.test(startStepId)) return 2;
     if (/copy|sent/.test(startStepId)) return 3;
@@ -98,7 +109,7 @@ export default function WorkspaceHelp({ onClose, startStepId, mode = 'help', bro
     useEffect(() => { contentRef.current?.scrollTo({ top: 0 }); }, [chapter]);
     return <div className="workspace-help-backdrop"><section className="workspace-help" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="workspace-help-title">
         <header><div><p>予約V2内 · ツリー通信v2</p><h2 id="workspace-help-title">{mode === 'tour' ? '新しい画面の使い方' : 'ツリー通信の使い方'}</h2></div><button type="button" onClick={onClose} aria-label="ヘルプを閉じる"><X size={22} /></button></header>
-        <div className="workspace-help-boundary">{sharedStorage ? '記録は予約V2に共有保存します。ほかのスタッフの変更は約8秒ごとに反映されます。入力途中の下書きは端末内に保護します。LINE送信画面で本文と宛先を確認して送信できます。入力完了やコピーだけでは送信しません。' : browserPreview ? '現在は利用者別のブラウザー内仮保存です。他スタッフや別端末との共有・保護者公開は未接続です。' : '現在は開発環境です。旧データの移行・保護者公開は行っていません。'}</div>
+        <div className="workspace-help-boundary">{sharedStorage ? '記録は予約V2に共有保存します。ほかのスタッフの変更は約8秒ごとに反映されます。入力途中の下書きは端末内に保護します。「保護者へ公開」と「LINE送信を確認」で、それぞれ対象と内容を確認して実行します。入力完了やコピーだけでは公開・送信しません。' : browserPreview ? '現在は利用者別のブラウザー内仮保存です。他スタッフや別端末との共有・保護者公開は未接続です。' : '現在は開発環境です。旧データの移行・保護者公開は行っていません。'}</div>
         <div className="workspace-help-layout"><nav aria-label="ヘルプの項目">{chapters.map(({ title, Icon }, index) => <button type="button" key={title} aria-current={index === chapter ? 'step' : undefined} onClick={() => setChapter(index)}><span>{String(index + 1).padStart(2, '0')}</span><Icon size={16} />{title}</button>)}</nav><main ref={contentRef}><div className="workspace-help-title"><current.Icon size={24} /><span>{chapter + 1} / {chapters.length}</span></div><h3>{current.title}</h3><p className="workspace-help-intro">{current.intro}</p>{current.items.map(([title, text]) => <article key={title}><h4><CheckCircle2 size={17} />{title}</h4><p>{text}</p></article>)}</main></div>
         <footer><button type="button" disabled={chapter === 0} onClick={() => setChapter(value => value - 1)}><ArrowLeft size={17} />前へ</button><div>{chapters.map((item, index) => <span key={item.id} className={index === chapter ? 'active' : ''} />)}</div>{chapter === chapters.length - 1 ? <button type="button" className="primary" onClick={onClose}>業務に戻る<CheckCircle2 size={17} /></button> : <button type="button" className="primary" onClick={() => setChapter(value => value + 1)}>次へ<ArrowRight size={17} /></button>}</footer>
     </section></div>;
