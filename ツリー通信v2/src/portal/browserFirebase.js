@@ -1,4 +1,6 @@
-// This facade deliberately has no Firebase SDK, API key, token or remote URL.
-export const firestore = {app: {options: {projectId: 'tree-tsushin-v2-browser'}}};
-export const auth = {mode: 'staff-portal'};
+// The host owns authentication and cloud access. No credential enters the frame.
+import { getSession } from './sessionBridge.js';
+import { syncReservationDay } from './sharedFirestore.js';
+export const firestore = {app: {options: {projectId: 'tree-tsushin-v2-portal'}}, syncReservationDay};
+export const auth = {mode: 'staff-portal', get storageMode() { return getSession()?.storageMode || 'shared-firestore'; }};
 export default firestore.app;

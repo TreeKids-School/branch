@@ -15,7 +15,7 @@ const server = createServer(async (request, response) => {
     response.setHeader('Cache-Control', 'no-store');
     if (url.pathname === '/') {
         response.setHeader('Content-Type', 'text/html');
-        response.end('<!doctype html><script>window.addEventListener("message",event=>{if(event.data?.type==="tree-tsushin:ready")event.source.postMessage({type:"tree-tsushin:session",uid:new URL(location.href).searchParams.get("uid")||"test-staff-a",role:"staff",displayName:"検証スタッフ"},location.origin)})</script><iframe src="/harness.html"></iframe>');
+        response.end('<!doctype html><script>window.addEventListener("message",event=>{if(event.data?.type==="tree-tsushin:ready")event.source.postMessage({type:"tree-tsushin:session",storageMode:"browser-preview",uid:new URL(location.href).searchParams.get("uid")||"test-staff-a",role:"staff",displayName:"検証スタッフ"},location.origin)})</script><iframe src="/harness.html"></iframe>');
         return;
     }
     if (url.pathname === '/harness.html') {

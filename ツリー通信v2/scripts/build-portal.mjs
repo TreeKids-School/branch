@@ -6,4 +6,4 @@ await build({configFile: 'vite.portal.config.js'});
 renameSync('dist-portal/portal.html', 'dist-portal/index.html');
 const commit = execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
 const dirty = Boolean(execFileSync('git', ['status', '--porcelain', '--', '.'], {encoding: 'utf8'}).trim());
-writeFileSync('dist-portal/portal-release.json', JSON.stringify({system: 'ツリー通信v2', mode: 'browser-preview', sourceCommit: commit, sourceDirty: dirty, builtAt: new Date().toISOString(), migrated: false, sharedStorage: false}, null, 2) + '\n');
+writeFileSync('dist-portal/portal-release.json', JSON.stringify({system: 'ツリー通信v2', mode: 'shared-firestore', sourceCommit: commit, sourceDirty: dirty, builtAt: new Date().toISOString(), migration: 'server-managed', sharedStorage: true}, null, 2) + '\n');

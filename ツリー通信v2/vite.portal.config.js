@@ -24,7 +24,7 @@ export default defineConfig({
     },
   }],
   resolve: {alias: [
-    {find: 'firebase/firestore', replacement: portal('browserFirestore.js')},
+    {find: 'firebase/firestore', replacement: portal('portalFirestore.js')},
     {find: 'firebase/auth', replacement: portal('browserAuth.js')},
     {find: /^(?:\.\/|(?:\.\.\/)+)firebase$/, replacement: portal('browserFirebase.js')},
     {find: '@portal-storage', replacement: portal('workspaceStorage.js')},

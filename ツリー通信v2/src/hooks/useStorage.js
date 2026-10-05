@@ -108,11 +108,8 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 return result;
             }
             case 'getMasterChildren': {
-                const projectId = firestore.app.options.projectId;
-                console.log(`[Firestore Debug] Fetching children from project: ${projectId}`);
                 const colRef = collection(firestore, 'children');
                 const snap = await getDocs(colRef);
-                console.log(`[Firestore Debug] Successfully fetched ${snap.docs.length} children.`);
                 setConnectionStatus?.('online'); setLastError?.(null);
                 return snap.docs
                     .map(doc => ({ id: doc.id, ...doc.data() }))
@@ -332,10 +329,6 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                 return { status: 'OK' };
             }
             case 'getStaffNames': {
-                const projectId = firestore.app.options.projectId;
-                const currentUser = auth.currentUser;
-                console.log(`[Firestore Debug] User: ${currentUser ? currentUser.email : 'NOT LOGGED IN'} (${currentUser ? currentUser.uid : 'N/A'})`);
-                console.log(`[Firestore Debug] Fetching staff from project: ${projectId}`);
                 
                 let snap;
                 try {
@@ -346,11 +339,8 @@ export const callStorage = async (payload, setConnectionStatus, setLastError) =>
                     const colRef = collection(firestore, 'staffs');
                     snap = await getDocs(colRef);
                 }
-
-                console.log(`[Firestore Debug] Successfully fetched ${snap.docs.length} staff members.`);
                 const results = snap.docs.map(doc => {
                     const data = doc.data();
-                    console.log(`[Firestore Debug] Staff Doc ID: ${doc.id}, Data:`, data);
                     const name = data.name || (data.lastName && data.firstName ? `${data.lastName} ${data.firstName}` : doc.id);
                     return { id: doc.id, ...data, name };
                 });

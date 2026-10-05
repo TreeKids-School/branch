@@ -20,3 +20,6 @@
 .cw-editor-overlay>.communication-editor{width:min(1100px,100%);max-height:100%;border-radius:13px;overflow:hidden}
 @media(max-width:760px){.cw-editor-overlay>.communication-editor{width:100%;border-radius:0}}
 @media(prefers-reduced-motion:reduce){.communication-app *{animation:none!important;transition:none!important}}
+.cw-roster-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.cw-identity-review{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:5px;color:#8c5b1b;font-size:10px}.cw-identity-review strong{border:1px solid #e4c889;border-radius:5px;background:#fff8e7;padding:2px 6px;font-weight:600}
+@media(max-width:600px){.cw-list>.cw-section-heading{flex-wrap:wrap;align-items:flex-start}.cw-roster-actions{justify-content:flex-start;flex:1 1 100%}.cw-roster-actions button{min-height:44px}}

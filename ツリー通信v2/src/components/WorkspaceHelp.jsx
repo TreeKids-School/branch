@@ -74,7 +74,7 @@ function initialChapter(startStepId) {
     return 0;
 }
 
-export default function WorkspaceHelp({ onClose, startStepId, mode = 'help', browserPreview = true }) {
+export default function WorkspaceHelp({ onClose, startStepId, mode = 'help', browserPreview = true, sharedStorage = false }) {
     const [chapter, setChapter] = useState(() => initialChapter(startStepId));
     const dialogRef = useRef(null);
     const contentRef = useRef(null);
@@ -98,7 +98,7 @@ export default function WorkspaceHelp({ onClose, startStepId, mode = 'help', bro
     useEffect(() => { contentRef.current?.scrollTo({ top: 0 }); }, [chapter]);
     return <div className="workspace-help-backdrop"><section className="workspace-help" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="workspace-help-title">
         <header><div><p>予約V2内 · ツリー通信v2</p><h2 id="workspace-help-title">{mode === 'tour' ? '新しい画面の使い方' : 'ツリー通信の使い方'}</h2></div><button type="button" onClick={onClose} aria-label="ヘルプを閉じる"><X size={22} /></button></header>
-        <div className="workspace-help-boundary">{browserPreview ? '現在は利用者別のブラウザー内仮保存です。旧データの移行・他スタッフや別端末との共有・保護者公開は未接続です。' : '現在は開発環境です。旧データの移行・保護者公開は行っていません。'}</div>
+        <div className="workspace-help-boundary">{sharedStorage ? '記録は予約V2に共有保存します。ほかのスタッフの変更は約8秒ごとに反映されます。入力途中の下書きは端末内に保護します。保護者への公開は未接続です。' : browserPreview ? '現在は利用者別のブラウザー内仮保存です。他スタッフや別端末との共有・保護者公開は未接続です。' : '現在は開発環境です。旧データの移行・保護者公開は行っていません。'}</div>
         <div className="workspace-help-layout"><nav aria-label="ヘルプの項目">{chapters.map(({ title, Icon }, index) => <button type="button" key={title} aria-current={index === chapter ? 'step' : undefined} onClick={() => setChapter(index)}><span>{String(index + 1).padStart(2, '0')}</span><Icon size={16} />{title}</button>)}</nav><main ref={contentRef}><div className="workspace-help-title"><current.Icon size={24} /><span>{chapter + 1} / {chapters.length}</span></div><h3>{current.title}</h3><p className="workspace-help-intro">{current.intro}</p>{current.items.map(([title, text]) => <article key={title}><h4><CheckCircle2 size={17} />{title}</h4><p>{text}</p></article>)}</main></div>
         <footer><button type="button" disabled={chapter === 0} onClick={() => setChapter(value => value - 1)}><ArrowLeft size={17} />前へ</button><div>{chapters.map((item, index) => <span key={item.id} className={index === chapter ? 'active' : ''} />)}</div>{chapter === chapters.length - 1 ? <button type="button" className="primary" onClick={onClose}>業務に戻る<CheckCircle2 size={17} /></button> : <button type="button" className="primary" onClick={() => setChapter(value => value + 1)}>次へ<ArrowRight size={17} /></button>}</footer>
     </section></div>;
