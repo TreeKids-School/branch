@@ -19,7 +19,7 @@ function PortalApplication() {
   }, []);
   if (!session) return <main className="max-w-lg mx-auto p-8 space-y-4"><h1 className="text-2xl font-bold">ツリー通信v2</h1><p>予約システムのスタッフログインを確認しています。</p><p>直接開いた場合は、予約システムの「ツリー通信v2」メニューから開き直してください。</p><a className="underline" href="/#/communication/v2" target="_top">予約システムへ戻る</a></main>;
   const shared = session.storageMode === 'shared-firestore';
-  return <><details role="note" className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs leading-5 text-amber-950"><summary className="cursor-pointer font-semibold">{shared ? '予約V2に共有保存 · 保護者公開は未接続' : 'このブラウザー内の仮保存 · スタッフ間共有は未接続'}</summary><p className="pt-2">{shared ? '保存した記録は、同じ事業所を担当するスタッフと共有されます。ほかのスタッフの変更は約8秒ごとに反映されます。入力途中の下書きは、この端末内に保護します。' : 'ブラウザーのデータ削除で消えるため、業務の正本としては使わないでください。'}通信の入力完了やコピーだけでは、保護者に公開・送信されません。</p></details><App /></>;
+  return <><details role="note" className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs leading-5 text-amber-950"><summary className="cursor-pointer font-semibold">{shared ? '予約V2に共有保存 · LINE送信は内容確認後' : 'このブラウザー内の仮保存 · スタッフ間共有は未接続'}</summary><p className="pt-2">{shared ? '保存した記録は、同じ事業所を担当するスタッフと共有されます。ほかのスタッフの変更は約8秒ごとに反映されます。入力途中の下書きは、この端末内に保護します。' : 'ブラウザーのデータ削除で消えるため、業務の正本としては使わないでください。'}通信の入力完了やコピーだけでは、保護者に公開・送信されません。</p></details><App /></>;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><PortalApplication /></React.StrictMode>);

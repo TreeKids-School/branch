@@ -37,8 +37,8 @@ const chapters = [
         intro: '文章を整えた後も、宛先と本文の確認を大切にします。',
         items: [
             ['コピー前に児童と本文を確認', '一人分または選択した児童の通信をコピーできます。結合コピーでは同じ姓をまとめる場合がありますが、姓だけで同じ家庭やLINEの宛先と判断しないでください。'],
-            ['LINEでの送信は別の操作', 'コピーした文章をLINEへ貼り付け、宛先と本文を確認して送ります。このシステムはLINEの送信結果を取得していません。'],
-            ['送信後に手動で確認を付ける', '実際に送信した後で、業務画面の手動送信確認を付けます。コピー成功・入力完了・送信確認は別の状態です。'],
+            ['LINEでの送信は別の操作', '共有保存版では「LINE送信を確認」から保存済み本文を確認済みにし、対象を選んで宛先と本文をプレビューした後、一斉送信します。コピーしてLINEへ貼り付けて送る方法も使えます。'],
+            ['送信後に手動で確認を付ける', '手動でLINEから送った場合は、今日の記録または通信一覧で「送信済み（手動確認）」を付けます。自動送信の「LINE受付済」はサーバーの結果です。受付済は既読や配達確認ではありません。失敗分は送信画面から個別に再試行できます。'],
             ['コピーに失敗したとき', '失敗表示が出た場合は成功扱いになりません。本文を選択して端末のコピー操作を使い、貼り付け先で内容を確認してください。'],
         ],
     },
@@ -98,7 +98,7 @@ export default function WorkspaceHelp({ onClose, startStepId, mode = 'help', bro
     useEffect(() => { contentRef.current?.scrollTo({ top: 0 }); }, [chapter]);
     return <div className="workspace-help-backdrop"><section className="workspace-help" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="workspace-help-title">
         <header><div><p>予約V2内 · ツリー通信v2</p><h2 id="workspace-help-title">{mode === 'tour' ? '新しい画面の使い方' : 'ツリー通信の使い方'}</h2></div><button type="button" onClick={onClose} aria-label="ヘルプを閉じる"><X size={22} /></button></header>
-        <div className="workspace-help-boundary">{sharedStorage ? '記録は予約V2に共有保存します。ほかのスタッフの変更は約8秒ごとに反映されます。入力途中の下書きは端末内に保護します。保護者への公開は未接続です。' : browserPreview ? '現在は利用者別のブラウザー内仮保存です。他スタッフや別端末との共有・保護者公開は未接続です。' : '現在は開発環境です。旧データの移行・保護者公開は行っていません。'}</div>
+        <div className="workspace-help-boundary">{sharedStorage ? '記録は予約V2に共有保存します。ほかのスタッフの変更は約8秒ごとに反映されます。入力途中の下書きは端末内に保護します。LINE送信画面で本文と宛先を確認して送信できます。入力完了やコピーだけでは送信しません。' : browserPreview ? '現在は利用者別のブラウザー内仮保存です。他スタッフや別端末との共有・保護者公開は未接続です。' : '現在は開発環境です。旧データの移行・保護者公開は行っていません。'}</div>
         <div className="workspace-help-layout"><nav aria-label="ヘルプの項目">{chapters.map(({ title, Icon }, index) => <button type="button" key={title} aria-current={index === chapter ? 'step' : undefined} onClick={() => setChapter(index)}><span>{String(index + 1).padStart(2, '0')}</span><Icon size={16} />{title}</button>)}</nav><main ref={contentRef}><div className="workspace-help-title"><current.Icon size={24} /><span>{chapter + 1} / {chapters.length}</span></div><h3>{current.title}</h3><p className="workspace-help-intro">{current.intro}</p>{current.items.map(([title, text]) => <article key={title}><h4><CheckCircle2 size={17} />{title}</h4><p>{text}</p></article>)}</main></div>
         <footer><button type="button" disabled={chapter === 0} onClick={() => setChapter(value => value - 1)}><ArrowLeft size={17} />前へ</button><div>{chapters.map((item, index) => <span key={item.id} className={index === chapter ? 'active' : ''} />)}</div>{chapter === chapters.length - 1 ? <button type="button" className="primary" onClick={onClose}>業務に戻る<CheckCircle2 size={17} /></button> : <button type="button" className="primary" onClick={() => setChapter(value => value + 1)}>次へ<ArrowRight size={17} /></button>}</footer>
     </section></div>;

@@ -18,6 +18,7 @@ import LogModal from './components/LogModal';
 import WorkspaceHelp from './components/WorkspaceHelp';
 import UpdateModal from './components/UpdateModal';
 import LegacyArchiveModal from './components/LegacyArchiveModal';
+import LineDeliveryModal from './components/LineDeliveryModal';
 import {ErrorBoundary} from './components/Shared';
 import {APP_VERSION} from './app_constants';
 import {printAllDocuments} from './utils/print';
@@ -45,11 +46,43 @@ export default function CommunicationApp(){
  const [loading,setLoading]=useState(true),[busy,setBusy]=useState(0),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [modal,setModal]=useState(null),[editor,setEditor]=useState(null),[memoTab,setMemoTab]=useState('memo'),[dirty,setDirty]=useState(false);
  const [reload,setReload]=useState(0),[importLock,setImportLock]=useState(null),[tourStep,setTourStep]=useState(null),[sandbox,setSandbox]=useState(null);
+ const [lineRows,setLineRows]=useState([]),[lineLoading,setLineLoading]=useState(false),[lineError,setLineError]=useState('');
+ const lineGeneration=useRef(0),lineReads=useRef(new Map());
  const queue=useRef(Promise.resolve()),scopeRef=useRef(''),reportRef=useRef(report),editorRef=useRef(editor);
  const scope=`${office?.id || ''}/${date}`;
  scopeRef.current=scope;reportRef.current=report;editorRef.current=editor;
  const staffName=staff.find(item=>item.id===user?.uid || (item.email && item.email===user?.email))?.name || user?.displayName || user?.email?.split('@')[0] || 'スタッフ';
  const officeStaff=staff.filter(item=>!office || item.officeId===office.id || item.officeIds?.includes(office.id) || item.facilityIds?.includes(office.id) || item.office===office.name || (Array.isArray(item.office)&&item.office.includes(office.name)));
+ const refreshLine=async({fresh=false}={})=>{
+  if(!sharedStorage||!user||!office)return;
+  const targetScope=scope,key=`${user.uid}/${targetScope}`;
+  if(fresh){const previous=lineReads.current.get(key);if(previous)await previous.promise.catch(()=>{});}
+  if(scopeRef.current!==targetScope)return;
+  const pending=lineReads.current.get(key);
+  if(pending){pending.generation=lineGeneration.current;setLineLoading(true);return pending.promise;}
+  const entry={generation:++lineGeneration.current,promise:null};setLineLoading(true);
+  const current=()=>scopeRef.current===targetScope&&entry.generation===lineGeneration.current;
+  entry.promise=Promise.resolve().then(async()=>{
+   try{const value=await firestore.manageLineDelivery({facilityId:office.id,date,action:'read'});if(current()){setLineRows(value.rows || []);setLineError('');}return value;}
+   catch(reason){if(current())setLineError(reason.message || 'LINE送信の状況を取得できませんでした。');throw reason;}
+   finally{if(lineReads.current.get(key)===entry)lineReads.current.delete(key);if(current())setLineLoading(false);}
+  });
+  lineReads.current.set(key,entry);return entry.promise;
+ };
+ useEffect(()=>{
+  setLineRows([]);setLineError('');lineGeneration.current++;
+  if(!sharedStorage||!user||!office){setLineLoading(false);return;}
+  const read=()=>{if(document.visibilityState!=='hidden')void refreshLine().catch(()=>{});};
+  read();const timer=setInterval(read,8000);window.addEventListener('focus',read);document.addEventListener('visibilitychange',read);
+  return()=>{lineGeneration.current++;clearInterval(timer);window.removeEventListener('focus',read);document.removeEventListener('visibilitychange',read);};
+ },[sharedStorage,user?.uid,office?.id,date,reload]);
+ const requestLine=async(action,payload={})=>{
+  if(!sharedStorage||!office)throw new Error('共有保存の事業所を選択してください。');
+  const targetScope=scope;if(scopeRef.current!==targetScope)throw new Error('対象の日付・事業所が変わりました。送信画面を開き直してください。');
+  setBusy(value=>value+1);
+  try{const value=await firestore.manageLineDelivery({...payload,facilityId:office.id,date,action});if(scopeRef.current!==targetScope)throw new Error('対象の日付・事業所が変わりました。送信画面を開き直してください。');if(action!=='preview')await refreshLine({fresh:true}).catch(()=>{});return value;}
+  finally{setBusy(value=>Math.max(0,value-1));}
+ };
  useEffect(()=>onAuthStateChanged(auth,value=>{setUser(value);setAuthLoading(false);}),[]);
  useEffect(()=>{
   if(!user)return;let alive=true;setLoading(true);setError('');
@@ -178,7 +211,7 @@ export default function CommunicationApp(){
  return <ErrorBoundary><div className="communication-app">
   {error&&<div className="cw-error" role="alert">{error}<button onClick={()=>setReload(value=>value+1)}>再読み込み</button></div>}
   {sandbox&&<div className="cw-success">取込み後のデモ表示です。保存はしていません。<button className="cw-back" onClick={()=>setSandbox(null)}>保存済みの記録へ戻る</button></div>}
-  <Workspace interactionBlocked={!!editor || !!modal} key={sandbox ? 'sandbox' : scope} initialView={sandbox ? 'operations' : 'record'} report={{...shownReport,children:shownChildren}} attendance={attendance} staff={officeStaff} office={sandbox?.office || office} offices={offices} date={sandbox?.date || date} staffName={staffName} columns={columns} loading={loading} busy={busy>0} disabled={!!error || !!sandbox} browserPreview={browserPreview} sharedStorage={sharedStorage} isAdmin={user.role==='admin'} portalMode={portalMode} onSyncDay={syncDay} onDate={changeDate} onOffice={changeOffice} onEditor={openEditor} onModal={openModal} onSaveChild={saveChild} onRemoveChild={removeChild} onSaveTable={saveTable} onSaveGlobal={saveGlobal} onLoadWeek={loadWeek} onCopy={copySingle} onCopySelected={copySelected} onDirtyChange={setDirty} onLogout={()=>signOut(auth)}/>
+  <Workspace interactionBlocked={!!editor || !!modal} key={sandbox ? 'sandbox' : scope} initialView={sandbox ? 'operations' : 'record'} report={{...shownReport,children:shownChildren}} attendance={attendance} staff={officeStaff} office={sandbox?.office || office} offices={offices} date={sandbox?.date || date} staffName={staffName} columns={columns} loading={loading} busy={busy>0} disabled={!!error || !!sandbox} browserPreview={browserPreview} sharedStorage={sharedStorage} deliveryRows={lineRows} isAdmin={user.role==='admin'} portalMode={portalMode} onSyncDay={syncDay} onDate={changeDate} onOffice={changeOffice} onEditor={openEditor} onModal={openModal} onSaveChild={saveChild} onRemoveChild={removeChild} onSaveTable={saveTable} onSaveGlobal={saveGlobal} onLoadWeek={loadWeek} onCopy={copySingle} onCopySelected={copySelected} onDirtyChange={setDirty} onLogout={()=>signOut(auth)}/>
   {editor&&currentChild&&createPortal(<div className="cw-editor-overlay"><MemoPanel key={`${scope}/${editor.id}`} child={currentChild} messages={report.messages[editor.id] || []} result={report.results[editor.id] || {}} tags={tags} tagInsertTexts={inserts} selectedDate={date} officeId={office?.id} officeName={office?.name} storageScope={user.uid} storageMode={storageMode} staffList={officeStaff} currentStaffName={staffName} activeTab={memoTab} setActiveTab={setMemoTab} onSave={addMemo} onUpdate={editMemo} onDelete={deleteMemo} onSaveTree={saveResult} onClose={closeEditor} onDirtyChange={setDirty} onShowHelpGuide={()=>setModal('help')} programTitle={report.globalLog.programTitle} programSummary={report.globalLog.programSummary} programs={report.globalLog.programs || []} greetingTemplates={greetings} onSaveTemplate={saveGreeting} okWords={okWords} onAddOkWord={addOkWord}/></div>,document.body)}
   <CalendarModal show={modal==='calendar'} onClose={closeModal} setSelectedDate={changeDate} selectedDate={date} existingReportDates={dates}/>
   <AddChildModal show={modal==='add'} onClose={closeModal} masterChildren={masterChildren} currentChildren={report.children} onAddChildren={addChildren} selectedDate={date} officeName={office?.name} onDirtyChange={setDirty}/>
@@ -189,6 +222,7 @@ export default function CommunicationApp(){
   <ExportModal onDirtyChange={setDirty} show={modal==='export'} onClose={closeModal} selectedDate={date} children={report.children} results={report.results} summaryC={report.summaryC} selectedOffice={office} staffList={officeStaff} dailyTable={report.dailyTable} dailyMessages={report.messages} globalLog={report.globalLog} attendance={attendance} onExportBackup={exportBackup} onPrintDay={printDay} tagColumnMap={columns}/>
   <LogModal show={modal==='logs'} onClose={closeModal} logs={logs} selectedDate={date} selectedOffice={office}/>
   {modal==='legacyArchive'&&sharedStorage&&user.role==='admin'&&<LegacyArchiveModal onClose={closeModal}/>}
+  {modal==='lineDelivery'&&sharedStorage&&<LineDeliveryModal key={scope} office={office} date={date} rows={lineRows} loading={lineLoading} loadError={lineError} onRequest={requestLine} onRefresh={refreshLine} onClose={()=>{if(!busy)closeModal();}}/>}
   {modal==='help'&&<WorkspaceHelp onClose={closeModal} browserPreview={browserPreview} sharedStorage={sharedStorage}/>}
   <UpdateModal show={modal==='update'} onClose={closeModal} onAcknowledge={()=>localStorage.setItem('tree_tsushin_v2_last_seen_version',APP_VERSION)} onStartTour={step=>{setTourStep(step);setModal('tour');}}/>
   {modal==='tour'&&<WorkspaceHelp onClose={closeModal} mode='tour' startStepId={tourStep} browserPreview={browserPreview} sharedStorage={sharedStorage}/>}

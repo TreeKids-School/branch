@@ -185,6 +185,12 @@ export async function syncReservationDay(payload) {
   refreshSoon();
   return value;
 }
+export async function manageLineDelivery(payload) {
+  const session = await sessionFor();
+  const value = await requestPortal('lineDelivery', payload);
+  assertSession(session.uid);
+  return value;
+}
 
 window.setInterval(() => { if (document.visibilityState !== 'hidden') refreshSoon(); }, 8000);
 window.addEventListener('focus', refreshSoon);
