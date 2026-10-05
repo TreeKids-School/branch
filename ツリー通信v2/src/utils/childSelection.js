@@ -1,6 +1,9 @@
 export function childDisplayName(child) {
     return child.lastName ? [child.lastName, child.firstName].filter(Boolean).join(' ') : child.name || '名前未登録';
 }
+export function needsChildIdentityReview(child) {
+    return ['birth-conflict', 'unmatched-history'].includes(child?.identityReview);
+}
 export function normalizedChildSearch(value) {
     return String(value || '').normalize('NFKC').toLowerCase().replace(/\s/g, '').replace(/[\u30a1-\u30f6]/g, character => String.fromCharCode(character.charCodeAt(0) - 0x60));
 }

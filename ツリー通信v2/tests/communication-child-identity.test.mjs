@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { availableChildren, childDisplayName, hasChildCandidateOverlap } from '../src/utils/childSelection.js';
+import { availableChildren, childDisplayName, hasChildCandidateOverlap, needsChildIdentityReview } from '../src/utils/childSelection.js';
 const canonical = { id: 'canonical', name: '合成児童' };
 const held = { id: 'held', name: '合成児童', identityReview: 'birth-conflict', candidateChildId: 'canonical' };
 const unrelated = { id: 'unrelated', name: '別の児童' };
 const master = [canonical, held, unrelated];
+test('only unresolved identity states show the review badge', () => {
+  assert.equal(needsChildIdentityReview({ identityReview: 'linked-by-unique-name' }), false);
+  assert.equal(needsChildIdentityReview({ identityReview: 'birth-conflict' }), true);
+  assert.equal(needsChildIdentityReview({ identityReview: 'unmatched-history' }), true);
+});
 test('held day member excludes both itself and its canonical candidate', () => {
   assert.deepEqual(availableChildren(master, [held], '').map(child => child.id), ['unrelated']);
 });

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, UserPlus, Search, Check, Clock, AlertCircle } from 'lucide-react';
-import { availableChildren, childDisplayName, hasChildCandidateOverlap } from '../utils/childSelection.js';
+import { availableChildren, childDisplayName, hasChildCandidateOverlap, needsChildIdentityReview } from '../utils/childSelection.js';
 
 export default function AddChildModal({ show, onClose, masterChildren = [], currentChildren = [], onAddChildren, selectedDate, officeName, onDirtyChange }) {
     const [searchQuery, setSearchQuery] = useState('');
@@ -47,14 +47,14 @@ export default function AddChildModal({ show, onClose, masterChildren = [], curr
             <div className="flex-1 overflow-y-auto min-h-0 p-4 md:p-6">
                 {error && <p role="alert" className="mb-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex gap-2"><AlertCircle className="w-5 h-5 shrink-0" />{error}</p>}
                 <p className="text-sm text-slate-500 mb-3">当日一覧にいない児童 · {candidates.length}名</p>
-                {masterChildren.some(child=>child.identityReview)&&<p className="text-xs text-amber-800 mb-3">照合保留の児童と、その予約名簿の候補は同時に追加できません。当日一覧や選択中に片方がある場合、もう片方は表示しません。</p>}
+                {masterChildren.some(needsChildIdentityReview)&&<p className="text-xs text-amber-800 mb-3">照合保留の児童と、その予約名簿の候補は同時に追加できません。当日一覧や選択中に片方がある場合、もう片方は表示しません。</p>}
                 {!candidates.length ? <div className="bg-white border border-dashed border-slate-300 rounded-xl p-8 text-center"><p className="font-semibold text-slate-700">{!masterChildren.length ? '児童名簿がまだありません' : '追加できる児童が見つかりません'}</p><p className="text-sm text-slate-500 mt-2">{!masterChildren.length ? '利用できる児童名簿がありません。事業所と登録状態を確認してください。' : '検索条件を変えるか、すでに当日一覧にいないか確認してください。'}</p></div>
                     : <div className="grid md:grid-cols-2 gap-2">{candidates.map(child => {
                         const checked = selectedIds.includes(child.id);
                         const reading = child.nameFurigana || [child.lastNameFurigana, child.firstNameFurigana].filter(Boolean).join(' ') || child.yomi;
                         return <button key={child.id} role="checkbox" aria-checked={checked} onClick={() => toggle(child.id)} disabled={saving} className={'min-h-[72px] rounded-xl border px-4 py-3 flex gap-3 items-center text-left ' + (checked ? 'bg-tree-50 border-tree-600' : 'bg-white border-slate-200 hover:border-tree-400')}>
                             <span className={'w-6 h-6 shrink-0 rounded-md border flex items-center justify-center ' + (checked ? 'bg-tree-700 border-tree-700 text-white' : 'bg-white border-slate-300')}>{checked && <Check className="w-4 h-4" />}</span>
-                            <span className="min-w-0"><span className="block font-bold text-base text-slate-800">{childDisplayName(child)}</span>{reading && <span className="block text-sm text-slate-500 mt-0.5">{reading}</span>}{child.identityReview&&<span className="block mt-1 text-xs text-amber-800"><span className="inline-block rounded border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold">照合保留</span><span className="block mt-1">{child.identityReview==='birth-conflict'?'生年月日相違':'旧データの対応確認が必要です'}</span></span>}</span>
+                            <span className="min-w-0"><span className="block font-bold text-base text-slate-800">{childDisplayName(child)}</span>{reading && <span className="block text-sm text-slate-500 mt-0.5">{reading}</span>}{needsChildIdentityReview(child)&&<span className="block mt-1 text-xs text-amber-800"><span className="inline-block rounded border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold">照合保留</span><span className="block mt-1">{child.identityReview==='birth-conflict'?'生年月日相違':'旧データの対応確認が必要です'}</span></span>}</span>
                         </button>;
                     })}</div>}
             </div>
